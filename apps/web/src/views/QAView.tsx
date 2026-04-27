@@ -39,10 +39,7 @@ export function QAView({ project, activeRunId, eventStream, onRunStarted }: QAVi
           className="col-body"
           style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}
         >
-          <RunControls
-            project={project}
-            onRunStarted={(runId, request) => onRunStarted(runId, request)}
-          />
+          <RunControls project={project} onRunStarted={onRunStarted} />
           <RunConsole eventStream={eventStream} activeRunId={activeRunId} />
         </div>
       </section>

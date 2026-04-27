@@ -86,29 +86,11 @@ export function ProjectPicker({ onProjectChange }: ProjectPickerProps) {
         </form>
 
         {project ? <ProjectFacts summary={project} /> : (
-          <p
-            className="muted"
-            style={{ fontSize: 12, color: "var(--ink-3)", margin: "12px 0 0" }}
-          >
+          <p className="muted-note" style={{ marginTop: 12 }}>
             No project is open. Provide a project root above.
           </p>
         )}
-        {errorMessage ? (
-          <p className="errorBlock"
-            style={{
-              marginTop: 12,
-              padding: "10px 12px",
-              border: "1px solid color-mix(in oklch, var(--fail) 40%, transparent)",
-              borderLeft: "3px solid var(--fail)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--fail-soft)",
-              color: "var(--fail)",
-              fontSize: 12
-            }}
-          >
-            ✕ {errorMessage}
-          </p>
-        ) : null}
+        {errorMessage ? <p className="error-inline">{errorMessage}</p> : null}
       </div>
     </div>
   );

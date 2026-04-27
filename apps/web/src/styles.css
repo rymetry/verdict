@@ -1645,6 +1645,31 @@
     .recent-runs .pr.up { color: var(--pass); }
     .recent-runs .pr.dn { color: var(--fail); }
 
+    /* ── shared utility: inline error ──────────────────────── */
+    .error-inline {
+      margin: 12px 0 0;
+      padding: 10px 12px;
+      border: 1px solid color-mix(in oklch, var(--fail) 40%, transparent);
+      border-left-width: 3px;
+      border-radius: var(--radius-sm);
+      background: var(--fail-soft);
+      color: var(--fail);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .error-inline::before {
+      content: "✕ ";
+      font-weight: 600;
+    }
+
+    /* ── shared utility: muted small text ──────────────────── */
+    .muted-note {
+      margin: 0;
+      font-size: 12px;
+      color: var(--ink-3);
+      line-height: 1.55;
+    }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; }
     }

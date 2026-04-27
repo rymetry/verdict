@@ -40,9 +40,7 @@ export function RunControls({ project, onRunStarted }: RunControlsProps) {
       <div className="locator-card">
         <h4>テスト実行</h4>
         <div>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--ink-3)" }}>
-            プロジェクトを開くと実行できます。
-          </p>
+          <p className="muted-note">プロジェクトを開くと実行できます。</p>
         </div>
       </div>
     );
@@ -96,37 +94,11 @@ export function RunControls({ project, onRunStarted }: RunControlsProps) {
           </button>
         </form>
         {blocked ? (
-          <p
-            style={{
-              marginTop: 12,
-              padding: "10px 12px",
-              border: "1px solid color-mix(in oklch, var(--fail) 40%, transparent)",
-              borderLeft: "3px solid var(--fail)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--fail-soft)",
-              color: "var(--fail)",
-              fontSize: 12
-            }}
-          >
-            ✕ パッケージマネージャの状態が解消されるまで run はブロックされます。
+          <p className="error-inline">
+            パッケージマネージャの状態が解消されるまで run はブロックされます。
           </p>
         ) : null}
-        {errorMessage ? (
-          <p
-            style={{
-              marginTop: 12,
-              padding: "10px 12px",
-              border: "1px solid color-mix(in oklch, var(--fail) 40%, transparent)",
-              borderLeft: "3px solid var(--fail)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--fail-soft)",
-              color: "var(--fail)",
-              fontSize: 12
-            }}
-          >
-            ✕ {errorMessage}
-          </p>
-        ) : null}
+        {errorMessage ? <p className="error-inline">{errorMessage}</p> : null}
       </div>
     </div>
   );

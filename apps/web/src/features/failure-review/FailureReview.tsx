@@ -19,7 +19,7 @@ export function FailureReview({ runId }: FailureReviewProps) {
       <div className="locator-card">
         <h4>失敗レビュー</h4>
         <div>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--ink-3)" }}>
+          <p className="muted-note">
             run を開始すると失敗の詳細がここに表示されます。
           </p>
         </div>
@@ -32,28 +32,15 @@ export function FailureReview({ runId }: FailureReviewProps) {
       <h4>失敗レビュー</h4>
       <div>
         {runQuery.isLoading ? (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--ink-3)" }}>
-            run メタデータを取得中…
-          </p>
+          <p className="muted-note">run メタデータを取得中…</p>
         ) : runQuery.error ? (
-          <p
-            style={{
-              margin: 0,
-              padding: "10px 12px",
-              border: "1px solid color-mix(in oklch, var(--fail) 40%, transparent)",
-              borderLeft: "3px solid var(--fail)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--fail-soft)",
-              color: "var(--fail)",
-              fontSize: 12
-            }}
-          >
-            ✕ {(runQuery.error as Error).message}
+          <p className="error-inline" style={{ marginTop: 0 }}>
+            {errorMessage(runQuery.error)}
           </p>
         ) : runQuery.data?.summary?.failedTests?.length ? (
           <FailedTestList failedTests={runQuery.data.summary.failedTests} />
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--ink-3)" }}>
+          <p className="muted-note">
             {runQuery.data?.status === "passed"
               ? "全テスト合格"
               : runQuery.data?.summary
@@ -64,6 +51,11 @@ export function FailureReview({ runId }: FailureReviewProps) {
       </div>
     </div>
   );
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return "Unexpected error";
 }
 
 function FailedTestList({ failedTests }: { failedTests: FailedTest[] }) {

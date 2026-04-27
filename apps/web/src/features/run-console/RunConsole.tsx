@@ -35,22 +35,13 @@ function trim(lines: string[], next: string): string[] {
   return [...lines.slice(lines.length - MAX_LINES + 1), next];
 }
 
-const STATUS_LABEL: Record<RunConsoleState["status"], string> = {
-  idle: "idle",
-  running: "running",
-  passed: "passed",
-  failed: "failed",
-  cancelled: "cancelled",
-  error: "error"
-};
-
-const STATUS_BADGE: Record<RunConsoleState["status"], string> = {
-  idle: "skipped",
-  running: "running",
-  passed: "passed",
-  failed: "failed",
-  cancelled: "skipped",
-  error: "failed"
+const STATUS_VIEW: Record<RunConsoleState["status"], { label: string; badge: string }> = {
+  idle: { label: "idle", badge: "skipped" },
+  running: { label: "running", badge: "running" },
+  passed: { label: "passed", badge: "passed" },
+  failed: { label: "failed", badge: "failed" },
+  cancelled: { label: "cancelled", badge: "skipped" },
+  error: { label: "error", badge: "failed" }
 };
 
 export function RunConsole({ eventStream, activeRunId }: RunConsoleProps) {
@@ -75,19 +66,18 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps) {
     }
   }, [state.stdout]);
 
+  const view = STATUS_VIEW[state.status];
   const headline = useMemo(() => {
     if (!activeRunId) return "アイドル — 上で run を開始してください";
-    return `Run ${activeRunId.slice(0, 12)} · ${STATUS_LABEL[state.status]}`;
-  }, [activeRunId, state.status]);
+    return `Run ${activeRunId.slice(0, 12)} · ${view.label}`;
+  }, [activeRunId, view.label]);
 
   return (
     <article className="locator-card" aria-label="Run console">
       <h4>
         Run コンソール
         <span style={{ marginLeft: 8 }}>
-          <span className={`badge ${STATUS_BADGE[state.status]}`}>
-            {STATUS_LABEL[state.status]}
-          </span>
+          <span className={`badge ${view.badge}`}>{view.label}</span>
         </span>
       </h4>
       <div>
