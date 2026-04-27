@@ -29,4 +29,20 @@ describe("<Badge />", () => {
     const badge = screen.getByText("中立");
     expect(badge).toHaveClass("bg-[var(--bg-2)]");
   });
+
+  it.each([
+    ["skip", "bg-[var(--skip-soft)]"],
+    ["info", "bg-[var(--info-soft)]"],
+    ["accent", "bg-[var(--accent-soft)]"]
+  ] as const)("%s variant は対応する soft 背景を持つ", (variant, expectedClass) => {
+    render(<Badge variant={variant}>{variant}</Badge>);
+    expect(screen.getByText(variant)).toHaveClass(expectedClass);
+  });
+
+  it("outline variant は透明背景 + 罫線色を持つ", () => {
+    render(<Badge variant="outline">中立枠</Badge>);
+    const badge = screen.getByText("中立枠");
+    expect(badge).toHaveClass("bg-transparent");
+    expect(badge).toHaveClass("border-[var(--line-strong)]");
+  });
 });

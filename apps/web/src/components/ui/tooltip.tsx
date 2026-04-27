@@ -1,4 +1,6 @@
 // shadcn/ui Tooltip (Radix UI ベース)。
+// 用途: fail メッセージのキー全文表示や、ToolBar のアイコンボタン補助ラベルなど、
+// 画面に常時出すと視認性を損なうが必要な情報の補助表示。
 import * as React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
@@ -9,7 +11,7 @@ const Tooltip = TooltipPrimitive.Root;
 const TooltipTrigger = TooltipPrimitive.Trigger;
 
 const TooltipContent = React.forwardRef<
-  React.ElementRef<typeof TooltipPrimitive.Content>,
+  React.ComponentRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
 >(({ className, sideOffset = 4, ...props }, ref) => (
   <TooltipPrimitive.Content

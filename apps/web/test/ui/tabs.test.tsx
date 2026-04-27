@@ -30,4 +30,12 @@ describe("<Tabs />", () => {
     await userEvent.click(screen.getByRole("tab", { name: "失敗" }));
     expect(screen.getByText("失敗パネル")).toBeInTheDocument();
   });
+
+  it("ArrowRight キーで次のタブへフォーカスが移動して切替わる (a11y)", async () => {
+    render(<Sample />);
+    const overview = screen.getByRole("tab", { name: "概要" });
+    overview.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(screen.getByText("失敗パネル")).toBeInTheDocument();
+  });
 });
