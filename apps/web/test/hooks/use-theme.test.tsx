@@ -146,7 +146,9 @@ describe("useTheme()", () => {
   });
 
   it("localStorage が throw しても初期化が成功する (Safari Private Mode)", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    // Node 25 のネイティブ Storage 互換性回避のため Storage.prototype ではなく
+    // setup.ts で install 済みのインスタンスを直接 spy する
+    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
       throw new Error("SecurityError: localStorage is not available");
     });
     expect(() => renderHook(() => useTheme(), { wrapper })).not.toThrow();
@@ -154,7 +156,7 @@ describe("useTheme()", () => {
 
   it("localStorage の setItem が throw しても setTheme は例外を投げない (Quota 超過)", () => {
     const { result } = renderHook(() => useTheme(), { wrapper });
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
       throw new Error("QuotaExceededError");
     });
     expect(() => act(() => result.current.setTheme("dark"))).not.toThrow();

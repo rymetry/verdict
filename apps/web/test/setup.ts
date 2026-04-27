@@ -4,6 +4,39 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 
+// Node 25 はネイティブ Web Storage を持つが API が不完全 (setItem/getItem 等が無く
+// clear のみのケースあり) で、jsdom の localStorage と衝突して TypeError を起こす。
+// テスト全体で安定して動かすため、`window.localStorage` を常にメモリ実装で上書きする。
+class InMemoryStorage {
+  private store = new Map<string, string>();
+  get length(): number {
+    return this.store.size;
+  }
+  clear(): void {
+    this.store.clear();
+  }
+  getItem(key: string): string | null {
+    return this.store.has(key) ? (this.store.get(key) as string) : null;
+  }
+  key(index: number): string | null {
+    return Array.from(this.store.keys())[index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, String(value));
+  }
+}
+if (typeof window !== "undefined") {
+  // 単一インスタンスを共有することで `vi.spyOn(window.localStorage, ...)` が
+  // テスト間で安定して効くようにする
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: new InMemoryStorage()
+  });
+}
+
 // jsdom は matchMedia を実装しないため、最低限のスタブを提供する。
 // useTheme の auto 経路や matchMedia 変更ハンドラをテストするため、
 // 個別テストで `vi.spyOn(window, "matchMedia")` で上書きできる形にしておく。
