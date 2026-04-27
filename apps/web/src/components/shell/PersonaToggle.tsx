@@ -56,7 +56,10 @@ export function dispatchPersonaSafely(
     return;
   }
   // eslint-disable-next-line no-console -- invariant 違反は production でも検出したい
-  console.error(`[PersonaToggle] Tabs から想定外 value: ${String(raw)}`);
+  console.error(
+    `[PersonaToggle] invariant violation: Tabs onValueChange got '${String(raw)}' which is not in PERSONA_VIEWS. ` +
+      `Check that PERSONA_VIEWS (lib/persona-view.ts) and TabsTrigger value props are in sync.`
+  );
 }
 
 export function PersonaToggle({

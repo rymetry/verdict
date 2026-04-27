@@ -74,8 +74,11 @@ function RootLayout(): React.ReactElement {
   const setTheme = useAppStore((s) => s.setTheme);
 
   // PERSONA segment が pathname から取れない場合は QA を見せる (画面の「無 persona 状態」を作らない)。
-  // 通常 indexRoute の redirect が `/` を捕捉するため、ここに来るのは catch-all 等で
-  // 想定外パスが __root に流れた時のみ。silent fallback はデバッグ性を損ねるため warning する。
+  // 通常 indexRoute の redirect (routes/index.tsx の beforeLoad → "/qa") が `/` を捕捉するため、
+  // ここに来るのは catch-all 等で想定外パスが __root に流れた時のみ。silent fallback は
+  // デバッグ性を損ねるため warning する。
+  // 注意: `!== "/"` ガードは indexRoute redirect の解決前 frame で warn が誤発火しないため。
+  // routes/index.tsx の redirect 先 ("/qa") を変更した場合、この `/` ガードは見直し対象 (記録漏れ防止)。
   const personaFromPath = pathnameToPersona(location.pathname);
   if (personaFromPath === null && location.pathname !== "/") {
     // eslint-disable-next-line no-console -- 想定外パスは本番でも痕跡を残す (route 設定の漏れ検知)
@@ -88,6 +91,25 @@ function RootLayout(): React.ReactElement {
     queryFn: fetchHealth,
     refetchInterval: 5_000
   });
+
+  // health が落ちたとき UI には agentState=unreachable で見えるが、サーバ側では
+  // Agent process の死亡を即知りたい。defense-in-depth として error は console.error する。
+  // refetchInterval で 5 秒ごとに同じ error が発火するため、error message を memoize して
+  // 同一 message が連続したら抑制する (log 洪水防止)。
+  const lastHealthErrorRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (healthQuery.status === "error" && healthQuery.error) {
+      const msg = healthQuery.error.message;
+      if (lastHealthErrorRef.current !== msg) {
+        lastHealthErrorRef.current = msg;
+        // eslint-disable-next-line no-console -- agent 死亡を本番でも痕跡を残す
+        console.error("[RootLayout] healthQuery failed", healthQuery.error);
+      }
+    } else if (healthQuery.status === "success") {
+      // 復活したら次回失敗で再 log するためリセット
+      lastHealthErrorRef.current = null;
+    }
+  }, [healthQuery.status, healthQuery.error]);
 
   const currentProjectQuery = useCurrentProjectQuery();
 
@@ -200,23 +222,34 @@ function RootLayout(): React.ReactElement {
   }
 
   async function dismissActiveRunError(): Promise<void> {
-    const dismissedId = activeRunId;
-    if (dismissedId) {
-      // in-flight refetch があれば **完了を await** してから cache を消す (race 対策)。
-      // ここを `void cancelQueries(...)` にしていた頃は cancel が完了する前に removeQueries が走り、
-      // 直後に解決した queryFn が cache を再 populate して banner が再表示される race を起こしうる。
-      // .catch でログを出すのは silent failure 防衛: cancel が rejection で終わっても dismiss 経路は
-      // 続行 (clearActive + removeQueries は副作用が少ない) する。
-      try {
-        await queryClient.cancelQueries({ queryKey: ["runs", dismissedId], exact: true });
-      } catch (error) {
-        // eslint-disable-next-line no-console -- cancel rejection は本番でも痕跡を残す
-        console.error("[RootLayout] cancelQueries failed during dismiss", error);
+    // 全体を try/catch で包むのは「ShellAlert.onDismiss が `() => void` 型で受け取るため
+    // async 関数が返す Promise の rejection は unhandledrejection に流れる」点を防衛するため。
+    // 現状 clearActiveRun / removeQueries は同期的に throw しないが、将来仕様変更で throw
+    // 経路が増えても silent rejection を window.onunhandledrejection に流さない。
+    try {
+      const dismissedId = activeRunId;
+      if (dismissedId) {
+        // in-flight refetch があれば **完了を await** してから cache を消す (race 対策)。
+        // ここを `void cancelQueries(...)` にしていた頃は cancel が完了する前に removeQueries が走り、
+        // 直後に解決した queryFn が cache を再 populate して banner が再表示される race を起こしうる。
+        // 内側の try/catch でログを出すのは silent failure 防衛: cancel が rejection で終わっても
+        // dismiss 経路は続行 (clearActive + removeQueries は副作用が少ない) する。
+        try {
+          await queryClient.cancelQueries({ queryKey: ["runs", dismissedId], exact: true });
+        } catch (error) {
+          // eslint-disable-next-line no-console -- cancel rejection は本番でも痕跡を残す
+          console.error("[RootLayout] cancelQueries failed during dismiss", error);
+        }
       }
-    }
-    clearActiveRun();
-    if (dismissedId) {
-      queryClient.removeQueries({ queryKey: ["runs", dismissedId], exact: true });
+      clearActiveRun();
+      if (dismissedId) {
+        queryClient.removeQueries({ queryKey: ["runs", dismissedId], exact: true });
+      }
+    } catch (error) {
+      // 想定外の同期 throw (clearActive 等の将来変更 / store 内部例外) を unhandledrejection
+      // に流さず可視化する。silent failure 防衛 + UI 遷移は continue する。
+      // eslint-disable-next-line no-console -- dismiss 経路の想定外失敗を本番でも痕跡を残す
+      console.error("[RootLayout] dismissActiveRunError unexpected failure", error);
     }
   }
 

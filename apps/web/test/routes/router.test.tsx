@@ -87,19 +87,30 @@ describe("router redirect", () => {
     expect(screen.getByRole("tab", { name: "QA", selected: true })).toBeInTheDocument();
   });
 
-  it("redirect は `replace: true` で履歴を残さない (back で / に戻らない)", async () => {
-    // / → /qa の redirect 後、back を押しても / に戻って再 redirect で loop しない契約。
-    // memory history では length が 1 になる (replace 直後)。
-    const { router } = renderWithRouter({ initialPath: "/" });
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/qa");
-    });
-    // back しても loop しない (= push 履歴に / が残っていないことの間接確認)
+  it("redirect は `replace: true` で履歴に / を残さない (push なら back で /qa→/→/qa loop が発生)", async () => {
+    // 単一 entry の memory history では back が no-op になり、replace と push の挙動が
+    // 区別できない。`/qa` → `/dev` → `/` の 3 entry 構成で back の遷移先を観察し、
+    // 「push だったら back で / (再 redirect で /qa) に戻る」と
+    // 「replace だったら back で /dev に戻る」を区別する。
+    const { user, router } = renderWithRouter({ initialPath: "/qa" });
+    await screen.findByRole("tab", { name: "QA", selected: true });
+
+    // /dev へ push
+    await user.click(screen.getByRole("tab", { name: "Developer" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/dev"));
+
+    // / へ navigate → indexRoute beforeLoad で /qa に redirect される。
+    // replace: true なら history は [/qa, /dev, /qa] (3 つ目で / は残らず /qa に置換)
+    // replace 無しなら history は [/qa, /dev, /, /qa] (4 つ目)
+    void router.navigate({ to: "/" });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/qa"));
+
+    // back を押す
     router.history.back();
-    // memory history で history.length が 1 のときは back は no-op
-    // pathname が再 redirect で /qa に戻り続けないことを観察する
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/qa");
+      // replace: true: back は /dev に戻る (途中の / が消えている)
+      // replace 無し: back は / に戻り、再度 redirect で /qa に戻る (= /qa のままになる)
+      expect(router.state.location.pathname).toBe("/dev");
     });
   });
 });
