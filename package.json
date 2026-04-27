@@ -1,0 +1,19 @@
+{
+  "name": "playwright-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.8.0",
+  "scripts": {
+    "dev": "pnpm --filter '@pwqa/*' --parallel dev",
+    "dev:agent": "pnpm --filter @pwqa/agent dev",
+    "dev:web": "pnpm --filter @pwqa/web dev",
+    "build": "pnpm --filter '@pwqa/*' build",
+    "typecheck": "pnpm --filter @pwqa/shared build && pnpm --filter '@pwqa/*' typecheck",
+    "test": "pnpm --filter '@pwqa/*' test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}

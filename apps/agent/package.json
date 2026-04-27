@@ -1,0 +1,28 @@
+{
+  "name": "@pwqa/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @pwqa/shared build && tsc -p tsconfig.json && node dist/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.18.2",
+    "@hono/node-ws": "^1.3.0",
+    "@pwqa/shared": "workspace:*",
+    "hono": "^4.10.5",
+    "pino": "^10.1.0",
+    "ws": "^8.18.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.5"
+  }
+}

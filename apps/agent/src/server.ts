@@ -1,0 +1,239 @@
+import * as fsSync from "node:fs";
+import * as path from "node:path";
+import { Hono } from "hono";
+import { serve, type ServerType } from "@hono/node-server";
+import { createNodeWebSocket } from "@hono/node-ws";
+import { type WSContext } from "hono/ws";
+import {
+  HealthResponseSchema,
+  type HealthResponse,
+  type WorkbenchEvent
+} from "@pwqa/shared";
+import { buildAgentEnv, type AgentEnv } from "./env.js";
+import { createLogger } from "./logger.js";
+import {
+  createNodeCommandRunner,
+  type AuditEntry,
+  type CommandRunner
+} from "./commands/runner.js";
+import {
+  DEFAULT_ALLOWED_EXECUTABLES,
+  DEFAULT_ENV_ALLOWLIST,
+  type CommandPolicy
+} from "./commands/policy.js";
+import { createEventBus, type EventBus } from "./events/bus.js";
+import { createRunManager, type RunManager } from "./playwright/runManager.js";
+import { createProjectStore, type ProjectStore } from "./project/store.js";
+import { projectsRoutes } from "./routes/projects.js";
+import { runsRoutes } from "./routes/runs.js";
+import { scanProject } from "./project/scanner.js";
+import { workbenchPaths } from "./storage/paths.js";
+
+const SERVICE_VERSION = "0.1.0";
+
+const ALLOWED_ORIGINS = new Set<string>([
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+  "http://127.0.0.1:4317",
+  "http://localhost:4317"
+]);
+
+export interface BuildAppOptions {
+  env: AgentEnv;
+  policy?: CommandPolicy;
+  /** Optional override for the audit sink (used by tests). */
+  audit?: (entry: AuditEntry) => void;
+}
+
+export interface BuildAppResult {
+  app: Hono;
+  injectWebSocket: (server: ServerType) => void;
+  bus: EventBus;
+  runner: CommandRunner;
+  runManager: RunManager;
+  projectStore: ProjectStore;
+}
+
+function defaultPolicy(env: AgentEnv): CommandPolicy {
+  // PoC: cwd boundary defaults to the configured project root if known,
+  // otherwise the current working directory. Routes that scan additional
+  // projects construct fresh runners with project-scoped policies.
+  const cwdBoundary = env.initialProjectRoot ?? process.cwd();
+  return {
+    allowedExecutables: DEFAULT_ALLOWED_EXECUTABLES,
+    cwdBoundary,
+    envAllowlist: DEFAULT_ENV_ALLOWLIST
+  };
+}
+
+function persistAuditEntry(rootDir: string | undefined, entry: AuditEntry): void {
+  if (!rootDir) return;
+  const wb = workbenchPaths(rootDir);
+  fsSync.mkdirSync(wb.workbenchDir, { recursive: true });
+  fsSync.appendFileSync(path.join(wb.workbenchDir, "audit.log"), `${JSON.stringify(entry)}\n`, "utf8");
+}
+
+function attachCors(app: Hono): void {
+  app.use("*", async (c, next) => {
+    const origin = c.req.header("Origin");
+    if (origin && ALLOWED_ORIGINS.has(origin)) {
+      c.res.headers.set("Access-Control-Allow-Origin", origin);
+      c.res.headers.set("Vary", "Origin");
+    }
+    c.res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    c.res.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    if (c.req.method === "OPTIONS") {
+      return c.body(null, 204);
+    }
+    await next();
+  });
+}
+
+function attachHealth(app: Hono): void {
+  app.get("/health", (c) => {
+    const response: HealthResponse = HealthResponseSchema.parse({
+      ok: true,
+      service: "playwright-workbench-agent",
+      version: SERVICE_VERSION,
+      timestamp: new Date().toISOString()
+    });
+    return c.json(response);
+  });
+}
+
+function attachWebSocket(
+  app: Hono,
+  bus: EventBus,
+  logger: ReturnType<typeof createLogger>
+): (server: ServerType) => void {
+  // PLAN.v2 §7 / §33: factory pattern leaves the door open for a raw `ws`
+  // fallback if @hono/node-ws becomes unstable.
+  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+  app.get(
+    "/ws",
+    upgradeWebSocket(() => {
+      let unsubscribe: (() => void) | undefined;
+      return {
+        onOpen(_evt: Event, ws: WSContext) {
+          unsubscribe = bus.subscribe((event) => {
+            const ready = (ws as unknown as { readyState?: number }).readyState;
+            if (ready !== undefined && ready !== 1 /* OPEN */) return;
+            try {
+              ws.send(JSON.stringify(event));
+            } catch (error) {
+              logger.debug({ err: error }, "ws send failed");
+            }
+          });
+          try {
+            ws.send(
+              JSON.stringify({
+                type: "snapshot",
+                sequence: 0,
+                timestamp: new Date().toISOString(),
+                payload: {
+                  service: "playwright-workbench-agent",
+                  version: SERVICE_VERSION
+                }
+              } satisfies WorkbenchEvent)
+            );
+          } catch {
+            // socket already closed before snapshot could be delivered
+          }
+        },
+        onClose() {
+          unsubscribe?.();
+        },
+        onError() {
+          unsubscribe?.();
+        }
+      };
+    })
+  );
+  return injectWebSocket;
+}
+
+export function buildApp(options: BuildAppOptions): BuildAppResult {
+  const { env } = options;
+  const logger = createLogger(env.logLevel);
+  const policy = options.policy ?? defaultPolicy(env);
+
+  const bus = createEventBus({
+    onListenerError: (error) => logger.debug({ err: error }, "ws listener error")
+  });
+
+  const runner = createNodeCommandRunner({
+    policy,
+    audit: (entry) => {
+      logger.info({ audit: entry }, "command audit");
+      try {
+        persistAuditEntry(env.initialProjectRoot, entry);
+      } catch (error) {
+        logger.warn(
+          { err: error instanceof Error ? error.message : String(error) },
+          "failed to persist audit log entry"
+        );
+      }
+      options.audit?.(entry);
+    }
+  });
+
+  const projectStore = createProjectStore();
+  const runManager = createRunManager({ runner, bus });
+
+  const app = new Hono();
+  attachCors(app);
+  attachHealth(app);
+  app.route(
+    "/",
+    projectsRoutes({ projectStore, runner, allowedRoots: env.allowedRoots })
+  );
+  app.route("/", runsRoutes({ projectStore, runManager }));
+  const injectWebSocket = attachWebSocket(app, bus, logger);
+
+  if (env.initialProjectRoot) {
+    void scanProject({
+      rootPath: env.initialProjectRoot,
+      allowedRoots: env.allowedRoots
+    })
+      .then((result) => {
+        projectStore.set(result);
+        logger.info(
+          { projectId: result.summary.id, packageManager: result.packageManager.name },
+          "Initial project loaded"
+        );
+      })
+      .catch((error: unknown) => {
+        logger.error(
+          { err: error instanceof Error ? error.message : String(error) },
+          "Failed to load initial project"
+        );
+      });
+  }
+
+  return { app, injectWebSocket, bus, runner, runManager, projectStore };
+}
+
+async function main(): Promise<void> {
+  const env = buildAgentEnv({ argv: process.argv.slice(2) });
+  const logger = createLogger(env.logLevel);
+  const { app, injectWebSocket } = buildApp({ env });
+  const server = serve(
+    { fetch: app.fetch, port: env.port, hostname: env.host },
+    (info) => {
+      logger.info({ port: info.port, host: env.host }, "Local Agent listening");
+    }
+  );
+  injectWebSocket(server);
+}
+
+const isDirectExecution = process.argv[1]
+  ? import.meta.url === new URL(`file://${process.argv[1]}`).href
+  : false;
+if (isDirectExecution) {
+  main().catch((error: unknown) => {
+    process.stderr.write(
+      `${error instanceof Error ? error.stack ?? error.message : String(error)}\n`
+    );
+    process.exit(1);
+  });
+}

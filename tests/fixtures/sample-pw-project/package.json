@@ -1,0 +1,13 @@
+{
+  "name": "@pwqa-fixture/sample-pw-project",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.8.0",
+  "scripts": {
+    "list": "playwright test --list --reporter=json"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}
