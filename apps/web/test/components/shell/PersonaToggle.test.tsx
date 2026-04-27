@@ -68,7 +68,7 @@ describe("dispatchPersonaSafely (guard 動線)", () => {
     expect(onChange.mock.calls).toEqual([["qa"], ["dev"], ["qmo"]]);
   });
 
-  it("invalid な値は onValueChange に転送せず dev で console.error する", () => {
+  it("invalid な値は onValueChange に転送せず console.error する (production でも検出可能)", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const onChange = vi.fn();
     dispatchPersonaSafely("admin", onChange);
@@ -76,6 +76,8 @@ describe("dispatchPersonaSafely (guard 動線)", () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledTimes(2);
     expect(errorSpy.mock.calls[0][0]).toMatch(/PersonaToggle.*admin/);
+    // 空文字も同様に prefix 付きで log されること (message format の drift 検出)
+    expect(errorSpy.mock.calls[1][0]).toMatch(/PersonaToggle/);
     errorSpy.mockRestore();
   });
 });

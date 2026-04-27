@@ -59,7 +59,8 @@ export function Breadcrumbs({
       {hasProject ? (
         <span className={itemBase}>
           <Folder aria-hidden />
-          <span className="truncate" title={projectName ?? undefined}>
+          {/* hasProject で string 確定済 (typeof + length 検証済) */}
+          <span className="truncate" title={projectName as string}>
             {projectName}
           </span>
         </span>

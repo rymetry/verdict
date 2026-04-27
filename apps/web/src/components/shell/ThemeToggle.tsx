@@ -11,7 +11,6 @@ import * as React from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { isDev } from "@/store/env";
 import type { ThemePreference } from "@/store/app-store";
 
 interface ThemeToggleProps {
@@ -53,11 +52,10 @@ export function ThemeToggle({
     event.preventDefault();
     const currentIndex = THEME_OPTIONS.findIndex((o) => o.value === value);
     if (currentIndex < 0) {
-      // value が型外に逸脱している = invariant 違反。silent 無視せず dev で可視化する。
-      if (isDev) {
-        // eslint-disable-next-line no-console -- 開発時の診断目的に限定
-        console.error(`[ThemeToggle] value="${value}" は THEME_OPTIONS 値域外`);
-      }
+      // value が型外に逸脱している = invariant 違反。silent 無視せず production でも可視化する
+      // (CLAUDE.md: `Never silently swallow errors`)。
+      // eslint-disable-next-line no-console -- invariant 違反は production でも検出したい
+      console.error(`[ThemeToggle] value="${value}" は THEME_OPTIONS 値域外`);
       return;
     }
     const direction = key === "ArrowLeft" || key === "ArrowUp" ? -1 : 1;

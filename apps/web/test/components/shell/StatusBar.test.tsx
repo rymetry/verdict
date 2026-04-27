@@ -49,6 +49,16 @@ describe("StatusBar", () => {
     expect(screen.getByText("Agent —")).toBeInTheDocument();
   });
 
+  it("agentEndpoint があれば '· {endpoint}' を表示する", () => {
+    render(<StatusBar agentState="reachable" agentEndpoint="127.0.0.1:4317" />);
+    expect(screen.getByText(/· 127\.0\.0\.1:4317/)).toBeInTheDocument();
+  });
+
+  it("agentEndpoint 未指定時は endpoint セグメントを描画しない", () => {
+    render(<StatusBar agentState="reachable" />);
+    expect(screen.queryByText(/127\.0\.0\.1/)).not.toBeInTheDocument();
+  });
+
   it("project と package manager を 'project · {name} · {pm}' で表示する", () => {
     render(
       <StatusBar

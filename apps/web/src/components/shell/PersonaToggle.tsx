@@ -6,7 +6,6 @@ import * as React from "react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { isDev } from "@/store/env";
 import {
   isPersonaView,
   PERSONA_VIEWS,
@@ -28,8 +27,11 @@ const PERSONA_LABEL: Record<PersonaView, string> = {
 /**
  * Radix Tabs の onValueChange (任意 string を流す) を PersonaView に narrow する guard。
  * - PERSONA_VIEWS と TabsTrigger value は同期している前提なので、ここに invalid 値が来るのは
- *   invariant 違反 (typo / PERSONA_VIEWS 拡張時の未同期)。dev で console.error し、
- *   store には絶対にコミットしない (silent failure 監査反映)。
+ *   invariant 違反 (typo / PERSONA_VIEWS 拡張時の未同期)。store には絶対にコミットしない。
+ * - throw ではなく console.error にする理由: Radix の onValueChange は React イベントハンドラで、
+ *   throw しても Error Boundary に拾われないことが多く、UI 全体を白画面化させない方を優先する。
+ *   一方で「silent」は許容しない方針 (CLAUDE.md `Never silently swallow errors`) のため、
+ *   production でも log は出す (ad blocker や Sentry が拾える状態にしておく)。
  * - test から動線を直接検証できるよう named export する。
  */
 export function dispatchPersonaSafely(
@@ -40,10 +42,8 @@ export function dispatchPersonaSafely(
     onValueChange(raw);
     return;
   }
-  if (isDev) {
-    // eslint-disable-next-line no-console -- 開発時の診断目的に限定
-    console.error(`[PersonaToggle] Tabs から想定外 value: ${String(raw)}`);
-  }
+  // eslint-disable-next-line no-console -- invariant 違反は production でも検出したい
+  console.error(`[PersonaToggle] Tabs から想定外 value: ${String(raw)}`);
 }
 
 export function PersonaToggle({

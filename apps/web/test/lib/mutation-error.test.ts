@@ -21,4 +21,14 @@ describe("formatMutationError", () => {
     expect(formatMutationError(undefined, "再実行に失敗しました")).toBe("再実行に失敗しました");
     expect(formatMutationError(42, "再実行に失敗しました")).toBe("再実行に失敗しました");
   });
+
+  it("空 message の Error は fallback に倒す", () => {
+    const err = new Error("");
+    expect(formatMutationError(err, "再実行に失敗しました")).toBe("再実行に失敗しました");
+  });
+
+  it("空 message の WorkbenchApiError は code: fallback の形式にする", () => {
+    const err = new WorkbenchApiError("", "TIMEOUT", 408);
+    expect(formatMutationError(err, "再実行に失敗しました")).toBe("TIMEOUT: 再実行に失敗しました");
+  });
 });

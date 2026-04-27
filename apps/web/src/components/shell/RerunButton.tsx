@@ -2,6 +2,8 @@
 // - 直前の RunRequest を保持していないとき、または mutation 進行中は disabled。
 // - キーボードショートカット `r` の hint は kbd タグで表示。
 //   key handler 本体は ε (TopBar 全体の keymap 層) で実装予定。それまでは UI hint のみ。
+// - ε 完了時には `SHORTCUT_KEY` 定数を keymap registry へ寄せ、本コンポーネントは
+//   display key 名を props で受け取る形にリファクタする (定数の二重定義を防ぐため)。
 // - shadcn Button (variant="default" = CTA ダーク緑) + lucide Play icon。
 import * as React from "react";
 import { Play } from "lucide-react";

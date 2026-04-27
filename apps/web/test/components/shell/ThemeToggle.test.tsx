@@ -109,7 +109,7 @@ describe("ThemeToggle", () => {
     expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Dark" }));
   });
 
-  it("値域外の value (型を緩めた緊急退避経路) では onValueChange を呼ばず dev で console.error する", () => {
+  it("値域外の value (型を緩めた緊急退避経路) では onValueChange を呼ばず console.error する", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const onChange = vi.fn();
     render(
@@ -124,6 +124,8 @@ describe("ThemeToggle", () => {
     fireEvent.keyDown(radiogroup, { key: "ArrowRight" });
     expect(onChange).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledTimes(1);
+    // message format に prefix と invalid 値が含まれること
+    expect(errorSpy.mock.calls[0][0]).toMatch(/ThemeToggle.*invalid/);
     errorSpy.mockRestore();
   });
 });
