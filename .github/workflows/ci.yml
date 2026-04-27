@@ -24,7 +24,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["22", "24"]
+        # 24 = current Active LTS (Krypton), 25 = Current/stable.
+        # Node 22 (Jod) is dropped: enters Maintenance Oct 2026 and dragging
+        # along an older runtime widens the supply-chain attack surface
+        # without buying us anything for a green-field PoC.
+        node: ["24", "25"]
     steps:
       - name: Checkout
         uses: actions/checkout@v5

@@ -172,6 +172,12 @@ export function createRunManager({
         const result = await handle.result;
         await logStreams.closeAll();
 
+        // §28 / security review #8: scrub the Playwright JSON before either
+        // the report provider reads it or the API surfaces its path.
+        await artifactsStore
+          .redactPlaywrightResults(paths.playwrightJson)
+          .catch(() => undefined);
+
         const summary = await readSummarySafely(reportProvider, {
           projectRoot: params.projectRoot,
           runDir: paths.runDir,

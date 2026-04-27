@@ -33,3 +33,11 @@ yarn-error.log*
 # Coverage
 coverage/
 .nyc_output/
+
+# Workbench Phase 1 PoC artifacts
+.playwright-workbench/
+
+# Smoke spec artifacts (run output, captured screenshots)
+tests/smoke/_artifacts/
+tests/smoke/test-results/
+tests/smoke/playwright-report/

@@ -555,10 +555,10 @@ Git操作:
 
 ## 26. AI Adapter Design
 
-Adapter候補:
+Adapter候補 (初期default: **Claude Code**):
 
+- Claude Code (default)
 - Codex CLI
-- Claude Code
 - Gemini CLI
 - Custom command
 
@@ -838,12 +838,12 @@ Phase 10:
 - `playwright test --list` の出力パース安定性（`--reporter=json` との併用検証を含む）。
 - `@hono/node-ws` のWebSocket安定性（大量stdout/stderr streaming、切断・再接続時の挙動）。
 - Workbench artifactをproject配下に置くか、OS app dataへ置くoptionを持つか。
-- 初期AI adapterの優先順位。
+- 初期AI adapterの優先順位 (default: Claude Code, ただしユーザー環境に応じて Codex CLI / Gemini CLI / Custom command に切り替え可)。
 - Windows対応をPoCに含めるか、Phase 2以降にするか。
 - QMO Quality Gate default thresholdを組織ごとにどう設定するか。
 - `npx playwright-workbench` の配布パッケージ名とCLI引数設計（`--project <path>`, `--port <number>` 等）。
 
-この計画のdefaultは、macOS/Linux中心のPoC、project配下file store、Codex CLI adapter優先、Quality Gateはadvisory保存から開始。
+この計画のdefaultは、macOS/Linux中心のPoC、project配下file store、**Claude Code adapter優先**、Quality Gateはadvisory保存から開始。
 
 ## 35. First Implementation Tasks
 

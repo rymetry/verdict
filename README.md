@@ -34,7 +34,9 @@ yet implemented.
 
 ## Requirements
 
-- Node.js ≥ 22 (Node 24 is used in local verification).
+- Node.js ≥ 24 (Active LTS "Krypton") — CI matrix covers Node 24 LTS and
+  Node 25 (Current). Node 22 was intentionally dropped because it enters
+  Maintenance in October 2026.
 - pnpm 10.
 
 ## Setup
