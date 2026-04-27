@@ -119,20 +119,26 @@ Workbench本体:
 
 共通前提: ProjectScannerが `package.json` の dependencies/devDependencies に `@playwright/test` が含まれることを検証済みとする。含まれていない場合はテスト実行をブロックする。
 
+Phase 1 対象（npm / pnpm / yarn）:
+
 | PM | 実行コマンド | Local binary保証 |
 |----|-------------|-----------------|
 | npm | `npx --no-install playwright test` | `--no-install` で暗黙install防止。`node_modules/.bin/playwright` 不在時はエラー |
 | pnpm | `pnpm exec playwright test` | `pnpm exec` はlocal依存のみ解決。workspace/store内で見つからなければエラー |
 | yarn | `yarn playwright test` | Yarn Classic: `node_modules/.bin/` 解決。Yarn PnP: `.pnp.cjs` 経由で解決。いずれも暗黙installなし |
-| bun | `bunx --bun playwright test` | `bunx` はlocal `node_modules` を優先。`@playwright/test` 依存確認済みなら安全 |
+
+Phase 1.5 検証対象（Bun）:
+
+| PM | 実行コマンド候補 | 検証事項 |
+|----|-----------------|---------|
+| bun | `bunx --no-install --bun playwright test` | `bunx` はlocal不在時にnpmからauto-installへfallbackする。`--no-install` flagの挙動、`node_modules` 未作成時の安全性、stdout/stderr streamingの安定性をPhase 1.5で検証する |
 
 CommandRunnerではshell stringではなく、必ずcommand + args配列として保持する。PM別のexecコマンドがlocal binary不在時にエラーを返すことを各PMの実装で検証する。暗黙のグローバルinstallに依存する構成はPoC標準にしない。
 
 Bun:
 
-- PoC標準runtime/package managerにはしない。
-- ユーザー側プロジェクトがBunの場合の実行対象として扱う。
-- Phase 1.5でBunCommandRunnerとTauri sidecar可能性を検証する。
+- Phase 1の実装対象には含めない。PackageManagerDetectorがBunを検出した場合は「Bun support is experimental (Phase 1.5)」と表示し、テスト実行をブロックする。
+- Phase 1.5でBunCommandRunner、`bunx --no-install` の挙動、Tauri sidecar可能性を検証する。
 
 ## 9. Reporting / Quality Evidence Decision
 
@@ -970,4 +976,8 @@ v2 レビュー指摘反映 (2026-04-27):
 v2 再レビュー指摘反映 (2026-04-27):
 
 19. **[P1] pre-clean → detect/archive/copy**: §22のpre-cleanを廃止。ユーザー成果物を削除しない原則を明記。`resultsDir` をヒューリスティック検出し、既存ファイルは `.playwright-workbench/archive/` へ退避。検出不能時はユーザー確認を必須とする。§38実装プロンプトにも原則を追記。
-20. **[P2] local binary検証のPM別明文化**: §8の実行コマンドをPM別テーブルに整理。npm: `--no-install`、pnpm/yarn/bun: 各PMのlocal exec保証。`node_modules/.bin/` 一律チェックを廃止し、Yarn PnP等を正しく扱う。
+20. **[P2] local binary検証のPM別明文化**: §8の実行コマンドをPM別テーブルに整理。npm: `--no-install`、pnpm/yarn: 各PMのlocal exec保証。`node_modules/.bin/` 一律チェックを廃止し、Yarn PnP等を正しく扱う。
+
+v2 3rd review 指摘反映 (2026-04-27):
+
+21. **[P2] BunをPhase 1対象外に明確化**: §8のPM別テーブルをPhase 1対象（npm/pnpm/yarn）とPhase 1.5検証対象（Bun）に分離。Bun検出時はテスト実行をブロックし experimental 表示する。`bunx --no-install` の挙動検証をPhase 1.5に明記。
