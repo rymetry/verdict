@@ -8,6 +8,16 @@ import {
   useQueryClient
 } from "@tanstack/react-query";
 import type { ProjectSummary, RunRequest } from "@pwqa/shared";
+
+// 自前ホストのフォントを globals.css より前に import する。
+// FOUC 抑止に加え、`@font-face` を base layer 適用前に登録することで
+// 初回フレームから正しい font-family が解決される。
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import "@fontsource/noto-sans-jp/400.css";
+import "@fontsource/noto-sans-jp/500.css";
+import "@fontsource/noto-sans-jp/700.css";
+
 import {
   fetchHealth,
   fetchCurrentProject,
@@ -19,6 +29,12 @@ import { ProjectPicker } from "./features/project-picker/ProjectPicker";
 import { TestInventoryPanel } from "./features/test-inventory/TestInventoryPanel";
 import { RunConsole } from "./features/run-console/RunConsole";
 import { FailureReview } from "./features/failure-review/FailureReview";
+import { FoundationPreview } from "./components/foundation/FoundationPreview";
+import { ThemeProvider } from "./hooks/use-theme";
+
+import "./styles/globals.css";
+// 既存 Phase 1 機能の暫定スタイル。δ (Issue #11) で QA View が Tailwind 化される
+// タイミングで削除する。それまでは既存 Phase 1 features の見た目を維持する目的。
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -26,6 +42,22 @@ const queryClient = new QueryClient({
     queries: { staleTime: 5_000, refetchOnWindowFocus: false }
   }
 });
+
+/**
+ * `?foundation=1` クエリで基盤プリミティブのプレビューに切替えられる。
+ * δ (Issue #11) 完了後に撤去予定 (YAGNI)。
+ *
+ * URL 解析で例外が起きた場合は通常 App にフォールバックする。
+ * Foundation Preview に行けないだけで、実機能を白画面化させない。
+ */
+function isFoundationPreview(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return new URLSearchParams(window.location.search).get("foundation") === "1";
+  } catch {
+    return false;
+  }
+}
 
 function App() {
   const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined);
@@ -172,10 +204,18 @@ function RunControls({ project, onRunStarted }: RunControlsProps) {
   );
 }
 
-createRoot(document.getElementById("root")!).render(
+// `index.html` のマウントポイント取得を明示エラーにする (null 断言はサイレント失敗を生む)
+const rootElement = document.getElementById("root");
+if (rootElement === null) {
+  throw new Error('Root element "#root" not found in index.html. Cannot mount React app.');
+}
+
+createRoot(rootElement).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        {isFoundationPreview() ? <FoundationPreview /> : <App />}
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>
 );
