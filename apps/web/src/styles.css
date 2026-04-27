@@ -1365,13 +1365,30 @@
         radial-gradient(800px 320px at 0% 0%, var(--accent-soft), transparent 60%),
         var(--bg-elev);
     }
-    .qmo-hero h1 {
+    .qmo-hero h2 {
       margin: 0 0 6px;
       font-size: 13px;
       font-weight: 600;
       letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--accent);
+    }
+    .qmo-disclaimer {
+      margin: 8px 0 0;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+    .qmo-side-head {
+      display: flex;
+      align-items: baseline;
+      padding: 0 0 10px;
+    }
+    .qmo-side-head h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-0);
     }
     .qmo-score {
       display: flex;
@@ -1483,11 +1500,24 @@
       font-size: 11px;
       color: var(--ink-3);
     }
-    .qmo-card-head .more {
+    .more {
       margin-left: auto;
+      padding: 0;
+      background: transparent;
+      border: none;
       font-size: 11.5px;
       color: var(--accent);
       font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .more:hover:not(:disabled) {
+      color: var(--accent-hover);
+      text-decoration: underline;
+    }
+    .more:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
     }
     .qmo-card ul {
       list-style: none;

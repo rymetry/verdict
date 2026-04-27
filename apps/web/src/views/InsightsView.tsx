@@ -1,40 +1,134 @@
 /**
  * Insights View — Phase 1 では static mock。
- * Phase 1.2 で Allure 統合 + Quality Gate 評価が実装されたら実データに置換。
- * Allure と競合しないよう「決定支援レイヤー」として位置づけ:
- *   - 詳細レポートは Allure に委譲 (フルレポートリンク)
- *   - 当 view は Quality Gate / AI 判定 / 危険信号サマリのみ提供
+ *
+ * Phase 1.2 で Allure 統合 + Quality Gate 評価が実装されたら下記 MOCK_DATA を
+ * API レスポンスで置換。Allure と競合しないよう「決定支援レイヤー」として
+ * 位置づけ — 詳細レポートは Allure に委譲し、当 view は Quality Gate / AI
+ * 判定 / 危険信号サマリのみ提供する。
  */
+
+// ─── MOCK_DATA — TODO(Phase 1.2): replace with live API responses ────────
+const MOCK_DATA = {
+  release: {
+    score: 86,
+    label: "Ready" as const,
+    rcVersion: "v2.14.0-rc",
+    summary:
+      "全 6 つの Quality Gate ルールをパス。重大な失敗 3 件と Flaky 3 件を確認すれば本番昇格可。"
+  },
+  stats: {
+    total: 2842,
+    passed: 2486,
+    failed: 198,
+    flaky: 37,
+    skipped: 121
+  },
+  criticals: [
+    {
+      scope: "checkout",
+      title: "should complete payment",
+      meta: "tests/e2e/checkout.spec.ts:112 · chromium · 3m ago"
+    },
+    {
+      scope: "search",
+      title: "filters › price range",
+      meta: "tests/e2e/search/filters.spec.ts:78 · webkit · 12m ago"
+    },
+    {
+      scope: "profile",
+      title: "update › saves changes",
+      meta: "tests/e2e/profile/update.spec.ts:54 · firefox · 16m ago"
+    }
+  ],
+  knownIssues: [
+    { title: "Payment gateway timeout in CI", meta: "#1024 · Open · High" },
+    { title: "Flaky: product list virtual scroll", meta: "#987 · Open · Medium" },
+    { title: "Intermittent auth redirect", meta: "#956 · Open · Medium" }
+  ],
+  topFlaky: [
+    {
+      scope: "search",
+      title: "autocomplete suggestions",
+      meta: "tests/e2e/search.auto.spec.ts:23 · 24%"
+    },
+    {
+      scope: "cart",
+      title: "remove item",
+      meta: "tests/e2e/cart.remove.spec.ts:41 · 18%"
+    },
+    {
+      scope: "homepage",
+      title: "hero carousel",
+      meta: "tests/e2e/home.hero.spec.ts:17 · 15%"
+    }
+  ],
+  qualityGate: {
+    verdict: "Passed" as const,
+    rules: [
+      { name: "最低パス率", thresh: "≥ 85%", actual: "88.2%", pass: true },
+      { name: "最大失敗数", thresh: "≤ 200", actual: "198", pass: true },
+      { name: "重大な失敗", thresh: "= 0", actual: "0", pass: true },
+      { name: "Flaky リスク上限", thresh: "≤ 10%", actual: "7.2%", pass: true },
+      { name: "最大 Broken", thresh: "≤ 40", actual: "37", pass: true },
+      { name: "最低カバレッジ", thresh: "≥ 70%", actual: "74.3%", pass: true }
+    ]
+  },
+  allure: [
+    { name: "パス率 (30 日)", thresh: "前回 82.1%", actual: "88.2%" },
+    { name: "平均所要時間", thresh: "前回 2h 47m", actual: "2h 18m" },
+    { name: "テスト/日", thresh: "直近 7 日", actual: "624" }
+  ],
+  recentRuns: [
+    { ts: "2024/05/18 10:24", status: "passed" as const, rate: "88.2%" },
+    { ts: "2024/05/16 09:18", status: "passed" as const, rate: "84.6%" },
+    { ts: "2024/05/13 14:51", status: "flaky" as const, rate: "81.3%" },
+    { ts: "2024/05/10 10:05", status: "failed" as const, rate: "75.2%" },
+    { ts: "2024/05/08 08:44", status: "passed" as const, rate: "83.1%" }
+  ],
+  aiSummary: {
+    body:
+      "総合品質は良好で、前回比でパス率が +6.1pp 改善。リスクは checkout / search の 3 件の重大な失敗に集中。Flaky リスクは許容範囲内 (7.2%) ですが、上位 3 件は次回 sprint で対処推奨。前回ブロッカー (#1024 Payment gateway timeout) は新規発生していません。",
+    verdictLead: "本番昇格可能",
+    verdictBody: "重大な失敗 3 件を確認後、デプロイ可。"
+  }
+} as const;
+
+const RUN_STATE_TO_TREND: Record<"passed" | "failed" | "flaky", string> = {
+  passed: "up",
+  failed: "dn",
+  flaky: ""
+};
+
 export function InsightsView() {
+  const { release, stats, criticals, knownIssues, topFlaky, qualityGate, allure, recentRuns, aiSummary } =
+    MOCK_DATA;
+
   return (
     <div className="view view-qmo">
       <div className="qmo-main">
 
-        <section className="qmo-hero">
+        <section className="qmo-hero" aria-labelledby="release-readiness-title">
           <div>
-            <h1>Release Readiness</h1>
+            <h2 id="release-readiness-title">Release Readiness</h2>
             <div className="qmo-score">
-              <span className="num">86</span>
+              <span className="num">{release.score}</span>
               <span className="max">/ 100</span>
-              <span className="verdict">Ready</span>
+              <span className="verdict">{release.label}</span>
             </div>
             <div className="qmo-bar">
-              <div className="qmo-bar-fill" style={{ width: "86%" }} />
+              <div className="qmo-bar-fill" style={{ width: `${release.score}%` }} />
             </div>
-            <p>
-              v2.14.0-rc · 全 6 つの Quality Gate ルールをパス。重大な失敗 3 件と Flaky
-              3 件を確認すれば本番昇格可。
-            </p>
-            <p style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--mono)" }}>
+            <p>{release.rcVersion} · {release.summary}</p>
+            <p className="qmo-disclaimer">
               ※ 表示データは Phase 1.2 (Allure 統合 + Quality Gate 評価) でライブ接続予定。現在は static mock。
             </p>
           </div>
           <div className="qmo-stats">
-            <div className="qmo-stat"><span className="label">Total</span><span className="num">2,842</span></div>
-            <div className="qmo-stat"><span className="label">Passed</span><span className="num pass">2,486</span></div>
-            <div className="qmo-stat"><span className="label">Failed</span><span className="num fail">198</span></div>
-            <div className="qmo-stat"><span className="label">Flaky</span><span className="num flaky">37</span></div>
-            <div className="qmo-stat"><span className="label">Skipped</span><span className="num skip">121</span></div>
+            <div className="qmo-stat"><span className="label">Total</span><span className="num">{stats.total.toLocaleString()}</span></div>
+            <div className="qmo-stat"><span className="label">Passed</span><span className="num pass">{stats.passed.toLocaleString()}</span></div>
+            <div className="qmo-stat"><span className="label">Failed</span><span className="num fail">{stats.failed.toLocaleString()}</span></div>
+            <div className="qmo-stat"><span className="label">Flaky</span><span className="num flaky">{stats.flaky.toLocaleString()}</span></div>
+            <div className="qmo-stat"><span className="label">Skipped</span><span className="num skip">{stats.skipped.toLocaleString()}</span></div>
           </div>
         </section>
 
@@ -42,82 +136,60 @@ export function InsightsView() {
           <article className="qmo-card">
             <div className="qmo-card-head">
               <h3>重大な失敗</h3>
-              <span className="count">3</span>
-              <a className="more" href="#all-criticals">すべて表示 ›</a>
+              <span className="count">{criticals.length}</span>
+              <DisabledMore />
             </div>
             <ul>
-              <li>
-                <span className="item-title"><span className="scope">checkout ›</span> should complete payment</span>
-                <span className="item-meta">tests/e2e/checkout.spec.ts:112 · chromium · 3m ago</span>
-              </li>
-              <li>
-                <span className="item-title"><span className="scope">search ›</span> filters › price range</span>
-                <span className="item-meta">tests/e2e/search/filters.spec.ts:78 · webkit · 12m ago</span>
-              </li>
-              <li>
-                <span className="item-title"><span className="scope">profile ›</span> update › saves changes</span>
-                <span className="item-meta">tests/e2e/profile/update.spec.ts:54 · firefox · 16m ago</span>
-              </li>
+              {criticals.map((it) => (
+                <li key={`${it.scope}-${it.title}`}>
+                  <span className="item-title"><span className="scope">{it.scope} ›</span> {it.title}</span>
+                  <span className="item-meta">{it.meta}</span>
+                </li>
+              ))}
             </ul>
           </article>
 
           <article className="qmo-card">
             <div className="qmo-card-head">
               <h3>既知の問題</h3>
-              <span className="count">8</span>
-              <a className="more" href="#all-known">すべて表示 ›</a>
+              <span className="count">{knownIssues.length}</span>
+              <DisabledMore />
             </div>
             <ul>
-              <li>
-                <span className="item-title">Payment gateway timeout in CI</span>
-                <span className="item-meta">#1024 · Open · High</span>
-              </li>
-              <li>
-                <span className="item-title">Flaky: product list virtual scroll</span>
-                <span className="item-meta">#987 · Open · Medium</span>
-              </li>
-              <li>
-                <span className="item-title">Intermittent auth redirect</span>
-                <span className="item-meta">#956 · Open · Medium</span>
-              </li>
+              {knownIssues.map((it) => (
+                <li key={it.title}>
+                  <span className="item-title">{it.title}</span>
+                  <span className="item-meta">{it.meta}</span>
+                </li>
+              ))}
             </ul>
           </article>
 
           <article className="qmo-card">
             <div className="qmo-card-head">
               <h3>Top Flaky</h3>
-              <span className="count">37</span>
-              <a className="more" href="#all-flaky">すべて表示 ›</a>
+              <span className="count">{topFlaky.length}</span>
+              <DisabledMore />
             </div>
             <ul>
-              <li>
-                <span className="item-title"><span className="scope">search ›</span> autocomplete suggestions</span>
-                <span className="item-meta">tests/e2e/search.auto.spec.ts:23 · 24%</span>
-              </li>
-              <li>
-                <span className="item-title"><span className="scope">cart ›</span> remove item</span>
-                <span className="item-meta">tests/e2e/cart.remove.spec.ts:41 · 18%</span>
-              </li>
-              <li>
-                <span className="item-title"><span className="scope">homepage ›</span> hero carousel</span>
-                <span className="item-meta">tests/e2e/home.hero.spec.ts:17 · 15%</span>
-              </li>
+              {topFlaky.map((it) => (
+                <li key={`${it.scope}-${it.title}`}>
+                  <span className="item-title"><span className="scope">{it.scope} ›</span> {it.title}</span>
+                  <span className="item-meta">{it.meta}</span>
+                </li>
+              ))}
             </ul>
           </article>
         </section>
 
-        <section className="qmo-ai">
+        <section className="qmo-ai" aria-labelledby="ai-summary-title">
           <div className="qmo-ai-head">
-            <h3>AI リリース判定 サマリ</h3>
+            <h3 id="ai-summary-title">AI リリース判定 サマリ</h3>
             <span className="pill">Claude Code · Beta</span>
           </div>
-          <p>
-            総合品質は良好で、前回比でパス率が +6.1pp 改善。リスクは checkout / search の 3
-            件の重大な失敗に集中。Flaky リスクは許容範囲内 (7.2%) ですが、上位 3 件は次回 sprint
-            で対処推奨。前回ブロッカー (#1024 Payment gateway timeout) は新規発生していません。
-          </p>
+          <p>{aiSummary.body}</p>
           <div className="verdict">
-            推奨: <strong>本番昇格可能</strong>。重大な失敗 3 件を確認後、デプロイ可。
+            推奨: <strong>{aiSummary.verdictLead}</strong>。{aiSummary.verdictBody}
           </div>
         </section>
       </div>
@@ -126,108 +198,65 @@ export function InsightsView() {
         <div className="rules-table">
           <div className="head">
             <h3>Quality Gate</h3>
-            <span className="pass-pill">Passed</span>
+            <span className="pass-pill">{qualityGate.verdict}</span>
           </div>
-          <div className="rule-row">
-            <span className="rule-name">最低パス率</span>
-            <span className="rule-thresh">≥ 85%</span>
-            <span className="rule-actual pass">88.2%</span>
-          </div>
-          <div className="rule-row">
-            <span className="rule-name">最大失敗数</span>
-            <span className="rule-thresh">≤ 200</span>
-            <span className="rule-actual pass">198</span>
-          </div>
-          <div className="rule-row">
-            <span className="rule-name">重大な失敗</span>
-            <span className="rule-thresh">= 0</span>
-            <span className="rule-actual pass">0</span>
-          </div>
-          <div className="rule-row">
-            <span className="rule-name">Flaky リスク上限</span>
-            <span className="rule-thresh">≤ 10%</span>
-            <span className="rule-actual pass">7.2%</span>
-          </div>
-          <div className="rule-row">
-            <span className="rule-name">最大 Broken</span>
-            <span className="rule-thresh">≤ 40</span>
-            <span className="rule-actual pass">37</span>
-          </div>
-          <div className="rule-row">
-            <span className="rule-name">最低カバレッジ</span>
-            <span className="rule-thresh">≥ 70%</span>
-            <span className="rule-actual pass">74.3%</span>
-          </div>
+          {qualityGate.rules.map((r) => (
+            <div className="rule-row" key={r.name}>
+              <span className="rule-name">{r.name}</span>
+              <span className="rule-thresh">{r.thresh}</span>
+              <span className={`rule-actual ${r.pass ? "pass" : "fail"}`}>{r.actual}</span>
+            </div>
+          ))}
         </div>
 
         <div className="rules-table">
           <div className="head">
             <h3>Allure サマリ</h3>
-            <a
-              href="#allure-full"
-              style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--accent)" }}
-            >
-              フルレポート ›
-            </a>
+            <DisabledMore label="フルレポート ›" />
           </div>
-          <div className="rule-row">
-            <span className="rule-name">パス率 (30 日)</span>
-            <span className="rule-thresh">前回 82.1%</span>
-            <span className="rule-actual pass">88.2%</span>
-          </div>
-          <div className="rule-row">
-            <span className="rule-name">平均所要時間</span>
-            <span className="rule-thresh">前回 2h 47m</span>
-            <span className="rule-actual pass">2h 18m</span>
-          </div>
-          <div className="rule-row">
-            <span className="rule-name">テスト/日</span>
-            <span className="rule-thresh">直近 7 日</span>
-            <span className="rule-actual pass">624</span>
-          </div>
+          {allure.map((r) => (
+            <div className="rule-row" key={r.name}>
+              <span className="rule-name">{r.name}</span>
+              <span className="rule-thresh">{r.thresh}</span>
+              <span className="rule-actual pass">{r.actual}</span>
+            </div>
+          ))}
         </div>
 
         <div>
-          <div style={{ display: "flex", alignItems: "baseline", padding: "0 0 10px" }}>
-            <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--ink-0)" }}>
-              最近の Run
-            </h3>
-            <a
-              href="#all-runs"
-              style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--accent)" }}
-            >
-              すべて表示 ›
-            </a>
+          <div className="qmo-side-head">
+            <h3>最近の Run</h3>
+            <DisabledMore />
           </div>
           <ul className="recent-runs">
-            <li>
-              <span className="ts">2024/05/18 10:24</span>
-              <span className="badge passed">Passed</span>
-              <span className="pr up">88.2%</span>
-            </li>
-            <li>
-              <span className="ts">2024/05/16 09:18</span>
-              <span className="badge passed">Passed</span>
-              <span className="pr up">84.6%</span>
-            </li>
-            <li>
-              <span className="ts">2024/05/13 14:51</span>
-              <span className="badge flaky">Flaky</span>
-              <span className="pr">81.3%</span>
-            </li>
-            <li>
-              <span className="ts">2024/05/10 10:05</span>
-              <span className="badge failed">Failed</span>
-              <span className="pr dn">75.2%</span>
-            </li>
-            <li>
-              <span className="ts">2024/05/08 08:44</span>
-              <span className="badge passed">Passed</span>
-              <span className="pr up">83.1%</span>
-            </li>
+            {recentRuns.map((run) => (
+              <li key={run.ts}>
+                <span className="ts">{run.ts}</span>
+                <span className={`badge ${run.status}`}>{capitalize(run.status)}</span>
+                <span className={`pr ${RUN_STATE_TO_TREND[run.status]}`}>{run.rate}</span>
+              </li>
+            ))}
           </ul>
         </div>
       </aside>
     </div>
+  );
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Phase 1.2 で実 navigation に置換予定の disabled affordance。 */
+function DisabledMore({ label = "すべて表示 ›" }: { label?: string }) {
+  return (
+    <button
+      type="button"
+      className="more"
+      disabled
+      title="Phase 1.2 で接続予定"
+    >
+      {label}
+    </button>
   );
 }

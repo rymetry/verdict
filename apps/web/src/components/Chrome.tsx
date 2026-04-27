@@ -12,6 +12,8 @@ import {
 
 interface ChromeProps {
   project: ProjectSummary | null;
+  /** Optional branch label. Phase 1 has no branch wiring; Phase 1.2 will pipe it in. */
+  branch?: string;
   activeRunId: string | null;
   activeRunStatus: RunStatus | null;
   persona: Persona;
@@ -26,6 +28,7 @@ interface ChromeProps {
 
 export function Chrome({
   project,
+  branch,
   activeRunId,
   activeRunStatus,
   persona,
@@ -38,7 +41,6 @@ export function Chrome({
   primaryAction
 }: ChromeProps) {
   const projectName = project ? deriveProjectName(project.rootPath) : "no project";
-  const branchLabel = "main";
   const runLabel = activeRunId ? `Run ${activeRunId.slice(0, 8)}` : "no run";
   const runBadge = activeRunStatus ? statusToBadge(activeRunStatus) : null;
 
@@ -48,7 +50,7 @@ export function Chrome({
         <span className="brand-mark">P</span>
         <div>
           <h1 className="brand-name">Playwright Workbench</h1>
-          <span className="brand-sub">v0.1.0 · local</span>
+          <span className="brand-sub">v{__APP_VERSION__} · local</span>
         </div>
       </div>
 
@@ -57,11 +59,15 @@ export function Chrome({
           <FolderIcon />
           {projectName}
         </span>
-        <span className="crumb-divider">/</span>
-        <span className="crumb">
-          <BranchIcon />
-          {branchLabel}
-        </span>
+        {branch ? (
+          <>
+            <span className="crumb-divider">/</span>
+            <span className="crumb">
+              <BranchIcon />
+              {branch}
+            </span>
+          </>
+        ) : null}
         <span className="crumb-divider">/</span>
         <span className="crumb">
           <ClockIcon />
