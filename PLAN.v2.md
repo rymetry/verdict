@@ -698,7 +698,7 @@ PoCで作らない:
 検証:
 
 - `bun.lock` / `bun.lockb` 検出。
-- `bunx playwright test` 実行。
+- `bunx --no-install --bun playwright test` 実行（bare `bunx` との挙動差も比較検証する）。
 - stdout/stderr streaming。
 - JSON reporter。
 - Allure results。
