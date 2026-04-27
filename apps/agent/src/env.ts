@@ -19,11 +19,24 @@ interface BuildEnvInput {
 const DEFAULT_PORT = 4317;
 const DEFAULT_HOST = "127.0.0.1";
 
+const SAFE_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+
 function parsePort(raw: string | undefined): number {
   if (!raw) return DEFAULT_PORT;
   const value = Number.parseInt(raw, 10);
   if (!Number.isFinite(value) || value <= 0 || value > 65535) {
     throw new Error(`Invalid PORT value: ${raw}`);
+  }
+  return value;
+}
+
+function parseHost(raw: string | undefined, allowAnyHost: boolean): string {
+  const value = raw ?? DEFAULT_HOST;
+  if (allowAnyHost) return value;
+  if (!SAFE_HOSTS.has(value)) {
+    throw new Error(
+      `Refusing to bind to non-loopback host '${value}'. Set WORKBENCH_ALLOW_REMOTE=1 to override.`
+    );
   }
   return value;
 }
@@ -43,7 +56,8 @@ export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = 
   const portArg = portArgIndex >= 0 ? argv[portArgIndex + 1] : undefined;
 
   const port = parsePort(portArg ?? env.PORT);
-  const host = env.HOST ?? DEFAULT_HOST;
+  const allowAnyHost = env.WORKBENCH_ALLOW_REMOTE === "1" || env.WORKBENCH_ALLOW_REMOTE === "true";
+  const host = parseHost(env.HOST, allowAnyHost);
   const logLevel = env.LOG_LEVEL ?? "info";
 
   const projectInput = projectArg ?? env.WORKBENCH_PROJECT_ROOT;

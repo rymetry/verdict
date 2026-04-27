@@ -1,3 +1,5 @@
+import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 import { Hono } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
@@ -11,6 +13,7 @@ import { buildAgentEnv, type AgentEnv } from "./env.js";
 import { createLogger } from "./logger.js";
 import {
   createNodeCommandRunner,
+  type AuditEntry,
   type CommandRunner
 } from "./commands/runner.js";
 import {
@@ -24,12 +27,22 @@ import { createProjectStore, type ProjectStore } from "./project/store.js";
 import { projectsRoutes } from "./routes/projects.js";
 import { runsRoutes } from "./routes/runs.js";
 import { scanProject } from "./project/scanner.js";
+import { workbenchPaths } from "./storage/paths.js";
 
 const SERVICE_VERSION = "0.1.0";
+
+const ALLOWED_ORIGINS = new Set<string>([
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+  "http://127.0.0.1:4317",
+  "http://localhost:4317"
+]);
 
 export interface BuildAppOptions {
   env: AgentEnv;
   policy?: CommandPolicy;
+  /** Optional override for the audit sink (used by tests). */
+  audit?: (entry: AuditEntry) => void;
 }
 
 export interface BuildAppResult {
@@ -53,16 +66,34 @@ function defaultPolicy(env: AgentEnv): CommandPolicy {
   };
 }
 
+function persistAuditEntry(rootDir: string | undefined, entry: AuditEntry): void {
+  if (!rootDir) return;
+  const wb = workbenchPaths(rootDir);
+  fsSync.mkdirSync(wb.workbenchDir, { recursive: true });
+  const line = `${JSON.stringify(entry)}\n`;
+  // sync append to keep ordering even if many runs start back-to-back.
+  fsSync.appendFileSync(wb.workbenchDir + "/audit.log", line, "utf8");
+}
+
 export function buildApp(options: BuildAppOptions): BuildAppResult {
   const { env } = options;
   const logger = createLogger(env.logLevel);
   const policy = options.policy ?? defaultPolicy(env);
 
-  const bus = createEventBus();
+  const bus = createEventBus({ onListenerError: (error) => logger.debug({ err: error }, "ws listener error") });
   const runner = createNodeCommandRunner({
     policy,
     audit: (entry) => {
       logger.info({ audit: entry }, "command audit");
+      try {
+        persistAuditEntry(env.initialProjectRoot, entry);
+      } catch (error) {
+        logger.warn(
+          { err: error instanceof Error ? error.message : String(error) },
+          "failed to persist audit log entry"
+        );
+      }
+      options.audit?.(entry);
     }
   });
   const projectStore = createProjectStore();
@@ -71,12 +102,12 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
   const app = new Hono();
 
   app.use("*", async (c, next) => {
-    // Permissive CORS for local Workbench (loopback only).
-    c.res.headers.set("Access-Control-Allow-Origin", "*");
-    c.res.headers.set(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization"
-    );
+    const origin = c.req.header("Origin");
+    if (origin && ALLOWED_ORIGINS.has(origin)) {
+      c.res.headers.set("Access-Control-Allow-Origin", origin);
+      c.res.headers.set("Vary", "Origin");
+    }
+    c.res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
     c.res.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     if (c.req.method === "OPTIONS") {
       return c.body(null, 204);
@@ -94,14 +125,18 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     return c.json(response);
   });
 
-  app.route("/", projectsRoutes({
-    projectStore,
-    runner,
-    allowedRoots: env.allowedRoots
-  }));
+  app.route(
+    "/",
+    projectsRoutes({
+      projectStore,
+      runner,
+      allowedRoots: env.allowedRoots
+    })
+  );
   app.route("/", runsRoutes({ projectStore, runManager }));
 
-  // WebSocket channel
+  // WebSocket channel (PLAN.v2 §7 / §33: factory pattern keeps the door open
+  // for a raw `ws` fallback if @hono/node-ws becomes unstable).
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
   app.get(
     "/ws",
@@ -110,16 +145,32 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       return {
         onOpen(_evt: Event, ws: WSContext) {
           unsubscribe = bus.subscribe((event) => {
-            ws.send(JSON.stringify(event));
+            // Only send while the socket is open. The bus dispatches synchronously
+            // and a stale listener could otherwise throw repeatedly into the bus
+            // catch-all.
+            const ready = (ws as unknown as { readyState?: number }).readyState;
+            if (ready !== undefined && ready !== 1 /* OPEN */) return;
+            try {
+              ws.send(JSON.stringify(event));
+            } catch (error) {
+              logger.debug({ err: error }, "ws send failed");
+            }
           });
-          ws.send(
-            JSON.stringify({
-              type: "snapshot",
-              sequence: 0,
-              timestamp: new Date().toISOString(),
-              payload: { service: "playwright-workbench-agent", version: SERVICE_VERSION }
-            } satisfies WorkbenchEvent)
-          );
+          try {
+            ws.send(
+              JSON.stringify({
+                type: "snapshot",
+                sequence: 0,
+                timestamp: new Date().toISOString(),
+                payload: {
+                  service: "playwright-workbench-agent",
+                  version: SERVICE_VERSION
+                }
+              } satisfies WorkbenchEvent)
+            );
+          } catch {
+            // socket already closed before snapshot could be delivered
+          }
         },
         onClose() {
           unsubscribe?.();
@@ -167,6 +218,10 @@ async function main(): Promise<void> {
   );
   injectWebSocket(server);
 }
+
+// Keep `fs` import warnings at bay in CI where the type-only import would be
+// unused if the audit path is never invoked.
+void fs.access;
 
 const isDirectExecution = process.argv[1]
   ? import.meta.url === new URL(`file://${process.argv[1]}`).href

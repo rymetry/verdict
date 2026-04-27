@@ -12,7 +12,11 @@ export interface EventBus {
   snapshot(runId: string): ReadonlyArray<WorkbenchEvent>;
 }
 
-export function createEventBus(): EventBus {
+export interface CreateEventBusOptions {
+  onListenerError?: (error: unknown) => void;
+}
+
+export function createEventBus(options: CreateEventBusOptions = {}): EventBus {
   const listeners = new Set<EventListener>();
   let nextSequence = 0;
   /** Per-run circular buffer for WS reconnect snapshots. */
@@ -37,8 +41,8 @@ export function createEventBus(): EventBus {
       for (const listener of listeners) {
         try {
           listener(event);
-        } catch {
-          // listeners are best-effort
+        } catch (error) {
+          options.onListenerError?.(error);
         }
       }
       return event;

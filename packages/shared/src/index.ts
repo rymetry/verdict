@@ -133,12 +133,31 @@ export const RunStatusSchema = z.enum([
 ]);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
+/**
+ * Inputs that flow to the Playwright CLI must not be allowed to act as
+ * additional flags (PLAN.v2 §28 / security review). A bare leading `-`
+ * is rejected; `..` and absolute paths are rejected for `specPath`.
+ */
+const noFlagInjection = (value: string): boolean => !value.startsWith("-");
+
 export const RunRequestSchema = z.object({
   projectId: z.string(),
-  specPath: z.string().optional(),
-  testIds: z.array(z.string()).optional(),
-  grep: z.string().optional(),
-  projectNames: z.array(z.string()).optional(),
+  specPath: z
+    .string()
+    .refine(noFlagInjection, "specPath must not start with '-'")
+    .refine((v) => !v.includes(".."), "specPath must not contain '..'")
+    .refine((v) => !v.startsWith("/"), "specPath must be project-relative")
+    .optional(),
+  testIds: z
+    .array(z.string().refine(noFlagInjection, "testId must not start with '-'"))
+    .optional(),
+  grep: z
+    .string()
+    .refine(noFlagInjection, "grep must not start with '-'")
+    .optional(),
+  projectNames: z
+    .array(z.string().refine(noFlagInjection, "projectName must not start with '-'"))
+    .optional(),
   headed: z.boolean().optional().default(false)
 });
 export type RunRequest = z.infer<typeof RunRequestSchema>;

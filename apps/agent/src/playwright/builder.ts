@@ -18,6 +18,13 @@ export interface PlaywrightCommandInput {
 
 const REPORTERS = ["list", "json", "html"] as const;
 
+export class PlaywrightCommandBuildError extends Error {
+  constructor(message: string, readonly code: string) {
+    super(message);
+    this.name = "PlaywrightCommandBuildError";
+  }
+}
+
 export function buildPlaywrightTestCommand(input: PlaywrightCommandInput): {
   command: CommandTemplate;
   env: Record<string, string>;
@@ -26,26 +33,30 @@ export function buildPlaywrightTestCommand(input: PlaywrightCommandInput): {
   const args = [...base.args];
 
   // PoC §21: list / json / html reporters by default. allure-playwright is added in Phase 1.2.
-  const reporterArg = `--reporter=${REPORTERS.join(",")}`;
-  args.push(reporterArg);
+  args.push(`--reporter=${REPORTERS.join(",")}`);
 
   if (input.request.headed) {
     args.push("--headed");
   }
-  if (input.request.grep) {
-    args.push("--grep", input.request.grep);
-  }
   for (const projectName of input.request.projectNames ?? []) {
     args.push("--project", projectName);
   }
-  for (const testId of input.request.testIds ?? []) {
-    // Playwright >=1.55 exposes test IDs via --test-list. PoC fallback: rely on grep when IDs are absent.
-    args.push("--grep", `^${escapeRegex(testId)}$`);
+
+  // testIds and grep map onto Playwright's --grep, which only honours the last
+  // occurrence. Combine them into a single alternation regex.
+  const grepFragments: string[] = [];
+  if (input.request.grep) {
+    grepFragments.push(input.request.grep);
   }
+  for (const testId of input.request.testIds ?? []) {
+    grepFragments.push(`^${escapeRegex(testId)}$`);
+  }
+  if (grepFragments.length > 0) {
+    args.push("--grep", grepFragments.length === 1 ? grepFragments[0]! : `(${grepFragments.join("|")})`);
+  }
+
   if (input.request.specPath) {
-    const specRel = path.isAbsolute(input.request.specPath)
-      ? path.relative(input.projectRoot, input.request.specPath)
-      : input.request.specPath;
+    const specRel = resolveSpecRelative(input.projectRoot, input.request.specPath);
     args.push(specRel);
   }
 
@@ -54,7 +65,6 @@ export function buildPlaywrightTestCommand(input: PlaywrightCommandInput): {
   const env: Record<string, string> = {
     PLAYWRIGHT_JSON_OUTPUT_NAME: input.jsonOutputPath,
     PLAYWRIGHT_HTML_REPORT: input.htmlOutputDir,
-    // Disable the auto-open behaviour of the HTML reporter on PoC.
     PLAYWRIGHT_HTML_OPEN: "never"
   };
 
@@ -66,4 +76,27 @@ export function buildPlaywrightTestCommand(input: PlaywrightCommandInput): {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Confines `specPath` to the project root. The schema already rejects
+ * leading '-', '..' and absolute paths, but we re-check defensively here
+ * so the runner cannot be reached with a path that escapes the project.
+ */
+function resolveSpecRelative(projectRoot: string, specPath: string): string {
+  if (specPath.startsWith("-")) {
+    throw new PlaywrightCommandBuildError(
+      "specPath must not start with '-'",
+      "INVALID_SPEC_PATH"
+    );
+  }
+  const absolute = path.resolve(projectRoot, specPath);
+  const relative = path.relative(projectRoot, absolute);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new PlaywrightCommandBuildError(
+      `specPath '${specPath}' escapes the project root`,
+      "INVALID_SPEC_PATH"
+    );
+  }
+  return relative === "" ? "." : relative;
 }

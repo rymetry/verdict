@@ -49,7 +49,7 @@ function FailedTestList({ failedTests }: { failedTests: FailedTest[] }) {
   return (
     <ul className="failureList">
       {failedTests.map((test, index) => (
-        <li key={`${test.testId ?? test.title}-${index}`}>
+        <li key={`${test.testId ?? test.fullTitle ?? test.title}-${index}`}>
           <h3>{test.fullTitle ?? test.title}</h3>
           <p className="muted">
             {test.filePath ?? "unknown"}

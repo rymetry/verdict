@@ -1,7 +1,12 @@
+import * as fs from "node:fs/promises";
 import { Hono } from "hono";
-import { RunRequestSchema, type RunListItem, type RunListResponse } from "@pwqa/shared";
+import {
+  RunRequestSchema,
+  type RunListItem,
+  type RunListResponse
+} from "@pwqa/shared";
 import type { RunManager } from "../playwright/runManager.js";
-import { loadRunsFromDisk } from "../playwright/runManager.js";
+import { combineRuns } from "../playwright/runManager.js";
 import type { ProjectStore } from "../project/store.js";
 
 interface Deps {
@@ -73,7 +78,7 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
       const empty: RunListResponse = { runs: [] };
       return c.json(empty);
     }
-    const runs = await loadRunsFromDisk(current.summary.rootPath);
+    const runs = await combineRuns(runManager, current.summary.rootPath);
     const listed: RunListItem[] = runs.map((run) => ({
       runId: run.runId,
       projectId: run.projectId,
@@ -96,7 +101,7 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
         404
       );
     }
-    const runs = await loadRunsFromDisk(current.summary.rootPath);
+    const runs = await combineRuns(runManager, current.summary.rootPath);
     const run = runs.find((r) => r.runId === runId);
     if (!run) {
       return c.json(
@@ -105,6 +110,69 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
       );
     }
     return c.json(run);
+  });
+
+  router.get("/runs/:runId/artifacts", async (c) => {
+    const runId = c.req.param("runId");
+    const current = projectStore.get();
+    if (!current) {
+      return c.json(
+        { error: { code: "NO_PROJECT", message: "Project is not open." } },
+        404
+      );
+    }
+    const runs = await combineRuns(runManager, current.summary.rootPath);
+    const run = runs.find((r) => r.runId === runId);
+    if (!run) {
+      return c.json(
+        { error: { code: "NOT_FOUND", message: `Run ${runId} not found.` } },
+        404
+      );
+    }
+    return c.json({
+      runId,
+      paths: run.paths,
+      hasPlaywrightJson: await pathExists(run.paths.playwrightJson),
+      hasPlaywrightHtml: await pathExists(run.paths.playwrightHtml),
+      hasStdoutLog: await pathExists(run.paths.stdoutLog),
+      hasStderrLog: await pathExists(run.paths.stderrLog)
+    });
+  });
+
+  router.get("/runs/:runId/report-summary", async (c) => {
+    const runId = c.req.param("runId");
+    const current = projectStore.get();
+    if (!current) {
+      return c.json(
+        { error: { code: "NO_PROJECT", message: "Project is not open." } },
+        404
+      );
+    }
+    const runs = await combineRuns(runManager, current.summary.rootPath);
+    const run = runs.find((r) => r.runId === runId);
+    if (!run) {
+      return c.json(
+        { error: { code: "NOT_FOUND", message: `Run ${runId} not found.` } },
+        404
+      );
+    }
+    if (!run.summary) {
+      return c.json(
+        {
+          error: {
+            code: "NO_SUMMARY",
+            message: "Playwright JSON summary is not yet available for this run."
+          }
+        },
+        409
+      );
+    }
+    return c.json({
+      runId,
+      summary: run.summary,
+      status: run.status,
+      completedAt: run.completedAt
+    });
   });
 
   router.post("/runs/:runId/cancel", (c) => {
@@ -125,4 +193,13 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
   });
 
   return router;
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -111,35 +111,61 @@ export function createRunManager({ runner, bus }: RunManagerDeps): RunManager {
     const stdoutFile = await fs.open(paths.stdoutLog, "w");
     const stderrFile = await fs.open(paths.stderrLog, "w");
 
-    bus.publish({
-      type: "run.started",
-      runId,
-      payload: { command, cwd: params.projectRoot, startedAt: metadata.startedAt }
-    });
-    metadata.status = "running";
-    await fs.writeFile(paths.metadataJson, JSON.stringify(metadata, null, 2), "utf8");
+    let handle;
+    try {
+      bus.publish({
+        type: "run.started",
+        runId,
+        payload: { command, cwd: params.projectRoot, startedAt: metadata.startedAt }
+      });
+      metadata.status = "running";
+      await fs.writeFile(paths.metadataJson, JSON.stringify(metadata, null, 2), "utf8");
 
-    const handle = runner.run(
-      {
-        executable: command.executable,
-        args: command.args,
-        cwd: params.projectRoot,
-        env: { ...process.env, ...env },
-        label: `run:${runId}`
-      },
-      {
-        onStdout: (chunk) => {
-          const safe = redact(chunk);
-          stdoutFile.write(safe).catch(() => undefined);
-          bus.publish({ type: "run.stdout", runId, payload: { chunk: safe } });
+      handle = runner.run(
+        {
+          executable: command.executable,
+          args: command.args,
+          cwd: params.projectRoot,
+          env: { ...process.env, ...env },
+          label: `run:${runId}`
         },
-        onStderr: (chunk) => {
-          const safe = redact(chunk);
-          stderrFile.write(safe).catch(() => undefined);
-          bus.publish({ type: "run.stderr", runId, payload: { chunk: safe } });
+        {
+          onStdout: (chunk) => {
+            const safe = redact(chunk);
+            stdoutFile.write(safe).catch(() => undefined);
+            bus.publish({ type: "run.stdout", runId, payload: { chunk: safe } });
+          },
+          onStderr: (chunk) => {
+            const safe = redact(chunk);
+            stderrFile.write(safe).catch(() => undefined);
+            bus.publish({ type: "run.stderr", runId, payload: { chunk: safe } });
+          }
         }
-      }
-    );
+      );
+    } catch (error) {
+      // Ensure file handles do not leak when the runner rejects synchronously
+      // (e.g. CommandPolicyError on a forbidden executable).
+      await stdoutFile.close().catch(() => undefined);
+      await stderrFile.close().catch(() => undefined);
+      const completedAt = new Date();
+      const completed: RunMetadata = {
+        ...metadata,
+        status: "error",
+        completedAt: completedAt.toISOString(),
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+        warnings: [
+          ...metadata.warnings,
+          `Runner rejected the command: ${error instanceof Error ? error.message : String(error)}`
+        ]
+      };
+      await fs.writeFile(paths.metadataJson, JSON.stringify(completed, null, 2), "utf8");
+      bus.publish({
+        type: "run.error",
+        runId,
+        payload: { message: error instanceof Error ? error.message : String(error) }
+      });
+      throw error;
+    }
 
     const finished: Promise<RunMetadata> = (async () => {
       let summary: TestResultSummary | undefined;
@@ -262,17 +288,36 @@ export function createRunManager({ runner, bus }: RunManagerDeps): RunManager {
  */
 export async function loadRunsFromDisk(projectRoot: string): Promise<RunMetadata[]> {
   const wb = workbenchPaths(projectRoot);
-  let entries: string[] = [];
+  let entries: import("node:fs").Dirent[] = [];
   try {
-    entries = await fs.readdir(wb.runsDir);
+    entries = await fs.readdir(wb.runsDir, { withFileTypes: true });
   } catch {
     return [];
   }
   const runs: RunMetadata[] = [];
   for (const entry of entries) {
-    const metadataPath = path.join(wb.runsDir, entry, "metadata.json");
+    if (!entry.isDirectory()) continue;
+    const metadataPath = path.join(wb.runsDir, entry.name, "metadata.json");
+    const stat = await fs.lstat(metadataPath).catch(() => null);
+    if (!stat || !stat.isFile()) continue;
     const metadata = await safeReadJson<RunMetadata>(metadataPath);
     if (metadata) runs.push(metadata);
   }
   return runs.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
+}
+
+/**
+ * Returns the freshest view of every run for a project: in-memory active runs
+ * override disk metadata when the same runId appears in both.
+ */
+export async function combineRuns(
+  manager: RunManager,
+  projectRoot: string
+): Promise<RunMetadata[]> {
+  const fromDisk = await loadRunsFromDisk(projectRoot);
+  const fromMemory = await manager.listRuns();
+  const byId = new Map<string, RunMetadata>();
+  for (const run of fromDisk) byId.set(run.runId, run);
+  for (const run of fromMemory) byId.set(run.runId, run); // in-memory wins
+  return Array.from(byId.values()).sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
 }

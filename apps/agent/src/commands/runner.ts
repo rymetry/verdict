@@ -8,6 +8,7 @@ import {
   resolveExecutableName,
   type CommandPolicy
 } from "./policy.js";
+import { redact } from "./redact.js";
 
 export interface CommandSpec {
   executable: string;
@@ -127,7 +128,9 @@ export function createNodeCommandRunner({
       audit?.({
         startedAt: startedAt.toISOString(),
         executable: spec.executable,
-        args: [...spec.args],
+        // Defense in depth: an arg might contain a credential-bearing grep
+        // value or path, so redact before logging.
+        args: spec.args.map((arg) => redact(arg)),
         cwd: spec.cwd,
         label: spec.label
       });
@@ -163,17 +166,36 @@ export function createNodeCommandRunner({
       let cancelled = false;
       let timedOut = false;
       let timeoutHandle: NodeJS.Timeout | undefined;
+      let killEscalation: NodeJS.Timeout | undefined;
       const timeoutMs = spec.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+      function escalateKill(): void {
+        // SIGTERM may be ignored by Playwright's browser children. Escalate to
+        // SIGKILL after a short grace period so cancel/timeout cannot leak runs.
+        if (killEscalation) return;
+        killEscalation = setTimeout(() => {
+          if (!child.killed) {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              // child has already exited
+            }
+          }
+        }, 5_000);
+      }
+
       if (timeoutMs > 0) {
         timeoutHandle = setTimeout(() => {
           timedOut = true;
           child.kill("SIGTERM");
+          escalateKill();
         }, timeoutMs);
       }
 
       const result = new Promise<CommandResult>((resolve, reject) => {
         child.on("error", (error: NodeJS.ErrnoException) => {
           if (timeoutHandle) clearTimeout(timeoutHandle);
+          if (killEscalation) clearTimeout(killEscalation);
           // ENOENT / EACCES surface as runner errors rather than mystery exit codes.
           reject(
             new Error(
@@ -183,6 +205,7 @@ export function createNodeCommandRunner({
         });
         child.on("close", (exitCode, signal) => {
           if (timeoutHandle) clearTimeout(timeoutHandle);
+          if (killEscalation) clearTimeout(killEscalation);
           const endedAt = new Date();
           resolve({
             exitCode,
@@ -209,6 +232,7 @@ export function createNodeCommandRunner({
             handlers.onStderr(`\n[workbench] cancelled: ${reason}\n`);
           }
           child.kill("SIGTERM");
+          escalateKill();
         }
       };
     }

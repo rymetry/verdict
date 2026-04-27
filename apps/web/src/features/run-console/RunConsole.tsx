@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  type RunCompletedPayload,
-  type RunStdStreamPayload,
+  RunCompletedPayloadSchema,
+  RunStdStreamPayloadSchema,
   type WorkbenchEvent
 } from "@pwqa/shared";
 import type { EventStream } from "../../api/events";
@@ -92,33 +92,36 @@ function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunConsoleSt
     case "run.started":
       return { ...state, status: "running" };
     case "run.stdout": {
-      const payload = event.payload as RunStdStreamPayload;
-      return { ...state, stdout: trim(state.stdout, payload.chunk) };
+      const parsed = RunStdStreamPayloadSchema.safeParse(event.payload);
+      if (!parsed.success) return state;
+      return { ...state, stdout: trim(state.stdout, parsed.data.chunk) };
     }
     case "run.stderr": {
-      const payload = event.payload as RunStdStreamPayload;
-      return { ...state, stderr: trim(state.stderr, payload.chunk) };
+      const parsed = RunStdStreamPayloadSchema.safeParse(event.payload);
+      if (!parsed.success) return state;
+      return { ...state, stderr: trim(state.stderr, parsed.data.chunk) };
     }
     case "run.completed":
     case "run.cancelled":
     case "run.error": {
-      const payload = event.payload as Partial<RunCompletedPayload>;
+      const parsed = RunCompletedPayloadSchema.safeParse(event.payload);
+      const payload = parsed.success ? parsed.data : null;
       const status: RunConsoleState["status"] =
         event.type === "run.cancelled"
           ? "cancelled"
           : event.type === "run.error"
             ? "error"
-            : payload.status === "passed"
+            : payload?.status === "passed"
               ? "passed"
-              : payload.status === "failed"
+              : payload?.status === "failed"
                 ? "failed"
                 : "error";
       return {
         ...state,
         status,
-        exitCode: payload.exitCode ?? null,
-        durationMs: payload.durationMs ?? state.durationMs,
-        summary: payload.summary
+        exitCode: payload?.exitCode ?? null,
+        durationMs: payload?.durationMs ?? state.durationMs,
+        summary: payload?.summary
           ? {
               total: payload.summary.total,
               passed: payload.summary.passed,

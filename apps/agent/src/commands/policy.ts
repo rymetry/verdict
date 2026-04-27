@@ -3,8 +3,11 @@ import * as path from "node:path";
 export interface CommandPolicy {
   /**
    * Allowed executable names. Each is matched on the command's basename
-   * after path resolution. `npx`, `pnpm`, `yarn`, `bunx`, `playwright`,
-   * `git`, `allure`, `node` are the PoC-allowed executables.
+   * after path resolution. Phase 1 PoC permits the package managers we
+   * actually invoke (npx/pnpm/yarn) plus utility binaries (`node`, `git`,
+   * `allure`, `playwright`). Bun-related binaries are intentionally NOT
+   * allowed by default — the Bun feasibility spike (PLAN.v2 Phase 1.5)
+   * must opt them in explicitly via a custom policy.
    */
   allowedExecutables: ReadonlyArray<string>;
   /**
@@ -26,13 +29,38 @@ export const DEFAULT_ALLOWED_EXECUTABLES: ReadonlyArray<string> = [
   "npx",
   "pnpm",
   "yarn",
-  "bunx",
   "playwright",
   "node",
   "git",
   "allure"
 ];
 
+/**
+ * Default arg allowlist for `npx`: forces a `--no-install` flag plus the
+ * `playwright` package as the first positional. This blocks the
+ * `npx <arbitrary-package>` escape route (PLAN.v2 §14).
+ */
+export const DEFAULT_NPX_ARG_PATTERNS: ReadonlyArray<RegExp> = [
+  /^--no-install$/,
+  /^playwright$/,
+  /^test$/,
+  /^--list$/,
+  /^--reporter=list,json,html$/,
+  /^--reporter=json$/,
+  /^--reporter=list,json,html(,allure-playwright)?$/,
+  /^--headed$/,
+  /^--grep$/,
+  /^--project$/,
+  // Spec / project-name / grep value: relative path or simple identifier.
+  /^[A-Za-z0-9._\-/@]+$/
+];
+
+/**
+ * Env allowlist *intentionally* excludes `NODE_OPTIONS`. NODE_OPTIONS can
+ * inject arbitrary code via `--require` / `--import` / `--loader` and would
+ * undermine the executable allowlist. If a downstream user needs it, they
+ * must opt in via a custom policy.
+ */
 export const DEFAULT_ENV_ALLOWLIST: ReadonlyArray<string> = [
   "PATH",
   "HOME",
@@ -41,11 +69,11 @@ export const DEFAULT_ENV_ALLOWLIST: ReadonlyArray<string> = [
   "LC_ALL",
   "TZ",
   "PWD",
-  "NODE_OPTIONS",
   "CI",
   // Playwright runtime knobs (PLAN.v2 §28: secret allowlist; do not pass arbitrary env).
   "PLAYWRIGHT_BROWSERS_PATH",
   "PLAYWRIGHT_HTML_REPORT",
+  "PLAYWRIGHT_HTML_OPEN",
   "PLAYWRIGHT_JSON_OUTPUT_NAME",
   "PLAYWRIGHT_DISABLE_SELF_UPDATE",
   "DEBUG",

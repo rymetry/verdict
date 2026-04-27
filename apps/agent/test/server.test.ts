@@ -116,4 +116,73 @@ describe("HTTP API surface", () => {
     const body = await response.json();
     expect(body.error.code).toBe("INVALID_INPUT");
   });
+
+  it("rejects /runs RunRequest with traversal in specPath", async () => {
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir]
+      }
+    });
+    await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: workdir })
+    });
+    const response = await app.request("/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: workdir,
+        specPath: "../../etc/passwd"
+      })
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects /runs RunRequest with grep starting with -", async () => {
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir]
+      }
+    });
+    await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: workdir })
+    });
+    const response = await app.request("/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: workdir,
+        grep: "--inject-flag"
+      })
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("only echoes Access-Control-Allow-Origin for allowed origins", async () => {
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir]
+      }
+    });
+    const allowed = await app.request("/health", {
+      headers: { Origin: "http://127.0.0.1:5173" }
+    });
+    expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("http://127.0.0.1:5173");
+    const denied = await app.request("/health", {
+      headers: { Origin: "http://attacker.example" }
+    });
+    expect(denied.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
 });
