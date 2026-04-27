@@ -65,7 +65,13 @@ export function PersonaToggle({
 }: PersonaToggleProps): React.ReactElement {
   const navigate = useNavigate();
   function dispatch(next: PersonaView): void {
-    void navigate({ to: PERSONA_PATH[next] });
+    // navigate() は Promise を返す。`void` で握りつぶすと beforeLoad の throw / 履歴アダプタ層の
+    // 失敗が production で完全 silent (window.onerror 経由) になり、CLAUDE.md の
+    // `Never silently swallow errors` に反する。明示的に .catch して console.error する。
+    navigate({ to: PERSONA_PATH[next] }).catch((error) => {
+      // eslint-disable-next-line no-console -- 本番でも navigate 失敗を可視化
+      console.error("[PersonaToggle] navigate failed", error);
+    });
   }
 
   return (

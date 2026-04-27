@@ -327,4 +327,71 @@ describe("`r` キーボードショートカット", () => {
 
     expect(vi.mocked(startRun)).not.toHaveBeenCalled();
   });
+
+  it("`R` (大文字) でも発火する (Shift 経由 / CapsLock 想定)", async () => {
+    useRunStore.setState({
+      activeRunId: null,
+      lastRequest: makeRunRequest({ projectId: "p-uppercase" })
+    });
+    vi.mocked(startRun).mockResolvedValue({
+      runId: "from-uppercase",
+      metadata: makeRunMetadata("from-uppercase", { status: "queued" })
+    });
+    renderWithRouter();
+    await screen.findByRole("button", { name: /再実行/ });
+
+    fireEvent.keyDown(window, { key: "R" });
+
+    await waitFor(() => {
+      expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("active run が running 状態のとき `r` を押しても rerun は走らない (multi-trigger 防止)", async () => {
+    useRunStore.setState({
+      activeRunId: "run-running",
+      lastRequest: makeRunRequest({ projectId: "p-running" })
+    });
+    // active run は running 中。RerunButton のラベルは "実行中…" に切替わる。
+    // accessible name は visible text から導出されるため、`/実行中/` で wait する。
+    vi.mocked(fetchRun).mockResolvedValue(makeRunMetadata("run-running", { status: "running" }));
+    renderWithRouter();
+
+    await waitFor(() => {
+      const btn = screen.getByRole("button", { name: /実行中/ });
+      expect(btn).toBeDisabled();
+    });
+
+    fireEvent.keyDown(window, { key: "r" });
+    fireEvent.keyDown(window, { key: "r" });
+
+    // canRerun=false なので mutate は呼ばれない (= startRun 呼出なし)
+    expect(vi.mocked(startRun)).not.toHaveBeenCalled();
+  });
+
+  it("rerun mutation が pending 中に `r` 連打しても 1 回しか発火しない (closure race 防止)", async () => {
+    useRunStore.setState({
+      activeRunId: null,
+      lastRequest: makeRunRequest({ projectId: "p-pending" })
+    });
+    // never-resolve で永続 pending を作る
+    vi.mocked(startRun).mockReturnValue(new Promise<never>(() => {}));
+    renderWithRouter();
+    await screen.findByRole("button", { name: /再実行/ });
+
+    // 1 回目: 発火する
+    fireEvent.keyDown(window, { key: "r" });
+    await waitFor(() => {
+      expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
+    });
+
+    // 2 回目: isPending=true で canRerun=false → 発火しない
+    fireEvent.keyDown(window, { key: "r" });
+    fireEvent.keyDown(window, { key: "r" });
+
+    // 短い waitFor で pending 状態が反映されたことを確認 (race を見落とさないため)
+    await waitFor(() => {
+      expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
+    });
+  });
 });

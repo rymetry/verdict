@@ -12,14 +12,13 @@
 // /dev /qmo に居る間は接続を維持する必要がない (再 mount で再接続する)。
 import * as React from "react";
 import { createRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import type { ProjectSummary, RunRequest } from "@pwqa/shared";
 
-import { fetchCurrentProject } from "@/api/client";
 import { FailureReview } from "@/features/failure-review/FailureReview";
 import { ProjectPicker } from "@/features/project-picker/ProjectPicker";
 import { RunConsole } from "@/features/run-console/RunConsole";
 import { TestInventoryPanel } from "@/features/test-inventory/TestInventoryPanel";
+import { useCurrentProjectQuery } from "@/hooks/use-current-project-query";
 import { useStartRunMutation } from "@/hooks/use-start-run-mutation";
 import { useWorkbenchEvents } from "@/hooks/use-workbench-events";
 import { formatMutationError } from "@/lib/mutation-error";
@@ -30,10 +29,7 @@ import { rootRoute } from "./__root";
 function QaView(): React.ReactElement {
   const activeRunId = useRunStore((s) => s.activeRunId);
   const eventStream = useWorkbenchEvents();
-  const currentProjectQuery = useQuery({
-    queryKey: ["projects", "current"],
-    queryFn: fetchCurrentProject
-  });
+  const currentProjectQuery = useCurrentProjectQuery();
   const project = currentProjectQuery.data ?? null;
 
   return (

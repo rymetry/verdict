@@ -17,8 +17,9 @@ import * as React from "react";
 import { createRootRoute, Outlet, useLocation } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { fetchCurrentProject, fetchHealth, fetchRun } from "@/api/client";
+import { fetchHealth, fetchRun } from "@/api/client";
 import { ShellAlert, StatusBar, TopBar } from "@/components/shell";
+import { useCurrentProjectQuery } from "@/hooks/use-current-project-query";
 import { useStartRunMutation } from "@/hooks/use-start-run-mutation";
 import { deriveAgentState, deriveProjectDisplayName } from "@/lib/shell-derive";
 import { formatMutationError } from "@/lib/mutation-error";
@@ -72,7 +73,15 @@ function RootLayout(): React.ReactElement {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
 
-  const persona = pathnameToPersona(location.pathname) ?? "qa";
+  // PERSONA segment が pathname から取れない場合は QA を見せる (画面の「無 persona 状態」を作らない)。
+  // 通常 indexRoute の redirect が `/` を捕捉するため、ここに来るのは catch-all 等で
+  // 想定外パスが __root に流れた時のみ。silent fallback はデバッグ性を損ねるため warning する。
+  const personaFromPath = pathnameToPersona(location.pathname);
+  if (personaFromPath === null && location.pathname !== "/") {
+    // eslint-disable-next-line no-console -- 想定外パスは本番でも痕跡を残す (route 設定の漏れ検知)
+    console.warn(`[RootLayout] pathname '${location.pathname}' not mapped to a persona — falling back to qa`);
+  }
+  const persona = personaFromPath ?? "qa";
 
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -80,20 +89,23 @@ function RootLayout(): React.ReactElement {
     refetchInterval: 5_000
   });
 
-  const currentProjectQuery = useQuery({
-    queryKey: ["projects", "current"],
-    queryFn: fetchCurrentProject
-  });
+  const currentProjectQuery = useCurrentProjectQuery();
 
   // active run のメタ (status / 完了時刻 等) を取得し、TopBar の status badge に反映する。
   // - queryFn は activeRunId が string であることを enabled でゲートしてから呼ぶ。
   //   TanStack v5 内部で enabled は信頼できるが、defense-in-depth として queryFn 内でも
   //   type guard を入れ、万一 enabled が破られた場合は silent return ではなく throw して可視化する。
+  //   throw は React Query の error state へ流れて UI banner で見えるが、production 環境の
+  //   診断のためには console.error も別経路で残す (silent failure 防衛 + invariant 違反の追跡)。
   // - refetchInterval は run 中 (running / queued) は 2 秒、それ以外は止める。
   const activeRunQuery = useQuery({
     queryKey: ["runs", activeRunId],
     queryFn: () => {
       if (typeof activeRunId !== "string" || activeRunId.length === 0) {
+        // invariant: enabled=false で queryFn は呼ばれない契約。ここに来たら React Query
+        // 内部の enabled 評価がズレた / 値域違反のいずれか。本番でも痕跡を残す。
+        // eslint-disable-next-line no-console -- invariant 違反は production でも検知したい
+        console.error("[RootLayout] activeRunQuery invariant: queryFn called with invalid activeRunId");
         throw new Error("activeRunQuery: activeRunId が不正なまま queryFn が呼ばれた");
       }
       return fetchRun(activeRunId);
@@ -149,7 +161,13 @@ function RootLayout(): React.ReactElement {
   const triggerRerunRef = React.useRef<() => void>(() => {});
   React.useEffect(() => {
     triggerRerunRef.current = () => {
-      if (!canRerun || lastRequest === null) {
+      // canRerun=false は通常のガード (実行中 / lastRequest=null) で silent OK。
+      // しかし canRerun=true && lastRequest=null は invariant 違反 (`canRerun` の組み立てが壊れている)。
+      // ボタン経路 (handleRerun 下方) と同じ警告を出して、キーボード経路と挙動を対称にする。
+      if (!canRerun) return;
+      if (lastRequest === null) {
+        // eslint-disable-next-line no-console -- invariant 違反は production でも検知したい
+        console.error("[RootLayout] keyboard rerun: lastRequest=null with canRerun=true");
         return;
       }
       rerunMutation.mutate(lastRequest);
@@ -181,11 +199,20 @@ function RootLayout(): React.ReactElement {
     rerunMutation.mutate(lastRequest);
   }
 
-  function dismissActiveRunError(): void {
+  async function dismissActiveRunError(): Promise<void> {
     const dismissedId = activeRunId;
     if (dismissedId) {
-      // in-flight refetch があれば cancel してから cache を消す (race 対策)
-      void queryClient.cancelQueries({ queryKey: ["runs", dismissedId], exact: true });
+      // in-flight refetch があれば **完了を await** してから cache を消す (race 対策)。
+      // ここを `void cancelQueries(...)` にしていた頃は cancel が完了する前に removeQueries が走り、
+      // 直後に解決した queryFn が cache を再 populate して banner が再表示される race を起こしうる。
+      // .catch でログを出すのは silent failure 防衛: cancel が rejection で終わっても dismiss 経路は
+      // 続行 (clearActive + removeQueries は副作用が少ない) する。
+      try {
+        await queryClient.cancelQueries({ queryKey: ["runs", dismissedId], exact: true });
+      } catch (error) {
+        // eslint-disable-next-line no-console -- cancel rejection は本番でも痕跡を残す
+        console.error("[RootLayout] cancelQueries failed during dismiss", error);
+      }
     }
     clearActiveRun();
     if (dismissedId) {

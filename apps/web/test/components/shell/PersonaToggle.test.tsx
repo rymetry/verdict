@@ -59,14 +59,35 @@ describe("PersonaToggle", () => {
     }
   });
 
-  it("tab クリックで navigate が走り URL pathname が更新される", async () => {
-    // ユニットテストでは「navigate を呼び出す」契約のみ検証する。
-    // 連続遷移時の active 同期 / 戻る挙動は test/routes/router.test.tsx (full routeTree) で検証。
-    const user = userEvent.setup();
-    const { router } = renderToggle("qa");
+  // PERSONA_PATH の typo / 不整合を検出するため、各 tab → 期待 path をパラメータ化する。
+  // ユニットテストでは「navigate を呼び出す」契約のみ検証する。
+  // 連続遷移時の active 同期 / 戻る挙動は test/routes/router.test.tsx (full routeTree) で検証。
+  it.each([
+    { initial: "qa" as const, click: "Developer", expected: "/dev" },
+    { initial: "qa" as const, click: "Insights", expected: "/qmo" },
+    { initial: "dev" as const, click: "QA", expected: "/qa" },
+    { initial: "dev" as const, click: "Insights", expected: "/qmo" },
+    { initial: "qmo" as const, click: "QA", expected: "/qa" },
+    { initial: "qmo" as const, click: "Developer", expected: "/dev" }
+  ])(
+    "$initial → $click click で URL は $expected に更新される",
+    async ({ initial, click, expected }) => {
+      const user = userEvent.setup();
+      const { router } = renderToggle(initial);
+      await user.click(await screen.findByRole("tab", { name: click }));
+      expect(router.state.location.pathname).toBe(expected);
+    }
+  );
 
+  it("通常クリック動線では console.error がスパイされない (invariant 違反検知が誤発火しない)", async () => {
+    // dispatchPersonaSafely の guard 経路は値域内で console.error を出さない契約。
+    // 実 DOM 経由の click でも誤発火しないことをスパイで pin する (regression 検知)。
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const user = userEvent.setup();
+    renderToggle("qa");
     await user.click(await screen.findByRole("tab", { name: "Developer" }));
-    expect(router.state.location.pathname).toBe("/dev");
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });
 

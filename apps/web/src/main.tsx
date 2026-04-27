@@ -64,10 +64,11 @@ function isFoundationPreview(): boolean {
   try {
     return new URLSearchParams(window.location.search).get("foundation") === "1";
   } catch (error) {
-    if (typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV)) {
-      // eslint-disable-next-line no-console -- 開発時の診断目的に限定
-      console.warn("[main] isFoundationPreview: URLSearchParams 解析失敗", error);
-    }
+    // location.search 改竄 / 不正 URL 等で URLSearchParams が throw する稀な経路。
+    // 通常 App にフォールバックするのが正しい挙動だが、本番でも痕跡を残す
+    // (vite.config.ts の console drop 防衛と組み合わせて、production でも観測可能にする方針)。
+    // eslint-disable-next-line no-console -- 本番でも稀な location 改竄経路を可視化
+    console.error("[main] isFoundationPreview: URLSearchParams 解析失敗", error);
     return false;
   }
 }
