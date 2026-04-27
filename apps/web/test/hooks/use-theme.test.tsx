@@ -67,6 +67,14 @@ describe("useTheme()", () => {
     expect(result.current.theme).toBe("auto");
   });
 
+  it("localStorage が空のとき defaultTheme で初期化される", () => {
+    function customWrapper({ children }: { children: React.ReactNode }) {
+      return <ThemeProvider defaultTheme="dark">{children}</ThemeProvider>;
+    }
+    const { result } = renderHook(() => useTheme(), { wrapper: customWrapper });
+    expect(result.current.theme).toBe("dark");
+  });
+
   it("dark 選択時に <html> へ .dark クラスと data-theme=dark が付く", () => {
     const { result } = renderHook(() => useTheme(), { wrapper });
     act(() => result.current.setTheme("dark"));

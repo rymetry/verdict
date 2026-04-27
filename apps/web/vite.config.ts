@@ -13,6 +13,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // /api と /ws は Hono Local Agent (apps/agent) のローカル既定ポート 4317 へ転送する。
+    // Agent 未起動時は React Query 側で "Agent unreachable" 表示にフォールバックする
+    // (UI を白画面化させない silent-failure 対策)。
     proxy: {
       "/api": {
         target: "http://127.0.0.1:4317",

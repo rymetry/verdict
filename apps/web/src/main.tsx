@@ -33,8 +33,8 @@ import { FoundationPreview } from "./components/foundation/FoundationPreview";
 import { ThemeProvider } from "./hooks/use-theme";
 
 import "./styles/globals.css";
-// 既存 Phase 1 機能の暫定スタイル。δ (Issue #11) で QA View が Tailwind 化される
-// タイミングで削除する。それまでは既存 Phase 1 features の見た目を維持する目的。
+// TODO(issue-#11): δ で QA View を Tailwind 化したタイミングで削除する。
+// それまでは既存 Phase 1 features の見た目を維持する目的の暫定スタイル。
 import "./styles.css";
 
 const queryClient = new QueryClient({

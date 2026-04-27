@@ -34,4 +34,18 @@ describe("<ToggleGroup />", () => {
       "off"
     );
   });
+
+  it("type=multiple では複数選択時に配列で値が伝わる", async () => {
+    const onValueChange = vi.fn();
+    render(
+      <ToggleGroup type="multiple" onValueChange={onValueChange} aria-label="filters">
+        <ToggleGroupItem value="pass">pass</ToggleGroupItem>
+        <ToggleGroupItem value="fail">fail</ToggleGroupItem>
+      </ToggleGroup>
+    );
+    await userEvent.click(screen.getByRole("button", { name: "pass" }));
+    expect(onValueChange).toHaveBeenLastCalledWith(["pass"]);
+    await userEvent.click(screen.getByRole("button", { name: "fail" }));
+    expect(onValueChange).toHaveBeenLastCalledWith(["pass", "fail"]);
+  });
 });

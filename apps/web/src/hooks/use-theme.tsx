@@ -89,7 +89,11 @@ function applyDocumentTheme(resolved: ResolvedTheme, pref: ThemePreference): voi
 
 interface ThemeProviderProps {
   children: React.ReactNode;
-  /** SSR や非ブラウザ環境向けの初期値 */
+  /**
+   * SSR や非ブラウザ環境向けの初期値。
+   * **初期マウント時のみ参照** され、マウント後の再レンダリングでは無視される。
+   * 動的にデフォルトを切替えたい場合は `setTheme()` を経由すること。
+   */
   defaultTheme?: ThemePreference;
 }
 

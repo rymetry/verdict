@@ -195,6 +195,8 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
+  /* テキスト選択色: ブランドアクセントへ寄せて light/dark 横断で読み取りコントラストを確保。
+     ブラウザデフォルト (青系) を意図的に上書きしている。 */
   ::selection {
     background-color: var(--accent);
     color: var(--accent-ink);
