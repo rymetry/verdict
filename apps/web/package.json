@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@pwqa/shared": "workspace:*",
+    "@tanstack/react-query": "^5.92.5",
     "@vitejs/plugin-react": "^5.1.1",
     "vite": "^7.2.4",
     "react": "^19.2.1",

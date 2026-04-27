@@ -1,23 +1,40 @@
-# Playwright QA Workbench
+# Playwright Workbench
 
-Local-first control plane for existing Playwright projects.
+Local-first control plane for existing Playwright projects. The Workbench treats
+each Playwright project as the source of truth and adds a GUI layer that runs
+tests through the official CLI, captures stdout/stderr/JSON results, and (in
+later phases) integrates Allure Report 3, AI failure analysis, and QMO release
+summaries.
 
-The Workbench keeps Playwright code and Git as the source of truth. It starts as a pnpm monorepo with a Vite React GUI, a Node.js Local Agent, and shared zod schemas.
+The current slice implements **Phase 1** of `PLAN.v2.md`:
 
-## Current Slice
+- `apps/web` — Vite + React 19 GUI with TanStack Query and a native WebSocket
+  console.
+- `apps/agent` — Local Agent built on Hono + `@hono/node-server` +
+  `@hono/node-ws`, exposing the HTTP API and `/ws` channel.
+- `packages/shared` — Zod schemas and TypeScript types shared between the GUI
+  and the Agent.
 
-This repository currently contains the Phase 1 foundation:
+Implemented Phase 1 capabilities:
 
-- `apps/web`: Vite + React shell.
-- `apps/agent`: Fastify Local Agent with `GET /health`.
-- `packages/shared`: shared zod schemas and TypeScript types.
-- pnpm workspace and TypeScript project setup.
+- Project root scan with realpath confinement and an `--allowed-roots` policy.
+- `PackageManagerDetector` for npm / pnpm / yarn (Phase 1 targets) plus
+  experimental gating for Bun (Phase 1.5). Ambiguous lockfiles or a missing
+  `@playwright/test` block test execution.
+- `NodeCommandRunner` built on `node:child_process.spawn` with no shell, an
+  executable allowlist, env allowlist, secret redaction, timeout, and
+  cancellation.
+- Test inventory via `playwright test --list --reporter=json`.
+- Run pipeline (`POST /runs`) that streams stdout/stderr through `/ws`, saves
+  Playwright JSON / HTML / logs under `.playwright-workbench/runs/<runId>/`,
+  and surfaces a `failedTests` array for the failure-review panel.
 
-Project scanning, package-manager detection, Playwright execution, WebSocket run streaming, and Allure Report 3 integration are the next vertical slices.
+Allure Report 3 (Phase 1.2) and the Bun feasibility spike (Phase 1.5) are not
+yet implemented.
 
 ## Requirements
 
-- Node.js 24 is currently used in local verification.
+- Node.js ≥ 22 (Node 24 is used in local verification).
 - pnpm 10.
 
 ## Setup
@@ -26,39 +43,55 @@ Project scanning, package-manager detection, Playwright execution, WebSocket run
 pnpm install
 pnpm typecheck
 pnpm build
+pnpm test
 ```
 
-## Run Locally
-
-Start the Local Agent:
+## Run locally
 
 ```bash
+# Terminal A — Local Agent (loopback only by default)
 pnpm dev:agent
-```
 
-Check the Agent:
-
-```bash
-curl -sL http://127.0.0.1:4317/health
-```
-
-Start the web app:
-
-```bash
+# Terminal B — GUI (Vite proxies /api and /ws to the Agent)
 pnpm dev:web
 ```
 
-Then open `http://127.0.0.1:5173`.
+Open <http://127.0.0.1:5173>, paste an absolute path to a Playwright project,
+and click **Open**. The Agent enforces `realpath` confinement and only opens
+roots that match either the CLI flag or the `WORKBENCH_ALLOWED_ROOTS` env var
+(colon-separated list). Without an allowed-roots list the Agent accepts any
+locally accessible root the user explicitly chooses.
+
+## CLI options
+
+The Agent accepts the same flags the future `npx playwright-workbench` entry
+point will expose:
+
+```bash
+node apps/agent/dist/server.js \
+  --project /absolute/path/to/playwright-project \
+  --port 4317
+```
+
+Environment variables:
+
+| Variable | Purpose |
+|----------|---------|
+| `PORT` | HTTP port (default `4317`) |
+| `HOST` | Bind host (default `127.0.0.1`) |
+| `LOG_LEVEL` | pino log level (default `info`) |
+| `WORKBENCH_PROJECT_ROOT` | Initial project root |
+| `WORKBENCH_ALLOWED_ROOTS` | `:`-separated allowlist of project roots |
 
 ## Architecture
 
 ```text
 React GUI
   -> HTTP / WebSocket
-Local Node Agent
-  -> file system / process
+Local Node Agent (Hono)
+  -> file system / process (NodeCommandRunner, no shell)
 User Playwright Project
-  -> Playwright JSON / HTML / Allure Report 3 / artifacts
+  -> Playwright JSON / HTML / artifacts (Allure in Phase 1.2)
 ```
 
-The detailed product and implementation plan lives in `PLAN.md`.
+`PLAN.v2.md` is the authoritative product and implementation plan.

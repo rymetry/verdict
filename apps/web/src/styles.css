@@ -190,6 +190,159 @@ dd {
   font-weight: 700;
 }
 
+.grid-2col {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pickerRow {
+  display: flex;
+  gap: 8px;
+}
+
+input[type="text"] {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid rgba(25, 32, 38, 0.16);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+}
+
+button {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #1b1f24;
+  background: #1b1f24;
+  color: #f4f1ea;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  background: transparent;
+  color: #1b1f24;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(25, 32, 38, 0.08);
+}
+
+.badgeReady {
+  background: #c8e6c9;
+  color: #1b5e20;
+}
+
+.badgeBlocked {
+  background: #ffd6cc;
+  color: #8a1f00;
+}
+
+.errorBlock {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #ffd6cc;
+  color: #8a1f00;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.console {
+  margin-top: 12px;
+  background: #0f1419;
+  color: #e6e1cf;
+  padding: 12px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.stderr {
+  margin-top: 10px;
+}
+
+.summary {
+  margin-top: 8px;
+  font-weight: 700;
+}
+
+.specList {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.specHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.testList {
+  margin: 6px 0 0 0;
+  padding: 0 0 0 16px;
+  list-style: square;
+  font-size: 13px;
+}
+
+.tags {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #4a5057;
+}
+
+.failureList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.failureMessage,
+.stack {
+  margin-top: 8px;
+  background: #f7e9e4;
+  color: #4a1100;
+  padding: 8px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.attachments {
+  margin-top: 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
 @media (max-width: 820px) {
   .shell {
     padding: 18px;
@@ -200,7 +353,8 @@ dd {
     flex-direction: column;
   }
 
-  .grid {
+  .grid,
+  .grid-2col {
     grid-template-columns: 1fr;
   }
 

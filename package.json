@@ -1,5 +1,5 @@
 {
-  "name": "playwright-qa-workbench",
+  "name": "playwright-workbench",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,8 @@
     "dev:agent": "pnpm --filter @pwqa/agent dev",
     "dev:web": "pnpm --filter @pwqa/web dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm --filter @pwqa/shared build && pnpm -r typecheck",
+    "test": "pnpm -r test"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
