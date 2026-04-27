@@ -1,14 +1,16 @@
-// アプリ全域で共有する選好状態 (PoC 段階では theme + 派生 systemDark のみ)。
+// アプリ全域で共有する選好状態 (η 時点では theme + 派生 systemDark のみ)。
 // - persona / agent state はビュー router (γ) と一緒に追加する想定で本ストアに足場だけ用意する。
-// - localStorage への永続化は zustand persist middleware ではなく自前で行う:
-//   index.html の同期 FOUC 抑止 bootstrap script が `pwqa-theme` の "flat string" 形式を
-//   読むため、persist middleware が要求する `{ state, version }` ラップ形式と衝突する。
-//   既存のキー形式を維持するために自前 read/write を採用する。
-// - matchMedia 監視と <html> への反映は副作用のため store の外 (theme-effects) で行う。
+// - localStorage 永続化は zustand persist middleware ではなく theme-effects 側の subscribe で行う:
+//   index.html の同期 FOUC bootstrap script が `pwqa-theme` を flat string で読むため、
+//   persist middleware が要求する `{ state, version }` ラップ形式と衝突する。
+//   さらに subscribe ベースにすることで `useAppStore.setState({ theme })` 経路 (HMR や test) でも
+//   永続化が走る invariant が保てる。setTheme 内では state 更新だけを行う。
+// - <html> への反映と matchMedia 監視も副作用のため store の外 (theme-effects.ts) に置く。
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 
-import { readGuarded, writeSafe } from "./safe-storage";
+import { isDev } from "./env";
+import { readGuarded } from "./safe-storage";
 
 export type ThemePreference = "light" | "dark" | "auto";
 export type ResolvedTheme = "light" | "dark";
@@ -33,39 +35,49 @@ export function resolveTheme(theme: ThemePreference, systemDark: boolean): Resol
   return theme;
 }
 
-/** OS のダークモード設定を読む (SSR / matchMedia 未実装 / throw 時は false) */
+function warnSystemDarkFailure(error: unknown): void {
+  if (isDev) {
+    // eslint-disable-next-line no-console -- 開発時の診断目的に限定
+    console.warn("[useAppStore] matchMedia(prefers-color-scheme) failed", error);
+  }
+}
+
+/** OS のダークモード設定を read-once で取得する (subscribe は theme-effects 側) */
 function readSystemDark(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
     return false;
   }
   try {
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
-  } catch {
+  } catch (error) {
     // matchMedia が無効なクエリで throw する古環境を安全に処理
+    warnSystemDarkFailure(error);
     return false;
   }
 }
 
 interface AppStateShape {
-  /** ユーザー選好値 (永続化対象) */
+  /** ユーザー選好値 (永続化対象。永続化は theme-effects の subscribe 経由) */
   theme: ThemePreference;
   /** OS の prefers-color-scheme 状態。auto モードでのみ参照される */
   systemDark: boolean;
 }
 
 interface AppActions {
-  /** 選好を更新し localStorage へ反映する */
+  /** 選好値を更新する。永続化は store 外の subscribe が担う */
   setTheme: (next: ThemePreference) => void;
-  /** matchMedia の change イベントから呼ばれる内部用 setter */
+  /**
+   * `systemDark` を更新する。matchMedia change ハンドラから呼ばれることを想定した
+   * 半内部 setter (Zustand の `setState` 経由でも書き換え可能なため public action として公開)。
+   */
   setSystemDark: (next: boolean) => void;
 }
 
 export type AppStore = AppStateShape & AppActions;
 
 /**
- * 初期化用ファクトリ (テストから呼んで初期 state を再構築できるよう露出)。
- * - localStorage から theme を復元 (不正値は "auto" フォールバック)
- * - matchMedia から systemDark を読む
+ * 初期 state を計算する純粋関数 (毎回 storage / matchMedia を再評価して返す)。
+ * テストでは `setState(...)` の引数として呼んで store を初期状態へ戻すのに使う。
  */
 export function computeInitialAppState(): AppStateShape {
   return {
@@ -74,15 +86,11 @@ export function computeInitialAppState(): AppStateShape {
   };
 }
 
-const isDev = typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
-
 export const useAppStore = create<AppStore>()(
   devtools(
     (set) => ({
       ...computeInitialAppState(),
       setTheme: (next) => {
-        // 永続化に失敗しても state は更新する (UI を白画面にしない)
-        writeSafe(THEME_STORAGE_KEY, next);
         set({ theme: next }, false, "app/setTheme");
       },
       setSystemDark: (next) => {
@@ -93,6 +101,10 @@ export const useAppStore = create<AppStore>()(
   )
 );
 
-/** selector: resolveTheme を state に当てて返す (selector 同一性を保つため呼び出し側で memoize 不要) */
+/**
+ * `resolveTheme` を state に当てて返す selector。
+ * 戻り値は string literal (`"light" | "dark"`) なので Zustand の Object.is 比較で
+ * 自動的に再レンダリング抑止が効く (selector reference の memoize は不要)。
+ */
 export const selectResolvedTheme = (s: AppStore): ResolvedTheme =>
   resolveTheme(s.theme, s.systemDark);

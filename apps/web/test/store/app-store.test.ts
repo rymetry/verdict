@@ -1,5 +1,7 @@
 // useAppStore の純粋関数 / selector / actions を検証する。
 // 初期 state はモジュール import 時に決まるため、各テストで setState で明示リセットする。
+// localStorage 永続化は theme-effects 側の subscribe が担うので、本ファイルでは検証しない
+// (永続化テストは test/store/theme-effects.test.ts 側で扱う)。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,6 +12,7 @@ import {
   THEME_STORAGE_KEY,
   useAppStore
 } from "@/store/app-store";
+import { createMediaQueryListMock } from "../_helpers/match-media";
 
 beforeEach(() => {
   // localStorage 残骸 / 直前テストの state を初期化
@@ -63,18 +66,8 @@ describe("computeInitialAppState()", () => {
   });
 
   it("matchMedia=true なら systemDark=true", () => {
-    vi.spyOn(window, "matchMedia").mockImplementation(
-      (query) =>
-        ({
-          matches: true,
-          media: query,
-          onchange: null,
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          dispatchEvent: vi.fn()
-        }) as unknown as MediaQueryList
+    vi.spyOn(window, "matchMedia").mockImplementation((query) =>
+      createMediaQueryListMock({ matches: true, media: query })
     );
     expect(computeInitialAppState().systemDark).toBe(true);
   });
@@ -88,22 +81,14 @@ describe("computeInitialAppState()", () => {
 });
 
 describe("useAppStore.setTheme()", () => {
-  it("state.theme を更新する", () => {
+  it("state.theme を更新する (localStorage 永続化は theme-effects 側で行われる)", () => {
     useAppStore.getState().setTheme("dark");
     expect(useAppStore.getState().theme).toBe("dark");
   });
 
-  it("localStorage に書き込む", () => {
-    useAppStore.getState().setTheme("light");
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
-  });
-
-  it("永続化失敗 (Quota 等) でも state は更新する", () => {
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-      throw new Error("QuotaExceededError");
-    });
+  it("setTheme 自体は副作用 (storage 書込) を持たないため例外を投げない", () => {
+    // 仕様: 永続化は store 外の subscribe が担うので、ストレージ未実装環境でも setTheme は安全
     expect(() => useAppStore.getState().setTheme("dark")).not.toThrow();
-    expect(useAppStore.getState().theme).toBe("dark");
   });
 });
 
@@ -125,5 +110,14 @@ describe("selectResolvedTheme()", () => {
   it("light は固定", () => {
     useAppStore.setState({ theme: "light", systemDark: true });
     expect(selectResolvedTheme(useAppStore.getState())).toBe("light");
+  });
+});
+
+describe("useAppStore (state shape invariants)", () => {
+  it("actions が常に保持される (setState の partial merge 退化検出)", () => {
+    // テストが `setState(..., true)` で actions を消す事故を防ぐ
+    useAppStore.setState({ theme: "auto", systemDark: false });
+    expect(typeof useAppStore.getState().setTheme).toBe("function");
+    expect(typeof useAppStore.getState().setSystemDark).toBe("function");
   });
 });

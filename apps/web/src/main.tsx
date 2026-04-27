@@ -105,7 +105,7 @@ function App() {
       {project ? (
         <section className="grid grid-2col">
           <TestInventoryPanel project={project} />
-          <RunConsole eventStream={eventStream} activeRunId={activeRunId ?? undefined} />
+          <RunConsole eventStream={eventStream} activeRunId={activeRunId} />
         </section>
       ) : null}
 

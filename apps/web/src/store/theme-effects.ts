@@ -1,11 +1,19 @@
-// useAppStore の theme / systemDark を <html> へ反映する副作用ハブ。
-// - React の effect ではなく vanilla subscribe で実装する。これにより:
-//   * StrictMode の二重 mount で document が乱れない (idempotent)
-//   * matchMedia → store dispatch の経路を React tree から独立させ、
-//     view router (γ) 導入時に Provider のネストが要らなくなる
-// - main.tsx の起動時に installThemeEffects() を 1 回だけ呼ぶ。
-//   返り値の cleanup 関数は通常使わないが、テストで生存管理するために露出する。
-import { selectResolvedTheme, useAppStore, type ResolvedTheme, type ThemePreference } from "./app-store";
+// useAppStore に紐付く副作用 (永続化 / matchMedia 連動 / <html> 反映) のハブ。
+// React tree の外で 1 回だけ install することで:
+//  * Provider のネストを回避し、view router (γ) を後から差し込んでも影響しない
+//  * `useAppStore.setState` 経由 (HMR / test) の更新でも localStorage 書き出しが走る invariant を維持
+//  * <html> への class / data 属性反映を idempotent な代入だけで完結させる
+// なお `useAppStore.subscribe` は selector を取らないため**全 state 変化**で listener が発火する。
+// theme-effects は idempotent なので実害は無いが、η 以降に store の field が増えた段階で
+// `subscribeWithSelector` または equality 判定を追加して無関係な変更を弾くこと。
+import {
+  selectResolvedTheme,
+  THEME_STORAGE_KEY,
+  useAppStore,
+  type ResolvedTheme,
+  type ThemePreference
+} from "./app-store";
+import { writeSafe } from "./safe-storage";
 
 /** <html> への class / data 属性反映 (テストから直接呼べるよう export) */
 export function applyDocumentTheme(resolved: ResolvedTheme, preference: ThemePreference): void {
@@ -42,11 +50,13 @@ function subscribeMediaQuery(
 
 /**
  * テーマ関連の副作用を一括 install する。
- * 1. 現在の解決テーマを <html> に同期反映
- * 2. store の theme / systemDark 変化を subscribe して <html> を更新
- * 3. OS の prefers-color-scheme 変化を subscribe して store.setSystemDark を呼ぶ
+ * 1. 現在の解決テーマを <html> に同期反映 (bootstrap script の値を最新で上書き確認)
+ * 2. store の theme 変化を localStorage へ persist
+ * 3. store の theme / systemDark 変化を <html> へ反映
+ * 4. OS の prefers-color-scheme 変化を `setSystemDark` へディスパッチ
  *
- * 戻り値: 全 subscription を解除する cleanup 関数 (主にテスト向け)
+ * 戻り値: 全 subscription を解除する cleanup 関数 (主にテスト向け)。
+ * 片方の unsubscribe が throw しても残りを確実に解除するため try/finally で連鎖する。
  */
 export function installThemeEffects(): () => void {
   if (typeof window === "undefined") return () => {};
@@ -55,12 +65,17 @@ export function installThemeEffects(): () => void {
   const initial = useAppStore.getState();
   applyDocumentTheme(selectResolvedTheme(initial), initial.theme);
 
-  // 2. store の変化を subscribe → <html> 反映
+  // 2-3. store 変化 → 永続化 + <html> 反映
+  let lastPersistedTheme: ThemePreference = initial.theme;
   const unsubscribeStore = useAppStore.subscribe((state) => {
+    if (state.theme !== lastPersistedTheme) {
+      writeSafe(THEME_STORAGE_KEY, state.theme);
+      lastPersistedTheme = state.theme;
+    }
     applyDocumentTheme(selectResolvedTheme(state), state.theme);
   });
 
-  // 3. matchMedia 変化を subscribe → setSystemDark
+  // 4. matchMedia 変化 → setSystemDark
   let unsubscribeMedia: () => void = () => {};
   if (typeof window.matchMedia === "function") {
     try {
@@ -75,7 +90,11 @@ export function installThemeEffects(): () => void {
   }
 
   return () => {
-    unsubscribeStore();
-    unsubscribeMedia();
+    // 片方の unsubscribe が throw しても残りを必ず呼ぶ
+    try {
+      unsubscribeStore();
+    } finally {
+      unsubscribeMedia();
+    }
   };
 }

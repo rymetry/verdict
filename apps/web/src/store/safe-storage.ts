@@ -2,17 +2,18 @@
 // - Safari Private Mode / Storage 容量超過 / 値域外 などで throw した場合でも
 //   UI を白画面にせず、既知の値域だけ受け取れるようにする。
 // - 値域チェック (guard) は呼び出し側から差し込むことで、key ごとに異なる validation を許容する。
+import { isDev } from "./env";
 
 /** 開発ビルド時のみ握り潰した例外を console.warn する */
 function warnDev(scope: string, error: unknown): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+  if (isDev) {
     // eslint-disable-next-line no-console -- 開発時の診断目的に限定
     console.warn(`[safe-storage] ${scope}`, error);
   }
 }
 
-/** 文字列値の guard 関数 (false なら "格納されていなかった" と同じ扱いになる) */
-type Guard<T extends string> = (value: unknown) => value is T;
+/** localStorage に格納された string 値が型 T に属するかを判定する guard */
+type StringGuard<T extends string> = (value: unknown) => value is T;
 
 /**
  * 値域チェック付きで localStorage の string 値を読む。
@@ -20,7 +21,7 @@ type Guard<T extends string> = (value: unknown) => value is T;
  */
 export function readGuarded<T extends string>(
   key: string,
-  guard: Guard<T>
+  guard: StringGuard<T>
 ): T | null {
   if (typeof window === "undefined") return null;
   try {

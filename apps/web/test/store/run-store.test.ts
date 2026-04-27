@@ -2,7 +2,7 @@
 import type { RunRequest } from "@pwqa/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { getInitialRunState, useRunStore } from "@/store/run-store";
+import { createInitialRunState, useRunStore } from "@/store/run-store";
 
 const sampleRequest: RunRequest = {
   projectId: "proj-1",
@@ -12,7 +12,7 @@ const sampleRequest: RunRequest = {
 };
 
 beforeEach(() => {
-  useRunStore.setState(getInitialRunState());
+  useRunStore.setState(createInitialRunState());
 });
 
 describe("useRunStore (initial state)", () => {
@@ -38,6 +38,24 @@ describe("useRunStore.startTracking()", () => {
     expect(useRunStore.getState().lastRequest).toEqual(next);
     expect(useRunStore.getState().activeRunId).toBe("run-2");
   });
+
+  it("runId が空文字なら illegal state として throw する", () => {
+    expect(() => useRunStore.getState().startTracking("", sampleRequest)).toThrow(
+      /runId は空でない文字列/
+    );
+    // store は初期状態のままで汚染されない
+    expect(useRunStore.getState().activeRunId).toBeNull();
+    expect(useRunStore.getState().lastRequest).toBeNull();
+  });
+});
+
+describe("useRunStore (state shape invariants)", () => {
+  it("state の非関数フィールドは activeRunId / lastRequest の 2 つだけ", () => {
+    // RunStatus 等を将来追加する判断時に本テストが落ちて議論が起こることを期待した invariant
+    const state = useRunStore.getState() as unknown as Record<string, unknown>;
+    const dataFields = Object.keys(state).filter((k) => typeof state[k] !== "function");
+    expect(dataFields.sort()).toEqual(["activeRunId", "lastRequest"]);
+  });
 });
 
 describe("useRunStore.clearActive()", () => {
@@ -51,10 +69,10 @@ describe("useRunStore.clearActive()", () => {
   });
 });
 
-describe("getInitialRunState()", () => {
+describe("createInitialRunState()", () => {
   it("毎回新しいオブジェクトを返す (immutable)", () => {
-    const a = getInitialRunState();
-    const b = getInitialRunState();
+    const a = createInitialRunState();
+    const b = createInitialRunState();
     expect(a).toEqual(b);
     expect(a).not.toBe(b);
   });

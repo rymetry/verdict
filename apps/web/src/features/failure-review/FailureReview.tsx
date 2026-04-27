@@ -3,18 +3,18 @@ import { fetchRun } from "../../api/client";
 import type { FailedTest } from "@pwqa/shared";
 
 interface FailureReviewProps {
-  runId?: string;
+  runId: string | null;
 }
 
 export function FailureReview({ runId }: FailureReviewProps) {
   const runQuery = useQuery({
     queryKey: ["runs", runId],
     queryFn: async () => (runId ? fetchRun(runId) : null),
-    enabled: Boolean(runId),
+    enabled: runId !== null,
     refetchInterval: 2000
   });
 
-  if (!runId) {
+  if (runId === null) {
     return (
       <article className="panel">
         <p className="panelLabel">Failure review</p>
