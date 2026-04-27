@@ -24,6 +24,7 @@ export default defineConfig({
       include: [
         "src/components/ui/**",
         "src/components/foundation/**",
+        "src/components/shell/**",
         "src/hooks/**",
         "src/lib/**",
         "src/store/**"

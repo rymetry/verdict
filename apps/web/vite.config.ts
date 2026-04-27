@@ -4,8 +4,16 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
+import pkg from "./package.json" with { type: "json" };
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // ブラウザに露出する build-time 定数。
+  // - `__APP_VERSION__` は package.json の version を文字列リテラルとして埋め込む。
+  //   chrome の brand-sub 表示で参照する。値域は SemVer のため XSS リスクなし。
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version)
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src")

@@ -7,7 +7,7 @@ import {
   useQuery,
   useQueryClient
 } from "@tanstack/react-query";
-import type { ProjectSummary, RunRequest } from "@pwqa/shared";
+import type { ProjectSummary, RunMetadata, RunRequest } from "@pwqa/shared";
 
 // 自前ホストのフォントを globals.css より前に import する。
 // FOUC 抑止に加え、`@font-face` を base layer 適用前に登録することで
@@ -21,6 +21,7 @@ import "@fontsource/noto-sans-jp/700.css";
 import {
   fetchHealth,
   fetchCurrentProject,
+  fetchRun,
   startRun,
   WorkbenchApiError
 } from "./api/client";
@@ -29,7 +30,11 @@ import { TestInventoryPanel } from "./features/test-inventory/TestInventoryPanel
 import { RunConsole } from "./features/run-console/RunConsole";
 import { FailureReview } from "./features/failure-review/FailureReview";
 import { FoundationPreview } from "./components/foundation/FoundationPreview";
+import { StatusBar, TopBar } from "./components/shell";
+import { deriveAgentState, deriveProjectDisplayName } from "./lib/shell-derive";
 import { useWorkbenchEvents } from "./hooks/use-workbench-events";
+import { useAppStore } from "./store/app-store";
+import { usePersonaStore } from "./store/persona-store";
 import { useRunStore } from "./store/run-store";
 import { installThemeEffects } from "./store/theme-effects";
 
@@ -64,7 +69,17 @@ function isFoundationPreview(): boolean {
 }
 
 function App() {
+  const queryClient = useQueryClient();
   const activeRunId = useRunStore((s) => s.activeRunId);
+  const lastRequest = useRunStore((s) => s.lastRequest);
+  const startTracking = useRunStore((s) => s.startTracking);
+
+  const persona = usePersonaStore((s) => s.persona);
+  const setPersona = usePersonaStore((s) => s.setPersona);
+
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
+
   const eventStream = useWorkbenchEvents();
 
   const healthQuery = useQuery({
@@ -78,39 +93,78 @@ function App() {
     queryFn: fetchCurrentProject
   });
 
+  // active run のメタ (status / 完了時刻 等) を取得し、TopBar の status badge に反映する。
+  // refetchInterval は run 中は短く、終了済み (passed/failed/cancelled/error) は止める。
+  const activeRunQuery = useQuery({
+    queryKey: ["runs", activeRunId],
+    queryFn: () => (activeRunId ? fetchRun(activeRunId) : Promise.resolve(null)),
+    enabled: typeof activeRunId === "string" && activeRunId.length > 0,
+    refetchInterval: (query) => {
+      const runData = query.state.data as RunMetadata | null | undefined;
+      const status = runData?.status;
+      // running / queued の間は 2 秒間隔で polling、それ以外は止める
+      return status === "running" || status === "queued" ? 2_000 : false;
+    }
+  });
+  const activeRun = activeRunQuery.data ?? null;
+
   const project = currentProjectQuery.data ?? null;
+  const agentState = deriveAgentState(healthQuery.data, healthQuery.error);
+
+  // chrome の "再実行" は最後に投入した RunRequest をそのまま再送する。
+  // running 中は disabled (RerunButton 側でも isRunning で disabled)。
+  const rerunMutation = useMutation({
+    mutationFn: async (request: RunRequest) => startRun(request),
+    onSuccess: (response, request) => {
+      startTracking(response.runId, request);
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+    }
+  });
+
+  const isActiveRunRunning = activeRun?.status === "running" || activeRun?.status === "queued";
 
   return (
-    <main className="shell">
-      <header className="topbar" aria-label="Workbench status">
-        <div>
-          <p className="eyebrow">Local control plane</p>
-          <h1>Playwright Workbench</h1>
-        </div>
-        <div className={healthQuery.data?.ok ? "status statusReady" : "status statusPending"}>
-          <span aria-hidden="true" />
-          {healthQuery.data?.ok
-            ? `Agent v${healthQuery.data.version}`
-            : healthQuery.error
-              ? "Agent unreachable"
-              : "Connecting…"}
-        </div>
-      </header>
+    <div className="flex min-h-screen flex-col bg-[var(--bg-0)] text-[var(--ink-0)]">
+      <TopBar
+        projectName={project ? deriveProjectDisplayName(project.rootPath) : null}
+        activeRunId={activeRunId}
+        activeRunStatus={activeRun?.status ?? null}
+        persona={persona}
+        onPersonaChange={setPersona}
+        theme={theme}
+        onThemeChange={setTheme}
+        canRerun={lastRequest !== null && !rerunMutation.isPending && !isActiveRunRunning}
+        isRunning={rerunMutation.isPending || isActiveRunRunning}
+        onRerun={() => {
+          if (lastRequest !== null) rerunMutation.mutate(lastRequest);
+        }}
+      />
 
-      <section className="grid">
-        <ProjectPicker />
-        <RunControls project={project} />
-      </section>
-
-      {project ? (
-        <section className="grid grid-2col">
-          <TestInventoryPanel project={project} />
-          <RunConsole eventStream={eventStream} activeRunId={activeRunId} />
+      <main className="shell flex-1">
+        <section className="grid">
+          <ProjectPicker />
+          <RunControls project={project} />
         </section>
-      ) : null}
 
-      {activeRunId ? <FailureReview runId={activeRunId} /> : null}
-    </main>
+        {project ? (
+          <section className="grid grid-2col">
+            <TestInventoryPanel project={project} />
+            <RunConsole eventStream={eventStream} activeRunId={activeRunId} />
+          </section>
+        ) : null}
+
+        {activeRunId ? <FailureReview runId={activeRunId} /> : null}
+      </main>
+
+      <StatusBar
+        agentState={agentState}
+        agentVersion={healthQuery.data?.version}
+        agentEndpoint="127.0.0.1:4317"
+        projectName={project ? deriveProjectDisplayName(project.rootPath) : null}
+        packageManager={project?.packageManager.name ?? null}
+        activeRunId={activeRunId}
+      />
+    </div>
   );
 }
 

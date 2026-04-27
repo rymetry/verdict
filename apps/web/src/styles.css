@@ -1,14 +1,13 @@
-:root {
-  color: #1b1f24;
-  background: #f4f1ea;
-  font-family:
-    "Avenir Next",
-    "Segoe UI",
-    system-ui,
-    sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-}
+/*
+ * 注意: このファイル全体は Phase 1 既存 features (ProjectPicker / RunControls /
+ *      TestInventory / RunConsole / FailureReview) の見た目を維持するための暫定スタイル。
+ *      δ (Issue #11) で QA View を Tailwind 化したタイミングで全削除する。
+ *
+ *      β (Issue #9) で TopBar / StatusBar が外側 (`.shell` の外) に移ったため、
+ *      bare element selector (`button`, `h1` 等) を `.shell` 配下にスコープする。
+ *      これを怠ると Tailwind v4 + shadcn primitives のスタイルが
+ *      legacy `button { background: #1b1f24 }` 等で潰されて leak する。
+ */
 
 * {
   box-sizing: border-box;
@@ -20,28 +19,28 @@ body {
   min-height: 100vh;
 }
 
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
-
 .shell {
-  min-height: 100vh;
+  /* β 以降は flex children として伸縮するため min-height は外す。
+     既存 features 用の余白とフォント/背景はここに集約する。 */
   padding: 28px;
   background:
     linear-gradient(135deg, rgba(32, 45, 53, 0.08), transparent 38%),
     linear-gradient(180deg, #fbf8f1, #ece8dd 72%);
+  color: #1b1f24;
+  font-family:
+    "Avenir Next",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  margin: 0 auto 24px;
-  max-width: 1160px;
+.shell button,
+.shell input,
+.shell textarea,
+.shell select {
+  font: inherit;
 }
 
 .eyebrow,
@@ -54,19 +53,19 @@ select {
   text-transform: uppercase;
 }
 
-h1,
-h2 {
+.shell h1,
+.shell h2 {
   margin: 0;
   letter-spacing: 0;
 }
 
-h1 {
+.shell h1 {
   color: #172026;
   font-size: clamp(2rem, 4vw, 4rem);
   line-height: 0.95;
 }
 
-h2 {
+.shell h2 {
   color: #172026;
   font-size: 1.4rem;
 }
@@ -154,14 +153,14 @@ h2 {
   border-bottom: 1px solid rgba(25, 32, 38, 0.1);
 }
 
-dt {
+.shell dt {
   color: #697682;
   font-size: 0.77rem;
   font-weight: 700;
   text-transform: uppercase;
 }
 
-dd {
+.shell dd {
   margin: 4px 0 0;
   overflow-wrap: anywhere;
   color: #1f2930;
@@ -206,7 +205,7 @@ dd {
   gap: 8px;
 }
 
-input[type="text"] {
+.shell input[type="text"] {
   flex: 1;
   padding: 8px 10px;
   border: 1px solid rgba(25, 32, 38, 0.16);
@@ -216,7 +215,7 @@ input[type="text"] {
   background: #fff;
 }
 
-button {
+.shell button {
   padding: 8px 14px;
   border-radius: 6px;
   border: 1px solid #1b1f24;
@@ -227,12 +226,12 @@ button {
   font-family: inherit;
 }
 
-button:disabled {
+.shell button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-button.ghost {
+.shell button.ghost {
   background: transparent;
   color: #1b1f24;
 }
