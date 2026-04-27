@@ -41,3 +41,8 @@ coverage/
 tests/smoke/_artifacts/
 tests/smoke/test-results/
 tests/smoke/playwright-report/
+
+# Design iteration scratch (Playwright MCP snapshots, iteration screenshots)
+# モックアップを更新する際の作業ファイルはここに置く: docs/design/_scratch/
+.playwright-mcp/
+docs/design/_scratch/
