@@ -23,9 +23,11 @@ import "./styles/globals.css";
 import "./styles.css";
 
 // React tree の外で 1 回だけ install する。
-// React Provider ではないため tree への配置は不要で、subscribe 重複や StrictMode の
-// 二重 mount を避けるためにモジュール top-level で実行する (HMR 時の多重 install は
-// theme-effects 自身が idempotent なので安全)。
+// React Provider ではないため tree への配置は不要で、tree 内で呼ぶと StrictMode 下で
+// effect が 2 回 mount/unmount し subscribe/unsubscribe が余分に走るのを避ける目的。
+// HMR で main.tsx が partial reload されると本ファイルが再評価され install が複数回
+// 走り得る (listener が累積する) ため、長時間 dev サーバを使う際は full reload を推奨。
+// 厳密な idempotent 化は dispose hook を追加する γ 以降の課題。
 installThemeEffects();
 
 const queryClient = new QueryClient({

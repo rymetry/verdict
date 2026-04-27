@@ -13,9 +13,9 @@ interface BrandProps {
   className?: string;
 }
 
-// `__APP_VERSION__` は vite define で注入される定数。test/setup.ts では globalThis 上に
-// `"0.0.0-test"` を仕込む。いずれの経路も無い場合は `"0.0.0-unknown"` を返し、
-// 「定数注入失敗」を UI 上で識別可能にする (正規 SemVer ではない suffix で運用判別する)。
+// `__APP_VERSION__` の注入経路は `vite-env.d.ts` を参照。
+// 注入失敗時は `"0.0.0-unknown"` を返し、UI 上で「定数注入失敗」を識別可能にする
+// (test/setup.ts は別経路で `"0.0.0-test"` を仕込み、build / test / unknown の 3 経路を区別する)。
 function readAppVersion(): string {
   return typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "0.0.0-unknown";
 }

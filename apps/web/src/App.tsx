@@ -2,7 +2,7 @@
 //  - SRP: entry は Provider / font / root mount のみ。app-shell ロジックは本ファイルに集約
 //  - 統合テスト容易性: QueryClientProvider 配下で App を直接 render するため named export
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ProjectSummary, RunRequest } from "@pwqa/shared";
 
 import { fetchCurrentProject, fetchHealth, fetchRun } from "@/api/client";
@@ -24,8 +24,10 @@ import { useRunStore } from "@/store/run-store";
 const AGENT_ENDPOINT_DISPLAY = "127.0.0.1:4317";
 
 export function App(): React.ReactElement {
+  const queryClient = useQueryClient();
   const activeRunId = useRunStore((s) => s.activeRunId);
   const lastRequest = useRunStore((s) => s.lastRequest);
+  const clearActiveRun = useRunStore((s) => s.clearActive);
 
   const persona = usePersonaStore((s) => s.persona);
   const setPersona = usePersonaStore((s) => s.setPersona);
@@ -90,7 +92,12 @@ export function App(): React.ReactElement {
     ? formatMutationError(rerunMutation.error, "再実行に失敗しました")
     : null;
 
-  // active run 取得失敗の通知。dismiss 機能は付けず、新しい error が発生したら自然に上書きされる。
+  // active run 取得失敗の通知。
+  // dismiss は **active run の追跡を停止** する設計:
+  //   `refetch()` だと server がまだ落ちている場合 banner が即座に再表示され UX dead-end になる。
+  //   `removeQueries` だけでも `enabled=true` のまま即時 refetch されて同じ問題が起きる。
+  //   `clearActive()` で activeRunId を null にすれば query は disabled になり banner も消える
+  //   (= ユーザが「この run はもう追わなくて良い」と意思表示する dismiss セマンティクス)。
   const activeRunErrorMessage = activeRunQuery.error
     ? formatMutationError(
         activeRunQuery.error,
@@ -135,9 +142,15 @@ export function App(): React.ReactElement {
         <ShellAlert
           key={`active-run-${activeRunQuery.failureCount}`}
           message={activeRunErrorMessage}
-          // dismiss で React Query 側の error をクリア (UX dead-end 回避)。
-          // refetch trigger は polling が再開した時に自然に効く。
-          onDismiss={() => activeRunQuery.refetch()}
+          // dismiss = active run の追跡を停止し、関連 cache を破棄する。
+          // ユーザは「この run はもう追わない」と意思表示する操作になる。
+          onDismiss={() => {
+            const dismissedId = activeRunId;
+            clearActiveRun();
+            if (dismissedId) {
+              queryClient.removeQueries({ queryKey: ["runs", dismissedId], exact: true });
+            }
+          }}
         />
       ) : null}
 
@@ -173,6 +186,11 @@ interface RunControlsProps {
   project: ProjectSummary | null;
 }
 
+// App と同ファイル: form submit 経路の useStartRunMutation を別 instance で取得する
+// (rerun banner の `rerunMutation` と分離し、UI 表示先を独立させるため)。
+// startMutation.error は React Query が保持するため、submit handler は throw に依存しない
+// (silent failure 防衛)。次回入力編集時に reset し、古いエラー表示の dead-end を回避する。
+// TODO(ε): `apps/web/src/features/run-controls/` に抽出し、QA View からも独立 mount できる構造へ。
 function RunControls({ project }: RunControlsProps): React.ReactElement {
   const [specPath, setSpecPath] = React.useState("");
   const [grep, setGrep] = React.useState("");
@@ -182,6 +200,13 @@ function RunControls({ project }: RunControlsProps): React.ReactElement {
   const errorMessage = startMutation.error
     ? formatMutationError(startMutation.error, "Failed to start run")
     : null;
+
+  // 入力編集で前回 error を自然に解除する。dismiss CTA を増やさず古いエラーが残る silent UX を防ぐ。
+  const clearErrorOnEdit = React.useCallback(() => {
+    if (startMutation.error) {
+      startMutation.reset();
+    }
+  }, [startMutation]);
 
   if (!project) {
     return (
@@ -218,7 +243,10 @@ function RunControls({ project }: RunControlsProps): React.ReactElement {
           type="text"
           placeholder="tests/auth.spec.ts"
           value={specPath}
-          onChange={(event) => setSpecPath(event.target.value)}
+          onChange={(event) => {
+            setSpecPath(event.target.value);
+            clearErrorOnEdit();
+          }}
         />
         <label htmlFor="grep" className="muted">
           Grep pattern (optional)
@@ -228,7 +256,10 @@ function RunControls({ project }: RunControlsProps): React.ReactElement {
           type="text"
           placeholder="@smoke"
           value={grep}
-          onChange={(event) => setGrep(event.target.value)}
+          onChange={(event) => {
+            setGrep(event.target.value);
+            clearErrorOnEdit();
+          }}
         />
         <button type="submit" disabled={blocked || startMutation.isPending}>
           {startMutation.isPending ? "Starting…" : "Run Playwright"}

@@ -32,6 +32,8 @@ const PERSONA_LABEL: Record<PersonaView, string> = {
  *   throw しても Error Boundary に拾われないことが多く、UI 全体を白画面化させない方を優先する。
  *   一方で「silent」は許容しない方針 (CLAUDE.md `Never silently swallow errors`) のため、
  *   production でも log は出す (将来運用環境のログ収集経路で拾える余地を残すため)。
+ *   vite.config.ts の `esbuild.drop: []` + `build.minify: "esbuild"` と組み合わせて、
+ *   本番 build でも console.error が drop されない invariant が成立している。
  * - test から動線を直接検証できるよう named export する。
  */
 export function dispatchPersonaSafely(

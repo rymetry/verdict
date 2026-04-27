@@ -118,13 +118,21 @@ describe("useStartRunMutation", () => {
 
   it("retry は 0 (POST /runs は副作用的なので多重起動を防ぐ)", async () => {
     vi.mocked(startRun).mockRejectedValue(new Error("transient"));
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // QueryClient defaults で `mutations.retry: 3` を上書きしても、フックの `retry: 0` が
+    // 個別指定として勝つこと (defense-in-depth invariant) を pin する。
+    // この設定を入れずに test するとデフォルト (= 0) と区別がつかず regression を検出できない。
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: 3, retryDelay: 0 }
+      }
+    });
 
     const { result } = renderHook(() => useStartRunMutation(), { wrapper: wrapper(client) });
     result.current.mutate({ projectId: "p1", headed: false });
     await waitFor(() => expect(result.current.isError).toBe(true));
 
-    // retry が走らないため startRun は 1 回だけ呼ばれる (デフォルト 3 回 retry なら 4 回呼ばれる)
+    // retry が走らないため startRun は 1 回だけ呼ばれる (フック側 retry: 0 の invariant)
     expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
   });
 });

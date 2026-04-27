@@ -3,11 +3,11 @@
 // trim された UI (TopBar) には埋め込めないエラーを伝えるための簡易 surface。
 //
 // PoC 段階では toast を別途導入せず、TopBar 直下に banner を出すことで:
-//  - silent failure を最低限可視化する (silent-failure-hunter 指摘反映)
+//  - silent failure を最低限可視化する
 //  - 後段で react-hot-toast 等を入れる時に置換しやすい単一コンポーネントに閉じ込める
 //
-// `severity` は AlertVariant と同じ集合だが、現状 fail のみを使用する。
-// 将来 warning (degraded 等) に拡張する余地として枠だけ用意。
+// 現状は fail (赤系) 単一スタイル。将来 degraded warning 等の severity 拡張が必要になったら
+// `severity?: "fail" | "warning"` props と `AlertVariant` 型を導入する (今は YAGNI)。
 import * as React from "react";
 import { AlertCircle, X } from "lucide-react";
 
