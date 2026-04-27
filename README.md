@@ -1,57 +1,64 @@
-# repo-template
+# Playwright QA Workbench
 
-汎用リポジトリテンプレート。新規リポジトリの初期設定をワンコマンドで完了します。
+Local-first control plane for existing Playwright projects.
 
-## 使い方
+The Workbench keeps Playwright code and Git as the source of truth. It starts as a pnpm monorepo with a Vite React GUI, a Node.js Local Agent, and shared zod schemas.
 
-### 1. テンプレートからリポジトリを作成
+## Current Slice
+
+This repository currently contains the Phase 1 foundation:
+
+- `apps/web`: Vite + React shell.
+- `apps/agent`: Fastify Local Agent with `GET /health`.
+- `packages/shared`: shared zod schemas and TypeScript types.
+- pnpm workspace and TypeScript project setup.
+
+Project scanning, package-manager detection, Playwright execution, WebSocket run streaming, and Allure Report 3 integration are the next vertical slices.
+
+## Requirements
+
+- Node.js 24 is currently used in local verification.
+- pnpm 10.
+
+## Setup
 
 ```bash
-gh repo create my-new-project --template rymetry/repo-template --public --clone
-cd my-new-project
+pnpm install
+pnpm typecheck
+pnpm build
 ```
 
-### 2. セットアップスクリプトを実行
+## Run Locally
+
+Start the Local Agent:
 
 ```bash
-bash .github/scripts/setup-repo.sh
+pnpm dev:agent
 ```
 
-以下が自動で設定されます:
+Check the Agent:
 
-| 設定 | 内容 |
-|------|------|
-| **LICENSE** | プレースホルダーを実際の年・名前に置換 |
-| **SECURITY.md** | リポジトリ URL を自動設定 |
-| **Branch protection** | main に PR 必須 + 管理者バイパス |
-| **Auto-merge** | 有効化 |
-| **Dependabot** | alerts + security updates 有効化 |
-| **Actions** | Workflow permissions を Read only に設定 |
-| **不要機能** | Projects / Discussions / Wiki を OFF |
-| **ブランチ自動削除** | マージ後に自動削除 |
-
-### 3. README を書き換える
-
-このファイルをプロジェクト固有の内容に置き換えてください。
-
-## 含まれるファイル
-
-```
-.github/
-  workflows/dependabot-auto-merge.yml  # Dependabot patch/minor 自動マージ
-  ISSUE_TEMPLATE/
-    bug_report.yml                     # バグ報告テンプレート
-    feature_request.yml                # 機能リクエストテンプレート
-    config.yml                         # blank issue 許可
-  PULL_REQUEST_TEMPLATE.md             # PR テンプレート
-  scripts/setup-repo.sh                # GitHub 設定自動化スクリプト
-LICENSE                                # MIT License（英語 + 日本語）
-CODE_OF_CONDUCT.md                     # Contributor Covenant（日本語）
-SECURITY.md                            # 脆弱性報告ポリシー
-CONTRIBUTING.md                        # コントリビューションガイド
-.gitignore                             # 基本的な除外ルール
+```bash
+curl -sL http://127.0.0.1:4317/health
 ```
 
-## ライセンス
+Start the web app:
 
-[MIT License](./LICENSE)
+```bash
+pnpm dev:web
+```
+
+Then open `http://127.0.0.1:5173`.
+
+## Architecture
+
+```text
+React GUI
+  -> HTTP / WebSocket
+Local Node Agent
+  -> file system / process
+User Playwright Project
+  -> Playwright JSON / HTML / Allure Report 3 / artifacts
+```
+
+The detailed product and implementation plan lives in `PLAN.md`.
