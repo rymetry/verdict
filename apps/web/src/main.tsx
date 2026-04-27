@@ -25,9 +25,23 @@ import "./styles.css";
 // React tree の外で 1 回だけ install する。
 // React Provider ではないため tree への配置は不要で、tree 内で呼ぶと StrictMode 下で
 // effect が 2 回 mount/unmount し subscribe/unsubscribe が余分に走るのを避ける目的。
-// HMR で main.tsx が partial reload されると本ファイルが再評価され install が複数回
-// 走り得る (listener が累積する) ため、長時間 dev サーバを使う際は full reload を推奨。
-// 厳密な idempotent 化は dispose hook を追加する γ 以降の課題。
+// 補足: Vite は通常 entry (main.tsx) 変更時に full page reload するため HMR 経路で
+// 多重 install されるケースは稀。ただし theme-effects / app-store が HMR boundary に
+// なる依存変更時は本ファイルの top-level が再評価され listener が累積する可能性がある。
+// 厳密な idempotent 化 (`import.meta.hot?.dispose` 経由) は γ 以降の課題。
+// 開発時に多重 install を検知するため dev guard を仕込んでおく。
+if (
+  typeof import.meta !== "undefined" &&
+  import.meta.env?.DEV &&
+  typeof window !== "undefined"
+) {
+  const w = window as unknown as { __pwqaThemeInstalled?: boolean };
+  if (w.__pwqaThemeInstalled) {
+    // eslint-disable-next-line no-console -- 開発時の診断目的に限定
+    console.warn("[main] installThemeEffects called twice — HMR listener leak の可能性");
+  }
+  w.__pwqaThemeInstalled = true;
+}
 installThemeEffects();
 
 const queryClient = new QueryClient({

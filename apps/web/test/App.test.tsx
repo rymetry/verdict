@@ -9,11 +9,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
-import type { ProjectSummary, RunMetadata, RunRequest } from "@pwqa/shared";
+import type { ProjectSummary } from "@pwqa/shared";
 
 import { App } from "@/App";
 import { WorkbenchApiError } from "@/api/client";
 import { createInitialRunState, useRunStore } from "@/store/run-store";
+import { makeRunMetadata, makeRunRequest } from "./_fixtures/run";
 
 // ネットワーク呼び出しを抑止し、各 fetch を vi.mocked で個別操作する。
 // `vi.importActual` で `WorkbenchApiError` 等の class を保つ (`instanceof` を test/production で揃える)。
@@ -43,29 +44,6 @@ vi.mock("@/hooks/use-workbench-events", () => ({
   useWorkbenchEvents: () => ({ events: [], status: "closed" })
 }));
 
-function makeRunMetadata(runId: string): RunMetadata {
-  return {
-    runId,
-    projectId: "p1",
-    projectRoot: "/p",
-    status: "passed",
-    startedAt: "2026-04-28T00:00:00Z",
-    completedAt: "2026-04-28T00:01:00Z",
-    command: { executable: "npx", args: ["playwright", "test"] },
-    cwd: "/p",
-    requested: { projectId: "p1", headed: false } as RunRequest,
-    paths: {
-      runDir: "/runs/test",
-      metadataJson: "/runs/test/metadata.json",
-      stdoutLog: "/runs/test/stdout.log",
-      stderrLog: "/runs/test/stderr.log",
-      playwrightJson: "/runs/test/playwright.json",
-      playwrightHtml: "/runs/test/playwright-report",
-      artifactsJson: "/runs/test/artifacts.json"
-    },
-    warnings: []
-  };
-}
 
 // `as ProjectSummary` cast を避け、戻り型を明示することで TS が必須 field を強制する。
 // 必須でない field (optional) は spread の override で undefined を渡さず単純に省略する形で扱う
@@ -155,7 +133,7 @@ describe("App integration", () => {
   it("rerun mutation がエラーになると ShellAlert が role=alert で `code: message` 形式で出る", async () => {
     useRunStore.setState({
       activeRunId: null,
-      lastRequest: { projectId: "p1", headed: false } as RunRequest
+      lastRequest: makeRunRequest()
     });
     vi.mocked(startRun).mockRejectedValue(
       new WorkbenchApiError("Run blocked", "RUN_BLOCKED", 409)
@@ -171,7 +149,7 @@ describe("App integration", () => {
   it("ShellAlert の dismiss で mutation.reset() 経由 banner が消える", async () => {
     useRunStore.setState({
       activeRunId: null,
-      lastRequest: { projectId: "p1", headed: false } as RunRequest
+      lastRequest: makeRunRequest()
     });
     vi.mocked(startRun).mockRejectedValue(new Error("network"));
     const { user } = renderApp();
@@ -188,7 +166,7 @@ describe("App integration", () => {
   it("失敗回数が変わると banner が **再 mount** される (key={failureCount} で role=alert を再 announce)", async () => {
     useRunStore.setState({
       activeRunId: null,
-      lastRequest: { projectId: "p1", headed: false } as RunRequest
+      lastRequest: makeRunRequest()
     });
     vi.mocked(startRun).mockRejectedValue(new Error("boom"));
     const { user } = renderApp();
@@ -209,10 +187,10 @@ describe("App integration", () => {
     expect(secondAlert).toHaveTextContent("boom");
   });
 
-  it("activeRunQuery error の dismiss で query cache が破棄される (refetch race 回避)", async () => {
+  it("activeRunQuery error の dismiss で activeRunId が null になり banner が消える (clearActive + removeQueries 二段)", async () => {
     useRunStore.setState({
       activeRunId: "abc-123",
-      lastRequest: { projectId: "p1", headed: false } as RunRequest
+      lastRequest: makeRunRequest()
     });
     vi.mocked(fetchRun).mockRejectedValue(new Error("boom"));
     const { user } = renderApp();
@@ -220,10 +198,13 @@ describe("App integration", () => {
     await screen.findByRole("alert");
     await user.click(screen.getByRole("button", { name: "通知を閉じる" }));
 
-    // removeQueries で error 状態が即座に消えること (refetch を待たない)
+    // (1) clearActive で activeRunId が null になり enabled=false で query が停止 → banner が消える
     await waitFor(() =>
       expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     );
+    // (2) store の invariant: activeRunId は null になり、lastRequest は rerun 用に保持される
+    expect(useRunStore.getState().activeRunId).toBeNull();
+    expect(useRunStore.getState().lastRequest).not.toBeNull();
   });
 
   it("RunControls の入力編集で前回 error が解除される (UX dead-end 回避)", async () => {
@@ -249,15 +230,14 @@ describe("App integration", () => {
     });
   });
 
-  it("lastRequest=null かつ canRerun guard 破れ時は console.error する (invariant 防衛)", () => {
+  it("lastRequest=null 時は canRerun guard により button が disabled で click が console.error 経路に到達しない", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    // canRerun=false で button が disabled。直接エラー pin の test ではなく、
-    // disabled button に click が届かないことで invariant が UI 層で守られていることを assert。
     useRunStore.setState({ activeRunId: null, lastRequest: null });
     renderApp();
     const btn = screen.getByRole("button", { name: /再実行/ });
     expect(btn).toBeDisabled();
-    // disabled button click は no-op で console.error は呼ばれない (UI guard が効いている証跡)
+    // disabled button click は HTML 仕様上 click event が発火しない (UI 層 guard) ため、
+    // App.tsx onRerun の invariant log には到達しない (= UI 層で先に弾かれている証跡)。
     btn.click();
     expect(errorSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("RerunButton.onRerun")
@@ -268,7 +248,7 @@ describe("App integration", () => {
   it("activeRunQuery エラー時に banner を出す (Error.message が優先される / fallback 文字列ではない)", async () => {
     useRunStore.setState({
       activeRunId: "abc-123",
-      lastRequest: { projectId: "p1", headed: false } as RunRequest
+      lastRequest: makeRunRequest()
     });
     vi.mocked(fetchRun).mockRejectedValue(new Error("boom"));
     renderApp();
@@ -301,7 +281,7 @@ describe("App integration", () => {
   it("rerun mutation の error は WorkbenchApiError (Error 子クラス) として narrow 可能", async () => {
     useRunStore.setState({
       activeRunId: null,
-      lastRequest: { projectId: "p1", headed: false } as RunRequest
+      lastRequest: makeRunRequest()
     });
     vi.mocked(startRun).mockRejectedValue(
       new WorkbenchApiError("blocked", "RUN_BLOCKED", 409)

@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import * as React from "react";
-import type { RunMetadata, RunRequest } from "@pwqa/shared";
 
 import { useStartRunMutation } from "@/hooks/use-start-run-mutation";
 import { createInitialRunState, useRunStore } from "@/store/run-store";
+import { makeRunMetadata, makeRunRequest } from "../_fixtures/run";
 
 // fetch ベースの startRun を直接モックする (network を出さない)
 vi.mock("@/api/client", async () => {
@@ -21,28 +21,8 @@ vi.mock("@/api/client", async () => {
 
 import { startRun } from "@/api/client";
 
-function makeMetadata(runId: string): RunMetadata {
-  return {
-    runId,
-    projectId: "p1",
-    projectRoot: "/p",
-    status: "queued",
-    startedAt: "2026-04-28T00:00:00Z",
-    command: { executable: "npx", args: ["playwright", "test"] },
-    cwd: "/p",
-    requested: { projectId: "p1", headed: false } as RunRequest,
-    paths: {
-      runDir: "",
-      metadataJson: "",
-      stdoutLog: "",
-      stderrLog: "",
-      playwrightJson: "",
-      playwrightHtml: "",
-      artifactsJson: ""
-    },
-    warnings: []
-  };
-}
+// queued status の test 用 metadata (default は passed なので overrides で切替)
+const makeQueuedMetadata = (runId: string) => makeRunMetadata(runId, { status: "queued" });
 
 function wrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -61,12 +41,12 @@ describe("useStartRunMutation", () => {
   });
 
   it("成功時に startTracking が呼ばれて activeRunId が更新される", async () => {
-    vi.mocked(startRun).mockResolvedValue({ runId: "r1", metadata: makeMetadata("r1") });
+    vi.mocked(startRun).mockResolvedValue({ runId: "r1", metadata: makeQueuedMetadata("r1") });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
     const { result } = renderHook(() => useStartRunMutation(), { wrapper: wrapper(client) });
 
-    const request: RunRequest = { projectId: "p1", headed: false };
+    const request = makeRunRequest();
     result.current.mutate(request);
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -75,7 +55,7 @@ describe("useStartRunMutation", () => {
   });
 
   it("成功時に ['runs'] queryKey の invalidate が呼ばれる", async () => {
-    vi.mocked(startRun).mockResolvedValue({ runId: "r2", metadata: makeMetadata("r2") });
+    vi.mocked(startRun).mockResolvedValue({ runId: "r2", metadata: makeQueuedMetadata("r2") });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidate = vi.spyOn(client, "invalidateQueries");
 

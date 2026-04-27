@@ -1,6 +1,7 @@
 // main.tsx (entry) と分離する理由:
 //  - SRP: entry は Provider / font / root mount のみ。app-shell ロジックは本ファイルに集約
-//  - 統合テスト容易性: QueryClientProvider 配下で App を直接 render するため named export
+//  - 統合テスト容易性: 命名一致した named export `App` を test/App.test.tsx から直接 render
+//    し、entry 側の副作用 (font import / installThemeEffects / root mount) を含めずに検証する
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ProjectSummary, RunRequest } from "@pwqa/shared";
@@ -50,7 +51,8 @@ export function App(): React.ReactElement {
 
   // active run のメタ (status / 完了時刻 等) を取得し、TopBar の status badge に反映する。
   // - queryFn は activeRunId が string であることを enabled でゲートしてから呼ぶ。
-  //   万一 enabled が破られた場合は silent return ではなく throw して可視化する。
+  //   TanStack v5 内部で enabled は信頼できるが、defense-in-depth として queryFn 内でも
+  //   type guard を入れ、万一 enabled が破られた場合は silent return ではなく throw して可視化する。
   // - refetchInterval は run 中 (running / queued) は 2 秒、それ以外は止める。
   const activeRunQuery = useQuery({
     queryKey: ["runs", activeRunId],
@@ -76,7 +78,7 @@ export function App(): React.ReactElement {
   // shell 上の "再実行" は最後に投入した RunRequest を再送する。
   // running 中は disabled (RerunButton 側でも isRunning 表示)。
   // Phase 1 では server に専用 rerun endpoint を持たないため client で lastRequest を保持して再送する。
-  // (専用 endpoint 採用は γ 以降の Open Question として PLAN.v2 §34 に残している)
+  // (専用 endpoint 採用は γ 以降の Open Question として別途 PLAN.v2 に追記する課題)
   const rerunMutation = useStartRunMutation();
 
   const isActiveRunRunning = activeRun?.status === "running" || activeRun?.status === "queued";
@@ -142,10 +144,16 @@ export function App(): React.ReactElement {
         <ShellAlert
           key={`active-run-${activeRunQuery.failureCount}`}
           message={activeRunErrorMessage}
-          // dismiss = active run の追跡を停止し、関連 cache を破棄する。
-          // ユーザは「この run はもう追わない」と意思表示する操作になる。
+          // dismiss は 2 段操作:
+          //   (1) `clearActive()` で activeRunId を null にし、`enabled=false` で query を停止
+          //   (2) `removeQueries` で stale な error cache を破棄し、次回 run 開始時に新規 lifecycle で取り直す
+          // 順序は **cancelQueries → state 更新 → removeQueries** で in-flight refetch race を回避。
           onDismiss={() => {
             const dismissedId = activeRunId;
+            if (dismissedId) {
+              // in-flight refetch があれば cancel してから cache を消す (race 対策)
+              void queryClient.cancelQueries({ queryKey: ["runs", dismissedId], exact: true });
+            }
             clearActiveRun();
             if (dismissedId) {
               queryClient.removeQueries({ queryKey: ["runs", dismissedId], exact: true });
@@ -202,11 +210,13 @@ function RunControls({ project }: RunControlsProps): React.ReactElement {
     : null;
 
   // 入力編集で前回 error を自然に解除する。dismiss CTA を増やさず古いエラーが残る silent UX を防ぐ。
-  const clearErrorOnEdit = React.useCallback(() => {
+  // useCallback は使わない: useMutation の戻り値は毎 render 新規参照のため memoize 効果ゼロで、
+  // 「memo 化されている」と読み手に誤解させる。
+  function clearErrorOnEdit(): void {
     if (startMutation.error) {
       startMutation.reset();
     }
-  }, [startMutation]);
+  }
 
   if (!project) {
     return (
