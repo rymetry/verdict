@@ -1,0 +1,121 @@
+/* ─────────────────────────────────────────────────────────────
+   Design tokens — white-first, neutral, single accent
+   Dark mode は light の値を反転して導出
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --sans: "Geist", "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
+  --mono: "Geist Mono", "Noto Sans JP", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 1px 2px rgba(15, 23, 42, 0.05), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --shadow-pop: 0 4px 24px rgba(15, 23, 42, 0.08);
+}
+
+/* ── LIGHT (v12 Balanced palette) ─────────────────────── */
+:root,
+[data-theme="light"] {
+  --bg-0: #fafafa;
+  --bg-1: #f3f4f6;
+  --bg-2: #eceef2;
+  --bg-3: #e3e8ed;
+  --bg-elev: #ffffff;
+  --bg-overlay: rgba(250, 250, 250, 0.86);
+
+  --ink-0: #0f1a14;
+  --ink-1: #2a3540;
+  --ink-2: #475464;
+  --ink-3: #6a7585;
+  --ink-4: #9ca5b1;
+
+  --line: #e3e8ed;
+  --line-strong: #cdd5dc;
+  --line-faint: #eef1f4;
+
+  --accent: oklch(0.52 0.11 156);
+  --accent-hover: oklch(0.45 0.10 156);
+  --accent-soft: oklch(0.96 0.02 156);
+  --accent-ring: oklch(0.52 0.11 156 / 0.20);
+  --accent-ink: #ffffff;
+
+  /* Filled CTA — constant dark green + white text in BOTH modes */
+  --cta: oklch(0.45 0.10 156);
+  --cta-hover: oklch(0.40 0.10 156);
+  --cta-fg: #ffffff;
+
+  --pass: oklch(0.62 0.16 142);
+  --pass-soft: oklch(0.96 0.04 142);
+  --fail: oklch(0.58 0.21 27);
+  --fail-soft: oklch(0.96 0.05 27);
+  --flaky: oklch(0.74 0.16 75);
+  --flaky-soft: oklch(0.96 0.06 75);
+  --skip: oklch(0.55 0.005 270);
+  --skip-soft: oklch(0.96 0 270);
+  --info: oklch(0.58 0.16 240);
+  --info-soft: oklch(0.96 0.04 240);
+}
+
+/* ── DARK (v12 Balanced palette) ──────────────────────── */
+[data-theme="dark"] {
+  --bg-0: #09090b;
+  --bg-1: #131316;
+  --bg-2: #1a1a1f;
+  --bg-3: #222228;
+  --bg-elev: #1a1a1f;
+  --bg-overlay: rgba(9, 9, 11, 0.86);
+
+  --ink-0: #f4f4f5;
+  --ink-1: #d4d6de;
+  --ink-2: #b0b4be;
+  --ink-3: #888d98;
+  --ink-4: #62666e;
+
+  --line: #28282e;
+  --line-strong: #3a3a42;
+  --line-faint: #1c1c20;
+
+  --accent: oklch(0.75 0.10 154);
+  --accent-hover: oklch(0.82 0.07 154);
+  --accent-soft: oklch(0.25 0.025 154);
+  --accent-ring: oklch(0.75 0.10 154 / 0.30);
+  --accent-ink: oklch(0.12 0.01 154);
+
+  /* Filled CTA — same constant dark green as light mode for cross-theme parity */
+  --cta: oklch(0.45 0.10 156);
+  --cta-hover: oklch(0.52 0.11 156);
+  --cta-fg: #ffffff;
+
+  --pass: oklch(0.83 0.18 142);
+  --pass-soft: oklch(0.83 0.18 142 / 0.14);
+  --fail: oklch(0.74 0.18 22);
+  --fail-soft: oklch(0.74 0.18 22 / 0.14);
+  --flaky: oklch(0.86 0.16 80);
+  --flaky-soft: oklch(0.86 0.16 80 / 0.14);
+  --skip: oklch(0.72 0.005 270);
+  --skip-soft: oklch(0.72 0.005 270 / 0.14);
+  --info: oklch(0.78 0.13 232);
+  --info-soft: oklch(0.78 0.13 232 / 0.14);
+}
+
+/* ── AUTO ─ system に追従 ──────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] {
+    --bg-0: #09090b; --bg-1: #131316; --bg-2: #1a1a1f; --bg-3: #222228;
+    --bg-elev: #1a1a1f; --bg-overlay: rgba(9, 9, 11, 0.86);
+    --ink-0: #f4f4f5; --ink-1: #d4d6de; --ink-2: #b0b4be; --ink-3: #888d98; --ink-4: #62666e;
+    --line: #28282e; --line-strong: #3a3a42; --line-faint: #1c1c20;
+    --accent: oklch(0.75 0.10 154); --accent-hover: oklch(0.82 0.07 154);
+    --accent-soft: oklch(0.25 0.025 154); --accent-ring: oklch(0.75 0.10 154 / 0.30);
+    --accent-ink: oklch(0.12 0.01 154);
+    --cta: oklch(0.45 0.10 156); --cta-hover: oklch(0.52 0.11 156); --cta-fg: #ffffff;
+    --pass: oklch(0.83 0.18 142); --pass-soft: oklch(0.83 0.18 142 / 0.14);
+    --fail: oklch(0.74 0.18 22); --fail-soft: oklch(0.74 0.18 22 / 0.14);
+    --flaky: oklch(0.86 0.16 80); --flaky-soft: oklch(0.86 0.16 80 / 0.14);
+    --skip: oklch(0.72 0.005 270); --skip-soft: oklch(0.72 0.005 270 / 0.14);
+    --info: oklch(0.78 0.13 232); --info-soft: oklch(0.78 0.13 232 / 0.14);
+  }
+}

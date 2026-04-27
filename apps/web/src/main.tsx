@@ -20,7 +20,7 @@ import type { Persona } from "./components/PersonaToggle";
 import { QAView } from "./views/QAView";
 import { DeveloperView } from "./views/DeveloperView";
 import { InsightsView } from "./views/InsightsView";
-import "./styles.css";
+import "./styles/index.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

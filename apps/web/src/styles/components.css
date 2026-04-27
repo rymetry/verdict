@@ -1,0 +1,102 @@
+/* ── status badge ─────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 3px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+}
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.badge.failed { color: var(--fail); background: var(--fail-soft); }
+.badge.flaky { color: var(--flaky); background: var(--flaky-soft); }
+.badge.passed { color: var(--pass); background: var(--pass-soft); }
+.badge.skipped { color: var(--skip); background: var(--skip-soft); }
+.badge.running { color: var(--info); background: var(--info-soft); }
+.badge.running::before { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+/* ── kv ────────────────────────────────────────────────── */
+.kv {
+  display: grid;
+  grid-template-columns: minmax(0, 110px) minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.kv > * {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line-faint);
+}
+.kv > *:nth-last-child(-n+2) { border-bottom: none; }
+.kv dt {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.kv dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-0);
+  overflow-wrap: anywhere;
+}
+
+
+/* ── card (titled panel, used in QA / Developer / Insights views) ─ */
+.locator-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: 0;
+  overflow: hidden;
+}
+.locator-card > h4 {
+  margin: 0;
+  padding: 11px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line-faint);
+  background: var(--bg-1);
+}
+.locator-card > div { padding: 12px 14px; }
+
+/* ── shared utility: inline error ──────────────────────── */
+.error-inline {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--fail) 40%, transparent);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--fail-soft);
+  color: var(--fail);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.error-inline::before {
+  content: "✕ ";
+  font-weight: 600;
+}
+
+/* ── shared utility: muted small text ──────────────────── */
+.muted-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.55;
+}
