@@ -1,8 +1,9 @@
 // Vite エントリポイント。Provider 設置と root mount のみを担う薄い層に保つ。
-// App ロジック本体は `App.tsx` 側に分離している (integration test 容易性のため)。
+// 画面合成 (shell layout / 各 view) は TanStack Router 配下の routes/* に委譲する。
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "@tanstack/react-router";
 
 // 自前ホストのフォントを globals.css より前に import する。
 // FOUC 抑止に加え、`@font-face` を base layer 適用前に登録することで
@@ -13,8 +14,8 @@ import "@fontsource/noto-sans-jp/400.css";
 import "@fontsource/noto-sans-jp/500.css";
 import "@fontsource/noto-sans-jp/700.css";
 
-import { App } from "./App";
 import { FoundationPreview } from "./components/foundation/FoundationPreview";
+import { router } from "./router";
 import { installThemeEffects } from "./store/theme-effects";
 
 import "./styles/globals.css";
@@ -28,7 +29,7 @@ import "./styles.css";
 // 補足: Vite は通常 entry (main.tsx) 変更時に full page reload するため HMR 経路で
 // 多重 install されるケースは稀。ただし theme-effects / app-store が HMR boundary に
 // なる依存変更時は本ファイルの top-level が再評価され listener が累積する可能性がある。
-// 厳密な idempotent 化 (`import.meta.hot?.dispose` 経由) は γ 以降の課題。
+// 厳密な idempotent 化 (`import.meta.hot?.dispose` 経由) は別 issue で扱う。
 // 開発時に多重 install を検知するため dev guard を仕込んでおく。
 if (
   typeof import.meta !== "undefined" &&
@@ -63,8 +64,6 @@ function isFoundationPreview(): boolean {
   try {
     return new URLSearchParams(window.location.search).get("foundation") === "1";
   } catch (error) {
-    // location.search 改竄 / 不正 URL 等で URLSearchParams が throw する稀な経路。
-    // 通常 App にフォールバックするのが正しい挙動だが、silent にせず dev で痕跡を残す。
     if (typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV)) {
       // eslint-disable-next-line no-console -- 開発時の診断目的に限定
       console.warn("[main] isFoundationPreview: URLSearchParams 解析失敗", error);
@@ -82,7 +81,7 @@ if (rootElement === null) {
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      {isFoundationPreview() ? <FoundationPreview /> : <App />}
+      {isFoundationPreview() ? <FoundationPreview /> : <RouterProvider router={router} />}
     </QueryClientProvider>
   </StrictMode>
 );

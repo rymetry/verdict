@@ -1,6 +1,9 @@
 // app-shell の上端 TopBar。Brand / Breadcrumbs / Persona+Rerun+Theme actions を 3 段組で並べる。
-// store からの state 取得は呼び出し側 (main.tsx) で selector を介して注入する設計とし、
-// TopBar 自体は純粋な presentational component に保つ (テスト容易性 + γ 移行時の流用性)。
+// store からの state 取得は呼び出し側 (__root.tsx) で selector を介して注入する設計とし、
+// TopBar 自体は純粋な presentational component に保つ (テスト容易性のため)。
+//
+// γ で `onPersonaChange` を撤去した: persona は URL segment が Source of Truth となり、
+// PersonaToggle 内部で `useNavigate` を直接呼び出す。TopBar は active 表示用に persona 値だけ受け取る。
 import * as React from "react";
 import type { RunStatus } from "@pwqa/shared";
 
@@ -10,8 +13,8 @@ import { PersonaToggle } from "@/components/shell/PersonaToggle";
 import { RerunButton } from "@/components/shell/RerunButton";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { cn } from "@/lib/utils";
+import type { PersonaView } from "@/lib/persona-view";
 import type { ThemePreference } from "@/store/app-store";
-import type { PersonaView } from "@/store/persona-store";
 
 interface TopBarProps {
   // Brand
@@ -23,9 +26,8 @@ interface TopBarProps {
   activeRunId?: string | null;
   activeRunStatus?: RunStatus | null;
 
-  // Persona
+  // Persona (active 表示専用 — 切替は PersonaToggle 内の navigate に委譲)
   persona: PersonaView;
-  onPersonaChange: (next: PersonaView) => void;
 
   // Rerun
   onRerun: () => void;
@@ -46,7 +48,6 @@ export function TopBar({
   activeRunId,
   activeRunStatus,
   persona,
-  onPersonaChange,
   onRerun,
   canRerun,
   isRunning,
@@ -75,7 +76,7 @@ export function TopBar({
       />
 
       <div className="flex items-center gap-2">
-        <PersonaToggle value={persona} onValueChange={onPersonaChange} />
+        <PersonaToggle value={persona} />
         <RerunButton onRerun={onRerun} canRerun={canRerun} isRunning={isRunning} />
         <ThemeToggle value={theme} onValueChange={onThemeChange} />
       </div>
