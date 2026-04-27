@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   QueryClient,
@@ -24,18 +24,22 @@ import {
   startRun,
   WorkbenchApiError
 } from "./api/client";
-import { connectWorkbenchEvents, type EventStream } from "./api/events";
 import { ProjectPicker } from "./features/project-picker/ProjectPicker";
 import { TestInventoryPanel } from "./features/test-inventory/TestInventoryPanel";
 import { RunConsole } from "./features/run-console/RunConsole";
 import { FailureReview } from "./features/failure-review/FailureReview";
 import { FoundationPreview } from "./components/foundation/FoundationPreview";
-import { ThemeProvider } from "./hooks/use-theme";
+import { useWorkbenchEvents } from "./hooks/use-workbench-events";
+import { useRunStore } from "./store/run-store";
+import { installThemeEffects } from "./store/theme-effects";
 
 import "./styles/globals.css";
 // TODO(issue-#11): δ で QA View を Tailwind 化したタイミングで削除する。
 // それまでは既存 Phase 1 features の見た目を維持する目的の暫定スタイル。
 import "./styles.css";
+
+// React tree の外で 1 回だけ install する (Provider のネストを避けるため)
+installThemeEffects();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -60,10 +64,8 @@ function isFoundationPreview(): boolean {
 }
 
 function App() {
-  const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined);
-  const [eventStream] = useState<EventStream>(() => connectWorkbenchEvents());
-
-  useEffect(() => () => eventStream.close(), [eventStream]);
+  const activeRunId = useRunStore((s) => s.activeRunId);
+  const eventStream = useWorkbenchEvents();
 
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -97,10 +99,7 @@ function App() {
 
       <section className="grid">
         <ProjectPicker />
-        <RunControls
-          project={project}
-          onRunStarted={(id) => setActiveRunId(id)}
-        />
+        <RunControls project={project} />
       </section>
 
       {project ? (
@@ -117,18 +116,18 @@ function App() {
 
 interface RunControlsProps {
   project: ProjectSummary | null;
-  onRunStarted: (runId: string) => void;
 }
 
-function RunControls({ project, onRunStarted }: RunControlsProps) {
+function RunControls({ project }: RunControlsProps) {
   const queryClientLocal = useQueryClient();
+  const startTracking = useRunStore((s) => s.startTracking);
   const [specPath, setSpecPath] = useState("");
   const [grep, setGrep] = useState("");
 
   const startMutation = useMutation({
     mutationFn: async (request: RunRequest) => startRun(request),
-    onSuccess: (response) => {
-      onRunStarted(response.runId);
+    onSuccess: (response, request) => {
+      startTracking(response.runId, request);
       void queryClientLocal.invalidateQueries({ queryKey: ["runs"] });
     }
   });
@@ -212,10 +211,8 @@ if (rootElement === null) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        {isFoundationPreview() ? <FoundationPreview /> : <App />}
-      </QueryClientProvider>
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      {isFoundationPreview() ? <FoundationPreview /> : <App />}
+    </QueryClientProvider>
   </StrictMode>
 );

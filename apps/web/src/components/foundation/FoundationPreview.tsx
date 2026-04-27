@@ -22,10 +22,17 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@/components/ui/tooltip";
-import { useTheme, isThemePreference } from "@/hooks/use-theme";
+import {
+  isThemePreference,
+  selectResolvedTheme,
+  useAppStore
+} from "@/store/app-store";
 
 export function FoundationPreview(): React.ReactElement {
-  const { theme, resolvedTheme, setTheme } = useTheme();
+  // Zustand の atomic selector で必要な値だけ subscribe して再レンダリングを最小化する
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
+  const resolvedTheme = useAppStore(selectResolvedTheme);
   return (
     <TooltipProvider delayDuration={150}>
       <div className="min-h-screen bg-[var(--bg-0)] text-[var(--ink-0)]">

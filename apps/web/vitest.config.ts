@@ -25,7 +25,8 @@ export default defineConfig({
         "src/components/ui/**",
         "src/components/foundation/**",
         "src/hooks/**",
-        "src/lib/**"
+        "src/lib/**",
+        "src/store/**"
       ],
       // foundation 範囲では 80% を強制 (Issue #7 受け入れ基準)
       thresholds: {

@@ -8,7 +8,7 @@ import type { EventStream } from "../../api/events";
 
 interface RunConsoleProps {
   eventStream?: EventStream;
-  activeRunId?: string;
+  activeRunId: string | null;
 }
 
 interface RunConsoleState {

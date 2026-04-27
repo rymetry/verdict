@@ -38,7 +38,7 @@ if (typeof window !== "undefined") {
 }
 
 // jsdom は matchMedia を実装しないため、最低限のスタブを提供する。
-// useTheme の auto 経路や matchMedia 変更ハンドラをテストするため、
+// useAppStore の auto 経路 / theme-effects の subscribe をテストするため、
 // 個別テストで `vi.spyOn(window, "matchMedia")` で上書きできる形にしておく。
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   type Listener = (event: MediaQueryListEvent) => void;
