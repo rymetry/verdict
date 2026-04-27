@@ -5,12 +5,12 @@
   "type": "module",
   "packageManager": "pnpm@10.8.0",
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "pnpm --filter '@pwqa/*' --parallel dev",
     "dev:agent": "pnpm --filter @pwqa/agent dev",
     "dev:web": "pnpm --filter @pwqa/web dev",
-    "build": "pnpm -r build",
-    "typecheck": "pnpm --filter @pwqa/shared build && pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "build": "pnpm --filter '@pwqa/*' build",
+    "typecheck": "pnpm --filter @pwqa/shared build && pnpm --filter '@pwqa/*' typecheck",
+    "test": "pnpm --filter '@pwqa/*' test"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

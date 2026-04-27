@@ -19,9 +19,29 @@ export interface BuildInventoryRequest {
   timeoutMs?: number;
 }
 
+/**
+ * Per-project execution stub Playwright includes for every spec entry. Each
+ * project (chromium, firefox, …) gets one of these. The shared spec metadata
+ * (title, tags, line) lives one level up on `PlaywrightListJsonSpec`.
+ */
+interface PlaywrightListJsonProjectStub {
+  projectId?: string;
+  projectName?: string;
+  expectedStatus?: string;
+  status?: string;
+  tags?: string[];
+  results?: unknown[];
+}
+
 interface PlaywrightListJsonSpec {
-  file: string;
-  tests: PlaywrightListJsonTest[];
+  title: string;
+  file?: string;
+  line?: number;
+  column?: number;
+  id?: string;
+  tags?: string[];
+  ok?: boolean;
+  tests?: PlaywrightListJsonProjectStub[];
 }
 
 interface PlaywrightListJsonSuite {
@@ -33,25 +53,10 @@ interface PlaywrightListJsonSuite {
   suites?: PlaywrightListJsonSuite[];
 }
 
-interface PlaywrightListJsonTestEntry {
-  id?: string;
-  projectName?: string;
-  tags?: string[];
-}
-
-interface PlaywrightListJsonTest {
-  title: string;
-  id?: string;
-  line?: number;
-  column?: number;
-  tags?: string[];
-  results?: unknown[];
-  tests?: PlaywrightListJsonTestEntry[];
-}
-
 interface PlaywrightListJsonRoot {
   config?: {
     rootDir?: string;
+    configFile?: string;
   };
   suites?: PlaywrightListJsonSuite[];
   errors?: { message?: string }[];
@@ -76,53 +81,61 @@ function extractJsonBody(stdout: string): string | undefined {
   return undefined;
 }
 
-function relativePath(projectRoot: string, absolutePath: string): string {
-  const relative = path.relative(projectRoot, absolutePath);
-  return relative === "" ? path.basename(absolutePath) : relative;
+function resolveSpecFile(
+  projectRoot: string,
+  testRootDir: string | undefined,
+  specFileFromJson: string
+): { absolute: string; relative: string } {
+  if (path.isAbsolute(specFileFromJson)) {
+    return { absolute: specFileFromJson, relative: path.relative(projectRoot, specFileFromJson) };
+  }
+  // Playwright's --list reporter emits paths relative to `config.rootDir`
+  // (typically the test directory). Resolve against rootDir when present;
+  // fall back to projectRoot for configs that disable rootDir.
+  const base = testRootDir ?? projectRoot;
+  const absolute = path.resolve(base, specFileFromJson);
+  return { absolute, relative: path.relative(projectRoot, absolute) };
 }
 
-function extractTags(spec: PlaywrightListJsonSpec, test: PlaywrightListJsonTest): string[] {
+function extractTags(
+  spec: PlaywrightListJsonSpec,
+  stub: PlaywrightListJsonProjectStub | undefined
+): string[] {
   const tags = new Set<string>();
-  for (const tag of test.tags ?? []) tags.add(tag);
-  for (const entry of test.tests ?? []) {
-    for (const tag of entry.tags ?? []) tags.add(tag);
-  }
+  for (const tag of spec.tags ?? []) tags.add(tag);
+  for (const tag of stub?.tags ?? []) tags.add(tag);
   return Array.from(tags);
 }
 
 function flattenSuite(
   projectRoot: string,
+  rootDir: string | undefined,
   suite: PlaywrightListJsonSuite,
   describePath: string[],
-  fileFromAncestor: string | undefined,
   emit: (specFile: string, test: TestCase) => void
 ): void {
-  const file = suite.file ?? fileFromAncestor;
   for (const spec of suite.specs ?? []) {
-    const specFile = spec.file ?? file;
+    const specFile = spec.file ?? suite.file;
     if (!specFile) continue;
-    const absoluteSpec = path.isAbsolute(specFile) ? specFile : path.join(projectRoot, specFile);
-    const relSpec = relativePath(projectRoot, absoluteSpec);
-    for (const test of spec.tests) {
-      const projectEntry = test.tests?.[0];
-      const id = test.id ?? projectEntry?.id ?? `${relSpec}:${test.line ?? 0}:${test.title}`;
-      const testCase: TestCase = {
-        id,
-        title: test.title,
-        filePath: absoluteSpec,
-        relativePath: relSpec,
-        line: test.line ?? 1,
-        column: test.column ?? 0,
-        describePath: [...describePath],
-        tags: extractTags(spec, test),
-        projectName: projectEntry?.projectName
-      };
-      emit(relSpec, testCase);
-    }
+    const { absolute, relative } = resolveSpecFile(projectRoot, rootDir, specFile);
+    const stub = spec.tests?.[0];
+    const id = spec.id ?? `${relative}:${spec.line ?? 0}:${spec.title}`;
+    const testCase: TestCase = {
+      id,
+      title: spec.title,
+      filePath: absolute,
+      relativePath: relative,
+      line: spec.line ?? 1,
+      column: spec.column ?? 0,
+      describePath: [...describePath],
+      tags: extractTags(spec, stub),
+      projectName: stub?.projectName || undefined
+    };
+    emit(relative, testCase);
   }
   for (const child of suite.suites ?? []) {
     const nextDescribe = child.title ? [...describePath, child.title] : describePath;
-    flattenSuite(projectRoot, child, nextDescribe, file, emit);
+    flattenSuite(projectRoot, rootDir, child, nextDescribe, emit);
   }
 }
 
@@ -150,9 +163,10 @@ export function parsePlaywrightListJson(
     if (err.message) errors.push(err.message);
   }
 
+  const rootDir = parsed.config?.rootDir;
   const grouped = new Map<string, TestCase[]>();
   for (const suite of parsed.suites ?? []) {
-    flattenSuite(projectRoot, suite, [], suite.file, (specFile, testCase) => {
+    flattenSuite(projectRoot, rootDir, suite, [], (specFile, testCase) => {
       const list = grouped.get(specFile) ?? [];
       list.push(testCase);
       grouped.set(specFile, list);
