@@ -96,6 +96,27 @@ describe("useStartRunMutation", () => {
     );
   });
 
+  it("失敗時に console.error が呼ばれる (silent failure 防衛 / caller のサーフェス漏れ対策)", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(startRun).mockRejectedValue(new Error("upstream 503"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useStartRunMutation(), { wrapper: wrapper(client) });
+
+    const request = makeRunRequest({ projectId: "p-error-log" });
+    result.current.mutate(request);
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    // log の prefix と payload (RunRequest の主要 field) を pin する。
+    // 詳細メッセージ内容まで pin すると brittle になるため "プレフィクス + projectId 含む" を確認するに留める。
+    expect(errorSpy).toHaveBeenCalled();
+    const firstCall = errorSpy.mock.calls[0];
+    expect(firstCall?.[0]).toMatch(/useStartRunMutation/);
+    expect(firstCall?.[1]).toEqual(
+      expect.objectContaining({ projectId: "p-error-log", error: expect.any(Error) })
+    );
+    errorSpy.mockRestore();
+  });
+
   it("retry は 0 (POST /runs は副作用的なので多重起動を防ぐ)", async () => {
     vi.mocked(startRun).mockRejectedValue(new Error("transient"));
     // QueryClient defaults で `mutations.retry: 3` を上書きしても、フックの `retry: 0` が

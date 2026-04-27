@@ -1,10 +1,12 @@
 // TopBar の composition smoke test と aria 経由の構造確認。
 // 個別コンポーネントの詳細は各々のテストで担保するため、ここでは「全部入りで動くか」のみ。
+// γ (Issue #10) で PersonaToggle が router-aware になったため、Router context wrapper 配下で render する。
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { TopBar } from "@/components/shell/TopBar";
+import { renderInMinimalRouter } from "../../_helpers/minimal-router";
 
 afterEach(() => cleanup());
 
@@ -17,7 +19,6 @@ interface HarnessProps {
   activeRunId?: string | null;
   activeRunStatus?: import("@pwqa/shared").RunStatus | null;
   onRerun?: () => void;
-  onPersonaChange?: (n: "qa" | "dev" | "qmo") => void;
   onThemeChange?: (n: "light" | "dark" | "auto") => void;
 }
 
@@ -30,14 +31,12 @@ function renderHarness({
   activeRunId = "42",
   activeRunStatus = "passed",
   onRerun = vi.fn(),
-  onPersonaChange = vi.fn(),
   onThemeChange = vi.fn()
 }: HarnessProps = {}) {
-  return render(
+  const { router, Wrapper } = renderInMinimalRouter(
     <TopBar
       appVersion="9.9.9"
       persona={persona}
-      onPersonaChange={onPersonaChange}
       theme={theme}
       onThemeChange={onThemeChange}
       onRerun={onRerun}
@@ -48,55 +47,52 @@ function renderHarness({
       activeRunStatus={activeRunStatus}
     />
   );
+  return { router, ...render(<Wrapper />) };
 }
 
 describe("TopBar", () => {
-  it("Brand / Breadcrumbs / PersonaToggle / RerunButton / ThemeToggle を内包する", () => {
+  it("Brand / Breadcrumbs / PersonaToggle / RerunButton / ThemeToggle を内包する", async () => {
     renderHarness();
-    // brand
-    expect(screen.getByText("Playwright Workbench")).toBeInTheDocument();
-    // breadcrumbs
+    expect(await screen.findByText("Playwright Workbench")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Project context" })).toBeInTheDocument();
     expect(screen.getByText("acme")).toBeInTheDocument();
     expect(screen.getByText("Run #42")).toBeInTheDocument();
-    // persona tabs
     expect(screen.getByRole("tablist", { name: "Persona view" })).toBeInTheDocument();
-    // rerun
     expect(screen.getByRole("button", { name: /再実行/ })).toBeInTheDocument();
-    // theme
     expect(screen.getByRole("radiogroup", { name: "Theme" })).toBeInTheDocument();
   });
 
-  it("aria-label='Workbench top bar' を持つ banner", () => {
+  it("aria-label='Workbench top bar' を持つ banner", async () => {
     renderHarness();
     expect(
-      screen.getByRole("banner", { name: "Workbench top bar" })
+      await screen.findByRole("banner", { name: "Workbench top bar" })
     ).toBeInTheDocument();
   });
 
-  it("PersonaToggle 操作で onPersonaChange が dev を渡す", async () => {
+  it("PersonaToggle 操作で URL が `/dev` に navigate される", async () => {
     const user = userEvent.setup();
-    const onPersonaChange = vi.fn();
-    renderHarness({ persona: "qa", onPersonaChange });
-    await user.click(screen.getByRole("tab", { name: "Developer" }));
-    expect(onPersonaChange).toHaveBeenCalledWith("dev");
+    const { router } = renderHarness({ persona: "qa" });
+    await user.click(await screen.findByRole("tab", { name: "Developer" }));
+    expect(router.state.location.pathname).toBe("/dev");
   });
 
   it("ThemeToggle 操作で onThemeChange が dark を渡す", async () => {
     const user = userEvent.setup();
     const onThemeChange = vi.fn();
     renderHarness({ theme: "auto", onThemeChange });
-    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    await user.click(await screen.findByRole("radio", { name: "Dark" }));
     expect(onThemeChange).toHaveBeenCalledWith("dark");
   });
 
-  it("RerunButton の disabled は canRerun=false で確実に効く", () => {
+  it("RerunButton の disabled は canRerun=false で確実に効く", async () => {
     renderHarness({ canRerun: false });
-    expect(screen.getByRole("button", { name: /再実行/ })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: /再実行/ })).toBeDisabled();
   });
 
-  it("project / run が無いときは Breadcrumbs が描画されない", () => {
+  it("project / run が無いときは Breadcrumbs が描画されない", async () => {
     renderHarness({ projectName: null, activeRunId: null, activeRunStatus: null });
+    // banner が描画されたら shell 全体は mount 済み (router 解決完了の signal)
+    await screen.findByRole("banner", { name: "Workbench top bar" });
     expect(
       screen.queryByRole("navigation", { name: "Project context" })
     ).not.toBeInTheDocument();

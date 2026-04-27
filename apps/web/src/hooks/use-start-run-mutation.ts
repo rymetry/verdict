@@ -1,10 +1,12 @@
 // `startRun` API の呼び出しを共通化するカスタムフック。
-// - App.tsx の rerun mutation と RunControls の form submit で同型のロジックが
+// - `__root.tsx` の rerun mutation と `routes/qa.tsx` の RunControls form submit で同型のロジックが
 //   重複していたため共通化 (DRY)。
 // - 成功時に useRunStore.startTracking で active run を切替え + 関連 query を invalidate する。
 // - エラー時の UI 表示は呼び出し側が **必ず** `mutation.error` を `formatMutationError` 経由で
-//   ShellAlert / errorBlock 等に流し込む契約。caller がエラー surface を忘れると silent failure
-//   になるため、新規 caller を追加する場合はテストで surface 経路を pin すること。
+//   ShellAlert / errorBlock 等に流し込む契約。
+//   ただし caller の surface 漏れを silent にしないよう、本フック側でも onError で console.error する
+//   (defense-in-depth)。production でも console drop されない invariant (vite.config.ts) と組み合わせて、
+//   起動失敗が完全 silent になる経路を遮断する。
 //
 // retry: 0 は POST /runs が副作用的 (run 起動) なので必須。
 //   TanStack Query v5 では mutation の retry default も 0 だが、将来 main.tsx の QueryClient で
@@ -37,7 +39,26 @@ export function useStartRunMutation(): StartRunMutation {
     retry: 0,
     onSuccess: (response, request) => {
       startTracking(response.runId, request);
-      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      // invalidate は副作用的だが、同じ queryKey を購読しているコンポーネントの refetch 漏れを
+      // 防ぐため、rejection は log だけ残して握りつぶさない。本フックの呼び出し成功 (run 起動成功)
+      // 自体は完了しており、UI 状態は startTracking で先に確定しているため、ここで例外を上に
+      // 投げると意図せず caller に副作用エラーが流れてしまう。
+      queryClient.invalidateQueries({ queryKey: ["runs"] }).catch((error) => {
+        // eslint-disable-next-line no-console -- invalidate 失敗を本番でも検出
+        console.error("[useStartRunMutation] invalidateQueries failed", error);
+      });
+    },
+    onError: (error, variables) => {
+      // caller が UI 上で `mutation.error` を surface する契約。それを忘れた場合の silent 化を
+      // 防ぐため、フック側でも console.error しておく (production でも drop されない)。
+      // variables (= RunRequest) を一緒に出すことで、どの run 起動が失敗したか後追い可能にする。
+      // eslint-disable-next-line no-console -- POST /runs 失敗は本番でも痕跡を残す
+      console.error("[useStartRunMutation] startRun failed", {
+        projectId: variables.projectId,
+        specPath: variables.specPath,
+        grep: variables.grep,
+        error
+      });
     }
   });
 }
