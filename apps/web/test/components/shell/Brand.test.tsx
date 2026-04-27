@@ -32,4 +32,16 @@ describe("Brand", () => {
     // __APP_VERSION__ は package.json の version と一致するため、文字列 "v" の prefix だけ確認
     expect(screen.getByText(/^v/)).toBeInTheDocument();
   });
+
+  it("__APP_VERSION__ が未注入のときは '0.0.0-unknown' fallback で識別可能にする", () => {
+    // typeof guard 経路を再現するため globalThis から一時的に剥がす
+    const original = globalThis.__APP_VERSION__;
+    delete (globalThis as { __APP_VERSION__?: string }).__APP_VERSION__;
+    try {
+      render(<Brand />);
+      expect(screen.getByText(/0\.0\.0-unknown/)).toBeInTheDocument();
+    } finally {
+      globalThis.__APP_VERSION__ = original;
+    }
+  });
 });

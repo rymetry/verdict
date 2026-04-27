@@ -13,10 +13,9 @@ interface BrandProps {
   className?: string;
 }
 
-// Brand を import する経路 (例: 別アプリでの再利用 / SSR ツール) で vite define が無い場合の
-// ReferenceError を避けるため、typeof guard で安全な fallback を返す。
-// fallback は **正規 SemVer ではない文字列** にすることで「定数注入失敗」を画面上で識別可能にする
-// (test/setup.ts は "0.0.0-test" で別経路を識別)。
+// `__APP_VERSION__` は vite define で注入される定数。test/setup.ts では globalThis 上に
+// `"0.0.0-test"` を仕込む。いずれの経路も無い場合は `"0.0.0-unknown"` を返し、
+// 「定数注入失敗」を UI 上で識別可能にする (正規 SemVer ではない suffix で運用判別する)。
 function readAppVersion(): string {
   return typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "0.0.0-unknown";
 }

@@ -7,6 +7,9 @@ import { cleanup } from "@testing-library/react";
 // vite の `define` で注入される `__APP_VERSION__` は本番ビルド時に文字列リテラル化されるが、
 // vitest 経由ではビルドが介在しないため undefined のまま参照されてしまう。
 // テストでは固定値を仕込み、Brand 等の default 表示が ReferenceError を起こさないようにする。
+//
+// `"0.0.0-test"` という値は、Brand が typeof guard 経路に落ちた時の `"0.0.0-unknown"` と
+// **別経路で識別可能**にするための prerelease suffix (test / unknown / 本番値の 3 経路を区別)。
 // 型は vite-env.d.ts の `declare global { var __APP_VERSION__: string }` で表現済み。
 if (typeof globalThis.__APP_VERSION__ !== "string") {
   globalThis.__APP_VERSION__ = "0.0.0-test";

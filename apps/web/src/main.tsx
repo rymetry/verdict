@@ -22,7 +22,10 @@ import "./styles/globals.css";
 // それまでは既存 Phase 1 features の見た目を維持する目的の暫定スタイル。
 import "./styles.css";
 
-// React tree の外で 1 回だけ install する (Provider のネストを避けるため)
+// React tree の外で 1 回だけ install する。
+// React Provider ではないため tree への配置は不要で、subscribe 重複や StrictMode の
+// 二重 mount を避けるためにモジュール top-level で実行する (HMR 時の多重 install は
+// theme-effects 自身が idempotent なので安全)。
 installThemeEffects();
 
 const queryClient = new QueryClient({

@@ -1,12 +1,8 @@
-// app-shell + Phase 1 features をマウントするルートコンポーネント。
-// main.tsx から分離した理由:
-//  - rerun banner / activeRun query / persona / theme の配線が増え、main.tsx に直書きすると
-//    エントリポイント (root mount, Provider 設置) と App ロジックが mix されて読みづらい
-//  - integration test (`apps/web/test/App.test.tsx`) で QueryClientProvider と一緒に
-//    render するために named export が必要
+// main.tsx (entry) と分離する理由:
+//  - SRP: entry は Provider / font / root mount のみ。app-shell ロジックは本ファイルに集約
+//  - 統合テスト容易性: QueryClientProvider 配下で App を直接 render するため named export
 import * as React from "react";
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { ProjectSummary, RunRequest } from "@pwqa/shared";
 
 import { fetchCurrentProject, fetchHealth, fetchRun } from "@/api/client";
@@ -51,19 +47,19 @@ export function App(): React.ReactElement {
   });
 
   // active run のメタ (status / 完了時刻 等) を取得し、TopBar の status badge に反映する。
-  // - queryFn は activeRunId が文字列前提。enabled で完全にゲートし、null fallback パターンは廃止。
+  // - queryFn は activeRunId が string であることを enabled でゲートしてから呼ぶ。
+  //   万一 enabled が破られた場合は silent return ではなく throw して可視化する。
   // - refetchInterval は run 中 (running / queued) は 2 秒、それ以外は止める。
-  const isActiveRunIdValid = typeof activeRunId === "string" && activeRunId.length > 0;
   const activeRunQuery = useQuery({
     queryKey: ["runs", activeRunId],
     queryFn: () => {
-      if (!isActiveRunIdValid) {
-        // enabled で防いでいる invariant 違反 (silent return ではなく明示的に throw)
+      // type guard で string への narrowing を有効化 (fetchRun は string 必須)
+      if (typeof activeRunId !== "string" || activeRunId.length === 0) {
         throw new Error("activeRunQuery: activeRunId が不正なまま queryFn が呼ばれた");
       }
       return fetchRun(activeRunId);
     },
-    enabled: isActiveRunIdValid,
+    enabled: typeof activeRunId === "string" && activeRunId.length > 0,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       return status === "running" || status === "queued" ? 2_000 : false;
@@ -75,9 +71,10 @@ export function App(): React.ReactElement {
   const projectDisplayName = project ? deriveProjectDisplayName(project.rootPath) : null;
   const agentState = deriveAgentState(healthQuery.data, healthQuery.error);
 
-  // chrome の "再実行" は最後に投入した RunRequest を再送する。
+  // shell 上の "再実行" は最後に投入した RunRequest を再送する。
   // running 中は disabled (RerunButton 側でも isRunning 表示)。
-  // server 側に専用 rerun endpoint が無いため client で lastRequest を保持して再送する設計。
+  // Phase 1 では server に専用 rerun endpoint を持たないため client で lastRequest を保持して再送する。
+  // (専用 endpoint 採用は γ 以降の Open Question として PLAN.v2 §34 に残している)
   const rerunMutation = useStartRunMutation();
 
   const isActiveRunRunning = activeRun?.status === "running" || activeRun?.status === "queued";
@@ -138,6 +135,9 @@ export function App(): React.ReactElement {
         <ShellAlert
           key={`active-run-${activeRunQuery.failureCount}`}
           message={activeRunErrorMessage}
+          // dismiss で React Query 側の error をクリア (UX dead-end 回避)。
+          // refetch trigger は polling が再開した時に自然に効く。
+          onDismiss={() => activeRunQuery.refetch()}
         />
       ) : null}
 
@@ -174,18 +174,14 @@ interface RunControlsProps {
 }
 
 function RunControls({ project }: RunControlsProps): React.ReactElement {
-  const queryClient = useQueryClient();
-  const [specPath, setSpecPath] = useState("");
-  const [grep, setGrep] = useState("");
+  const [specPath, setSpecPath] = React.useState("");
+  const [grep, setGrep] = React.useState("");
 
   const startMutation = useStartRunMutation();
 
   const errorMessage = startMutation.error
     ? formatMutationError(startMutation.error, "Failed to start run")
     : null;
-
-  // queryClient は cache 操作のために hooks 規約遵守目的で取得 (現状は useStartRunMutation 内で利用済)
-  void queryClient;
 
   if (!project) {
     return (

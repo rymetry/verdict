@@ -98,4 +98,33 @@ describe("useStartRunMutation", () => {
     // 失敗時は activeRunId / lastRequest を更新しない
     expect(useRunStore.getState().activeRunId).toBeNull();
   });
+
+  it("WorkbenchApiError も Error として保持され instanceof で narrow 可能", async () => {
+    const { WorkbenchApiError } = await import("@/api/client");
+    vi.mocked(startRun).mockRejectedValue(
+      new WorkbenchApiError("blocked", "RUN_BLOCKED", 409)
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const { result } = renderHook(() => useStartRunMutation(), { wrapper: wrapper(client) });
+    result.current.mutate({ projectId: "p1", headed: false });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toBeInstanceOf(WorkbenchApiError);
+    expect((result.current.error as InstanceType<typeof WorkbenchApiError>).code).toBe(
+      "RUN_BLOCKED"
+    );
+  });
+
+  it("retry は 0 (POST /runs は副作用的なので多重起動を防ぐ)", async () => {
+    vi.mocked(startRun).mockRejectedValue(new Error("transient"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const { result } = renderHook(() => useStartRunMutation(), { wrapper: wrapper(client) });
+    result.current.mutate({ projectId: "p1", headed: false });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    // retry が走らないため startRun は 1 回だけ呼ばれる (デフォルト 3 回 retry なら 4 回呼ばれる)
+    expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
+  });
 });
