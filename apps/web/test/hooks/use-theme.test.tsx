@@ -12,8 +12,14 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 beforeEach(() => {
-  // 念のため毎テスト前にクリア
-  window.localStorage.clear();
+  // 念のため毎テスト前にクリア。
+  // Node 25 のネイティブ Web Storage 実装は jsdom と異なり `clear()` が無いため、
+  // 既知のキーを直接 removeItem する形にしてランタイム差を吸収する。
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // 環境依存の例外は無視 (テスト前提条件ではない)
+  }
   document.documentElement.className = "";
   document.documentElement.removeAttribute("data-theme");
   document.documentElement.removeAttribute("data-theme-preference");
