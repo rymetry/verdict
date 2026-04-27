@@ -1,8 +1,16 @@
 /**
  * Style entry point.
- * Order matters: tokens → base → shell → components → workspace → views.
+ * Order matters: fonts → tokens → base → shell → components → workspace → views.
  * Tokens declare CSS variables consumed by everything below.
+ *
+ * Self-host Geist (sans + mono) via @fontsource-variable to drop the
+ * jsdelivr CDN dependency and the SRI gap that came with it.
+ * Noto Sans JP stays on Google Fonts (subsetted at request time) — bundling
+ * the variable JP face would add ~600KB to the tree.
  */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
 @import "./tokens.css";
 @import "./base.css";
 @import "./shell.css";
