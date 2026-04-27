@@ -29,7 +29,15 @@ import {
 } from "@/api/client";
 
 vi.mock("@/hooks/use-workbench-events", () => ({
-  useWorkbenchEvents: () => ({ events: [], status: "closed" })
+  // δ: useWorkbenchEvents は EventStream を返す契約に変わったため、テスト用に最小実装を返す。
+  // useWsConnectionState は React の useSyncExternalStore 経路。テストでは固定値を返す。
+  useWorkbenchEvents: () => ({
+    subscribe: () => () => {},
+    subscribeState: () => () => {},
+    getState: () => "open",
+    close: () => {}
+  }),
+  useWsConnectionState: () => "open"
 }));
 
 beforeEach(() => {
@@ -135,9 +143,13 @@ describe("pathnameToPersona (URL → persona 派生)", () => {
 });
 
 describe("各 persona route の直接アクセス", () => {
-  it("`/qa` を直接開くと QA の Run controls / Project picker が描画される", async () => {
+  it("`/qa` を直接開くとプロジェクト未オープン状態で ProjectPicker が描画される", async () => {
+    // δ で QA View は project null のとき ProjectPicker のみを中央に表示する設計に変更
+    // (Run controls / inventory / failure review は project が前提のため空で出さない)。
     renderWithRouter({ initialPath: "/qa" });
-    expect(await screen.findByText("Run controls")).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("Absolute path to a Playwright project")
+    ).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "QA", selected: true })).toBeInTheDocument();
   });
 

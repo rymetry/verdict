@@ -11,9 +11,9 @@ export default defineConfig({
     }
   },
   test: {
-    // δ (Issue #11) で Phase 1 features が Tailwind 化されるまでの間、
-    // src 配下に残る既存テストも対象に含める (移行後に src/** glob を撤去)
-    include: ["test/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
+    // δ (Issue #11) で QA View の Tailwind 化が完了したため src/** glob は撤去。
+    // テストはすべて test/ 配下に集約する。
+    include: ["test/**/*.test.{ts,tsx}"],
     environment: "jsdom",
     setupFiles: ["./test/setup.ts"],
     globals: false,
@@ -22,14 +22,15 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html"],
       include: [
+        "src/api/events.ts",
         "src/components/ui/**",
-        "src/components/foundation/**",
         "src/components/shell/**",
+        "src/features/**",
         "src/hooks/**",
         "src/lib/**",
         "src/store/**"
       ],
-      // foundation 範囲では 80% を強制 (Issue #7 受け入れ基準)
+      // δ で QA features を移植したため features/** も coverage 対象に追加
       thresholds: {
         lines: 80,
         statements: 80,

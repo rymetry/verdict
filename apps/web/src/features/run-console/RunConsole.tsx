@@ -1,17 +1,32 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+// 進行中 run の stdout/stderr を WebSocket 経由で表示するパネル。
+// δ (Issue #11) で Tailwind + shadcn primitives へ移植した。
+//
+// 配線:
+//  - eventStream は WorkbenchEventsContext から取得する (RootLayout で生成された singleton)。
+//  - activeRunId は run-store から購読 (qa.tsx で渡す)。
+//  - state machine は initial state + applyEvent で immutable に更新する。
+//
+// silent failure ガード:
+//  - parse 失敗は events.ts 側で console.error する (本ファイルではフィルタしない)。
+//  - state listener 内 throw は events.ts 側で握り潰さず log する。
+import * as React from "react";
 import {
   RunCompletedPayloadSchema,
   RunStdStreamPayloadSchema,
   type WorkbenchEvent
 } from "@pwqa/shared";
-import type { EventStream } from "../../api/events";
+
+import type { EventStream } from "@/api/events";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface RunConsoleProps {
-  eventStream?: EventStream;
+  eventStream: EventStream;
   activeRunId: string | null;
 }
 
-interface RunConsoleState {
+export interface RunConsoleState {
   status: "idle" | "running" | "passed" | "failed" | "cancelled" | "error";
   exitCode: number | null;
   stdout: string[];
@@ -36,12 +51,12 @@ function trim(lines: string[], next: string): string[] {
   return [...lines.slice(lines.length - MAX_LINES + 1), next];
 }
 
-export function RunConsole({ eventStream, activeRunId }: RunConsoleProps) {
-  const [state, setState] = useState<RunConsoleState>(initialState);
-  const stdoutRef = useRef<HTMLPreElement>(null);
+export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React.ReactElement {
+  const [state, setState] = React.useState<RunConsoleState>(initialState);
+  const stdoutRef = React.useRef<HTMLPreElement>(null);
 
-  useEffect(() => {
-    if (!eventStream || !activeRunId) return undefined;
+  React.useEffect(() => {
+    if (!activeRunId) return undefined;
     setState(initialState);
     const unsubscribe = eventStream.subscribe((event: WorkbenchEvent) => {
       if (event.runId !== activeRunId) return;
@@ -52,39 +67,82 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps) {
     };
   }, [eventStream, activeRunId]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (stdoutRef.current) {
       stdoutRef.current.scrollTop = stdoutRef.current.scrollHeight;
     }
   }, [state.stdout]);
 
-  const statusLabel = useMemo(() => {
-    if (!activeRunId) return "Idle — start a run from the inventory above.";
-    return `Run ${activeRunId.slice(0, 12)} · ${state.status}`;
-  }, [activeRunId, state.status]);
+  const statusLabel = activeRunId
+    ? `Run ${activeRunId.slice(0, 12)} · ${state.status}`
+    : "Idle — テスト実行は左カラムから開始します。";
 
   return (
-    <article className="panel panelPrimary">
-      <p className="panelLabel">Run console</p>
-      <p className="muted">{statusLabel}</p>
-      {state.summary ? (
-        <p className="summary">
-          {state.summary.passed} passed · {state.summary.failed} failed · {state.summary.skipped}{" "}
-          skipped · {state.summary.flaky} flaky · total {state.summary.total}
-          {state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}
-        </p>
-      ) : null}
-      <pre ref={stdoutRef} className="console">
-        {state.stdout.join("")}
-      </pre>
-      {state.stderr.length > 0 ? (
-        <details className="stderr">
-          <summary>stderr</summary>
-          <pre>{state.stderr.join("")}</pre>
-        </details>
-      ) : null}
-    </article>
+    <Card className="overflow-hidden">
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span>Run console</span>
+          <RunStatusBadge status={state.status} />
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-[var(--ink-3)]">{statusLabel}</p>
+        {state.summary ? (
+          <p className="mt-2 text-sm font-semibold text-[var(--ink-1)]">
+            {state.summary.passed} passed · {state.summary.failed} failed ·{" "}
+            {state.summary.skipped} skipped · {state.summary.flaky} flaky · total{" "}
+            {state.summary.total}
+            {state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}
+          </p>
+        ) : null}
+        <pre
+          ref={stdoutRef}
+          aria-label="標準出力"
+          className={cn(
+            "mt-3 max-h-[40vh] overflow-auto rounded-md border border-[var(--line)]",
+            // mono パネルはダークなまま (light/dark 共通) でターミナル感を出す
+            "bg-[#0f1419] p-3 font-mono text-[11.5px] leading-5 text-[#e6e1cf]",
+            "whitespace-pre-wrap break-words"
+          )}
+        >
+          {state.stdout.join("")}
+        </pre>
+        {state.stderr.length > 0 ? (
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs font-medium text-[var(--ink-2)]">
+              stderr
+            </summary>
+            <pre
+              className={cn(
+                "mt-2 max-h-[30vh] overflow-auto rounded-md border border-[var(--line)]",
+                "bg-[#1a0f0f] p-3 font-mono text-[11.5px] leading-5 text-[#f4cfcf]",
+                "whitespace-pre-wrap break-words"
+              )}
+            >
+              {state.stderr.join("")}
+            </pre>
+          </details>
+        ) : null}
+      </CardContent>
+    </Card>
   );
+}
+
+function RunStatusBadge({ status }: { status: RunConsoleState["status"] }): React.ReactElement | null {
+  switch (status) {
+    case "idle":
+      return <Badge variant="outline">Idle</Badge>;
+    case "running":
+      return <Badge variant="info">Running</Badge>;
+    case "passed":
+      return <Badge variant="pass">Passed</Badge>;
+    case "failed":
+      return <Badge variant="fail">Failed</Badge>;
+    case "cancelled":
+      return <Badge variant="default">Cancelled</Badge>;
+    case "error":
+      return <Badge variant="fail">Error</Badge>;
+  }
 }
 
 export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunConsoleState {

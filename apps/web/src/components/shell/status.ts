@@ -3,6 +3,7 @@
 // 値はデザインモック (`docs/design/concept-b-refined.html`) のステータス色相分離方針に従う。
 import type { RunStatus } from "@pwqa/shared";
 
+import type { WsConnectionState } from "@/api/events";
 import type { BadgeProps } from "@/components/ui/badge";
 
 /**
@@ -71,5 +72,36 @@ export function agentDotColorClass(state: AgentDotState): string {
       return "bg-[var(--fail)] shadow-[0_0_0_3px_var(--fail-soft)]";
     case "pending":
       return "bg-[var(--skip)] shadow-[0_0_0_3px_var(--skip-soft)]";
+  }
+}
+
+/**
+ * WebSocket 接続状態 → dot 色マッピング。
+ *  - open: pass (緑系)
+ *  - connecting: flaky (黄系。再接続待機の中間状態)
+ *  - disconnected: fail (赤系)
+ *
+ * Agent dot と同様、形 (リング太さ) はアイコン枠と二重エンコードされる。
+ */
+export function wsDotColorClass(state: WsConnectionState): string {
+  switch (state) {
+    case "open":
+      return "bg-[var(--pass)] shadow-[0_0_0_3px_var(--pass-soft)]";
+    case "connecting":
+      return "bg-[var(--flaky)] shadow-[0_0_0_3px_var(--flaky-soft)]";
+    case "disconnected":
+      return "bg-[var(--fail)] shadow-[0_0_0_3px_var(--fail-soft)]";
+  }
+}
+
+/** WebSocket 接続状態 → 表示ラベル (StatusBar 用)。 */
+export function wsStateLabel(state: WsConnectionState): string {
+  switch (state) {
+    case "open":
+      return "Connected";
+    case "connecting":
+      return "Connecting";
+    case "disconnected":
+      return "Disconnected";
   }
 }

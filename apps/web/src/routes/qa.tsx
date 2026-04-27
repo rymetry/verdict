@@ -1,152 +1,64 @@
-// QA View route。Phase 1 (β/η 完了時点) では「現在のメイン画面」をそのまま QA persona 用に表示する。
-// δ (Issue #11) で Tailwind ベースの新 design system へ移植する予定。
+// QA View route。Issue #11 (δ) で Tailwind + shadcn primitives 化した 3-col layout に組み直す。
 //
 // 構成:
-//  - ProjectPicker: project root を選んで agent に開かせる
-//  - RunControls: 選択 project に対して spec/grep を指定して run を起動 (form-submit mutation)
-//  - TestInventoryPanel: project の test 一覧
-//  - RunConsole: 進行中 run の stdout/stderr を WS 経由で表示
-//  - FailureReview: active run があれば失敗詳細を出す
+//  - プロジェクト未オープン時: ProjectPicker のみを中央寄せで描画 (3-col grid を組まない)。
+//    Run controls / inventory / failure review は project が前提のため、3-col grid を空欄で
+//    出すと UX が "何もできない" 印象を与える。
+//  - プロジェクト open 後:
+//      Left  col: ProjectPicker + TestInventoryPanel
+//      Center col: RunControls + RunConsole
+//      Right col: FailureReview (active run があるときのみ)
+//    `docs/design/concept-b-refined.html` の QA View 3-col 縦割りを Phase 1 機能セットに当てはめる。
 //
-// useWorkbenchEvents は qa route 内に閉じる。WS の consumer は今のところ RunConsole のみで、
-// /dev /qmo に居る間は接続を維持する必要がない (再 mount で再接続する)。
+// WebSocket は __root から WorkbenchEventsContext 経由で受け取る (δ で Root scope に singleton 化)。
 import * as React from "react";
 import { createRoute } from "@tanstack/react-router";
-import type { ProjectSummary, RunRequest } from "@pwqa/shared";
 
 import { FailureReview } from "@/features/failure-review/FailureReview";
 import { ProjectPicker } from "@/features/project-picker/ProjectPicker";
 import { RunConsole } from "@/features/run-console/RunConsole";
+import { RunControls } from "@/features/run-controls/RunControls";
 import { TestInventoryPanel } from "@/features/test-inventory/TestInventoryPanel";
 import { useCurrentProjectQuery } from "@/hooks/use-current-project-query";
-import { useStartRunMutation } from "@/hooks/use-start-run-mutation";
-import { useWorkbenchEvents } from "@/hooks/use-workbench-events";
-import { formatMutationError } from "@/lib/mutation-error";
+import { useWorkbenchEventStream } from "@/hooks/workbench-events-context";
 import { useRunStore } from "@/store/run-store";
 
 import { rootRoute } from "./__root";
 
 function QaView(): React.ReactElement {
   const activeRunId = useRunStore((s) => s.activeRunId);
-  const eventStream = useWorkbenchEvents();
+  const eventStream = useWorkbenchEventStream();
   const currentProjectQuery = useCurrentProjectQuery();
   const project = currentProjectQuery.data ?? null;
 
-  return (
-    <>
-      <section className="grid">
-        <ProjectPicker />
-        <RunControls project={project} />
-      </section>
-
-      {project ? (
-        <section className="grid grid-2col">
-          <TestInventoryPanel project={project} />
-          <RunConsole eventStream={eventStream} activeRunId={activeRunId} />
-        </section>
-      ) : null}
-
-      {activeRunId ? <FailureReview runId={activeRunId} /> : null}
-    </>
-  );
-}
-
-interface RunControlsProps {
-  project: ProjectSummary | null;
-}
-
-// QA route 内のローカル component: form submit 経路の useStartRunMutation を別 instance で取得する
-// (rerun banner の `rerunMutation` と分離し、UI 表示先を独立させるため)。
-// startMutation.error は React Query が保持するため、submit handler は throw に依存しない
-// (silent failure 防衛)。次回入力編集時に reset し、古いエラー表示の dead-end を回避する。
-// TODO(ε): `apps/web/src/features/run-controls/` に抽出し、Developer View からも独立 mount できる構造へ。
-function RunControls({ project }: RunControlsProps): React.ReactElement {
-  const [specPath, setSpecPath] = React.useState("");
-  const [grep, setGrep] = React.useState("");
-
-  const startMutation = useStartRunMutation();
-
-  const errorMessage = startMutation.error
-    ? formatMutationError(startMutation.error, "Failed to start run")
-    : null;
-
-  // 入力編集で前回 error を自然に解除する。dismiss CTA を増やさず古いエラーが残る silent UX を防ぐ。
-  // useCallback は使わない: useMutation の戻り値は毎 render 新規参照のため memoize 効果ゼロで、
-  // 「memo 化されている」と読み手に誤解させる。
-  function clearErrorOnEdit(): void {
-    if (startMutation.error) {
-      startMutation.reset();
-    }
-  }
-
   if (!project) {
     return (
-      <article className="panel">
-        <p className="panelLabel">Run controls</p>
-        <p className="muted">Open a project to enable runs.</p>
-      </article>
+      <div className="mx-auto max-w-2xl">
+        <ProjectPicker />
+      </div>
     );
   }
 
-  const blocked = project.blockingExecution;
-
+  // Phase 1: project open 後の 3-col。Right col は active run があるときだけ表示するが、
+  // grid の列数を変えると左右の幅が揺れるため列数は常に 3 で、無いときは右列を空に保つ。
+  // breakpoint: 1280px 以上で 3-col、未満では 1 列に折り返す (lg: 2-col)。
   return (
-    <article className="panel">
-      <p className="panelLabel">Run controls</p>
-      <form
-        className="picker"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const request: RunRequest = {
-            projectId: project.id,
-            specPath: specPath.trim() || undefined,
-            grep: grep.trim() || undefined,
-            headed: false
-          };
-          startMutation.mutate(request);
-        }}
-      >
-        <label htmlFor="spec-path" className="muted">
-          Spec path (relative; optional)
-        </label>
-        <input
-          id="spec-path"
-          type="text"
-          placeholder="tests/auth.spec.ts"
-          value={specPath}
-          onChange={(event) => {
-            setSpecPath(event.target.value);
-            clearErrorOnEdit();
-          }}
-        />
-        <label htmlFor="grep" className="muted">
-          Grep pattern (optional)
-        </label>
-        <input
-          id="grep"
-          type="text"
-          placeholder="@smoke"
-          value={grep}
-          onChange={(event) => {
-            setGrep(event.target.value);
-            clearErrorOnEdit();
-          }}
-        />
-        <button type="submit" disabled={blocked || startMutation.isPending}>
-          {startMutation.isPending ? "Starting…" : "Run Playwright"}
-        </button>
-      </form>
-      {blocked ? (
-        <p role="alert" className="errorBlock">
-          Runs are blocked while the package manager status requires user resolution.
-        </p>
-      ) : null}
-      {errorMessage ? (
-        <p role="alert" className="errorBlock">
-          {errorMessage}
-        </p>
-      ) : null}
-    </article>
+    <div
+      data-testid="qa-view-grid"
+      className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.95fr)]"
+    >
+      <div className="flex flex-col gap-4">
+        <ProjectPicker />
+        <TestInventoryPanel project={project} />
+      </div>
+      <div className="flex flex-col gap-4">
+        <RunControls project={project} />
+        <RunConsole eventStream={eventStream} activeRunId={activeRunId} />
+      </div>
+      <div className="flex flex-col gap-4">
+        <FailureReview runId={activeRunId} />
+      </div>
+    </div>
   );
 }
 

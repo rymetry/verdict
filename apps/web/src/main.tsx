@@ -14,14 +14,10 @@ import "@fontsource/noto-sans-jp/400.css";
 import "@fontsource/noto-sans-jp/500.css";
 import "@fontsource/noto-sans-jp/700.css";
 
-import { FoundationPreview } from "./components/foundation/FoundationPreview";
 import { router } from "./router";
 import { installThemeEffects } from "./store/theme-effects";
 
 import "./styles/globals.css";
-// TODO(issue-#11): δ で QA View を Tailwind 化したタイミングで削除する。
-// それまでは既存 Phase 1 features の見た目を維持する目的の暫定スタイル。
-import "./styles.css";
 
 // React tree の外で 1 回だけ install する。
 // React Provider ではないため tree への配置は不要で、tree 内で呼ぶと StrictMode 下で
@@ -51,28 +47,6 @@ const queryClient = new QueryClient({
   }
 });
 
-/**
- * `?foundation=1` クエリで基盤プリミティブのプレビューに切替えられる。
- * δ (Issue #11) で QA View 全体が Tailwind に移行した時点で `FoundationPreview` は使い道が
- * 消えるため、本関数 + import + ファイル群 (`apps/web/src/components/foundation/**`) を一括削除する。
- *
- * URL 解析で例外が起きた場合は通常 App にフォールバックする。
- * Foundation Preview に行けないだけで、実機能を白画面化させない。
- */
-function isFoundationPreview(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return new URLSearchParams(window.location.search).get("foundation") === "1";
-  } catch (error) {
-    // location.search 改竄 / 不正 URL 等で URLSearchParams が throw する稀な経路。
-    // 通常 App にフォールバックするのが正しい挙動だが、本番でも痕跡を残す
-    // (vite.config.ts の console drop 防衛と組み合わせて、production でも観測可能にする方針)。
-    // eslint-disable-next-line no-console -- 本番でも稀な location 改竄経路を可視化
-    console.error("[main] isFoundationPreview: URLSearchParams 解析失敗", error);
-    return false;
-  }
-}
-
 // `index.html` のマウントポイント取得を明示エラーにする (null 断言はサイレント失敗を生む)
 const rootElement = document.getElementById("root");
 if (rootElement === null) {
@@ -82,7 +56,7 @@ if (rootElement === null) {
 createRoot(rootElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      {isFoundationPreview() ? <FoundationPreview /> : <RouterProvider router={router} />}
+      <RouterProvider router={router} />
     </QueryClientProvider>
   </StrictMode>
 );

@@ -4,7 +4,7 @@ import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as events from "@/api/events";
-import { useWorkbenchEvents } from "@/hooks/use-workbench-events";
+import { useWorkbenchEvents, useWsConnectionState } from "@/hooks/use-workbench-events";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -13,9 +13,11 @@ afterEach(() => {
 function mockEventsModule() {
   const close = vi.fn();
   const subscribe = vi.fn(() => () => {});
-  const stream = { subscribe, close };
+  const subscribeState = vi.fn(() => () => {});
+  const getState = vi.fn<() => events.WsConnectionState>(() => "connecting");
+  const stream: events.EventStream = { subscribe, subscribeState, getState, close };
   const spy = vi.spyOn(events, "connectWorkbenchEvents").mockReturnValue(stream);
-  return { close, subscribe, stream, spy };
+  return { close, subscribe, subscribeState, getState, stream, spy };
 }
 
 describe("useWorkbenchEvents()", () => {
@@ -52,5 +54,23 @@ describe("useWorkbenchEvents()", () => {
     expect(close).not.toHaveBeenCalled();
     unmount();
     expect(close.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("useWsConnectionState()", () => {
+  it("初期値は stream.getState() の戻り値", () => {
+    const { stream, getState } = mockEventsModule();
+    getState.mockReturnValue("connecting");
+    const { result } = renderHook(() => useWsConnectionState(stream));
+    expect(result.current).toBe("connecting");
+  });
+
+  it("subscribeState は useSyncExternalStore に渡る", () => {
+    // useSyncExternalStore は (notify) => unsubscribe を期待する。useWsConnectionState 内では
+    // (notify) => stream.subscribeState(() => notify()) のラップ呼び出しをする。
+    // ここでは subscribeState が呼ばれることだけを pin (実際の re-render 検証は events.test.ts 側で)。
+    const { stream, subscribeState } = mockEventsModule();
+    renderHook(() => useWsConnectionState(stream));
+    expect(subscribeState).toHaveBeenCalledTimes(1);
   });
 });

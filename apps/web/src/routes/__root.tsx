@@ -11,8 +11,9 @@
 //    store (β の persona-store) は廃止。`useLocation()` から派生させる。
 //  - `r` キーボードショートカットは __root に集約。canRerun / rerun トリガが
 //    TopBar と同じスコープに居るので、shortcut 配線は本ファイルが最も自然。
-//  - useWorkbenchEvents は qa.tsx に閉じる。Phase 1 では RunConsole のみが consumer のため、
-//    qa を離れた瞬間に WS をクローズしても情報損失はない。
+//  - WebSocket は __root で 1 つだけ生成して WorkbenchEventsContext で配る (δ で変更)。
+//    γ では qa.tsx に閉じていたが、StatusBar に WS 接続状態を出す要件 (Issue #11) のため
+//    Root scope に singleton 化。route 切替えで切れないので接続状態の点滅を防ぐ。
 import * as React from "react";
 import { createRootRoute, Outlet, useLocation } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,6 +22,8 @@ import { fetchHealth, fetchRun } from "@/api/client";
 import { ShellAlert, StatusBar, TopBar } from "@/components/shell";
 import { useCurrentProjectQuery } from "@/hooks/use-current-project-query";
 import { useStartRunMutation } from "@/hooks/use-start-run-mutation";
+import { useWorkbenchEvents, useWsConnectionState } from "@/hooks/use-workbench-events";
+import { WorkbenchEventsProvider } from "@/hooks/workbench-events-context";
 import { deriveAgentState, deriveProjectDisplayName } from "@/lib/shell-derive";
 import { formatMutationError } from "@/lib/mutation-error";
 import { isPersonaView, type PersonaView } from "@/lib/persona-view";
@@ -65,6 +68,11 @@ function shouldIgnoreShortcut(event: KeyboardEvent): boolean {
 function RootLayout(): React.ReactElement {
   const queryClient = useQueryClient();
   const location = useLocation();
+
+  // Workbench WebSocket は Root scope で 1 度だけ作る (route 切替えで切れないように)。
+  // 接続状態は StatusBar に渡し、stream 自体は Provider 経由で qa route に届ける。
+  const eventStream = useWorkbenchEvents();
+  const wsState = useWsConnectionState(eventStream);
 
   const activeRunId = useRunStore((s) => s.activeRunId);
   const lastRequest = useRunStore((s) => s.lastRequest);
@@ -283,14 +291,17 @@ function RootLayout(): React.ReactElement {
         />
       ) : null}
 
-      <main className="shell flex-1">
-        <Outlet />
+      <main className="flex-1 px-6 py-5">
+        <WorkbenchEventsProvider stream={eventStream}>
+          <Outlet />
+        </WorkbenchEventsProvider>
       </main>
 
       <StatusBar
         agentState={agentState}
         agentVersion={healthQuery.data?.version}
         agentEndpoint={AGENT_ENDPOINT_DISPLAY}
+        wsState={wsState}
         projectName={projectDisplayName}
         packageManager={project?.packageManager.name ?? null}
         activeRunId={activeRunId}
