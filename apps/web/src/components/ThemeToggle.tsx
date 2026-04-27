@@ -33,7 +33,7 @@ export function ThemeToggle({ theme, onChange }: ThemeToggleProps) {
     <div className="theme-toggle" role="radiogroup" aria-label="Theme">
       <button
         role="radio"
-        aria-pressed={theme === "light"}
+        aria-checked={theme === "light"}
         title="Light"
         onClick={() => onChange("light")}
       >
@@ -41,7 +41,7 @@ export function ThemeToggle({ theme, onChange }: ThemeToggleProps) {
       </button>
       <button
         role="radio"
-        aria-pressed={theme === "auto"}
+        aria-checked={theme === "auto"}
         title="System"
         onClick={() => onChange("auto")}
       >
@@ -49,7 +49,7 @@ export function ThemeToggle({ theme, onChange }: ThemeToggleProps) {
       </button>
       <button
         role="radio"
-        aria-pressed={theme === "dark"}
+        aria-checked={theme === "dark"}
         title="Dark"
         onClick={() => onChange("dark")}
       >

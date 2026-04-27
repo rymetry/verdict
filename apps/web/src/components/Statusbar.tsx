@@ -6,6 +6,7 @@ interface StatusbarProps {
   agentEndpoint?: string;
   project: ProjectSummary | null;
   activeRunId: string | null;
+  rerunEnabled: boolean;
 }
 
 export function Statusbar({
@@ -13,7 +14,8 @@ export function Statusbar({
   agentReady,
   agentEndpoint = "127.0.0.1:4317",
   project,
-  activeRunId
+  activeRunId,
+  rerunEnabled
 }: StatusbarProps) {
   const agentLabel = agentReady && agentVersion
     ? `Agent v${agentVersion}`
@@ -39,15 +41,11 @@ export function Statusbar({
       <span className="seg">{projectSeg}</span>
       <span className="seg">{runSeg}</span>
       <span className="spacer" />
-      <span className="seg">
-        <kbd>↵</kbd> 開く
-      </span>
-      <span className="seg">
-        <kbd>r</kbd> 再実行
-      </span>
-      <span className="seg">
-        <kbd>?</kbd> ショートカット
-      </span>
+      {rerunEnabled ? (
+        <span className="seg">
+          <kbd>r</kbd> 再実行
+        </span>
+      ) : null}
     </footer>
   );
 }

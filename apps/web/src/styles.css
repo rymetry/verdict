@@ -245,7 +245,7 @@
       transition: background 120ms var(--ease), color 120ms var(--ease);
     }
     .persona button:hover { color: var(--ink-0); }
-    .persona button[aria-pressed="true"] {
+    .persona button[aria-selected="true"] {
       background: var(--bg-elev);
       color: var(--ink-0);
       box-shadow: var(--shadow-sm);
@@ -334,7 +334,7 @@
       transition: background 120ms var(--ease), color 120ms var(--ease);
     }
     .theme-toggle button:hover { color: var(--ink-0); }
-    .theme-toggle button[aria-pressed="true"] {
+    .theme-toggle button[aria-checked="true"] {
       background: var(--bg-elev);
       color: var(--ink-0);
       box-shadow: var(--shadow-sm);

@@ -18,7 +18,7 @@ export function PersonaToggle({ persona, onChange }: PersonaToggleProps) {
         <button
           key={p.id}
           role="tab"
-          aria-pressed={persona === p.id}
+          aria-selected={persona === p.id}
           data-persona={p.id}
           onClick={() => onChange(p.id)}
         >

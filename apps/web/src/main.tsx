@@ -82,9 +82,9 @@ function App() {
     onSuccess: (response) => setActiveRunId(response.runId)
   });
 
-  const handleRunStarted = (runId: string, request?: RunRequest) => {
+  const handleRunStarted = (runId: string, request: RunRequest) => {
     setActiveRunId(runId);
-    if (request) setLastRequest(request);
+    setLastRequest(request);
   };
 
   const handleRerun = () => {
@@ -95,6 +95,26 @@ function App() {
   const agentReady = Boolean(healthQuery.data?.ok);
   const agentVersion = healthQuery.data?.ok ? healthQuery.data.version : null;
   const rerunDisabled = !lastRequest || rerunMutation.isPending;
+
+  // Global keyboard shortcut: `r` to re-run last request (when one exists
+  // and an input is not focused).
+  useEffect(() => {
+    function isTypingTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
+    }
+    function handler(event: KeyboardEvent) {
+      if (event.key !== "r") return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTypingTarget(event.target)) return;
+      if (rerunDisabled) return;
+      event.preventDefault();
+      handleRerun();
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [rerunDisabled, lastRequest]);
 
   return (
     <>
@@ -129,6 +149,7 @@ function App() {
         agentReady={agentReady}
         project={project}
         activeRunId={activeRunId ?? null}
+        rerunEnabled={!rerunDisabled}
       />
     </>
   );
