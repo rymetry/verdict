@@ -1,6 +1,6 @@
 // QA View 中央列の上半分: spec path / grep / Run ボタン。
-// δ (Issue #11) で qa.tsx 内のローカル component を `apps/web/src/features/run-controls/` へ抽出
-// (β で TODO marker を残していた箇所、ε の Developer View からも独立 mount できるよう features 化する)。
+// δ (Issue #11) で routes/qa.tsx 内の inline 定義を `apps/web/src/features/run-controls/` へ抽出した。
+// ε (Issue #12) の Developer View からも同一コンポーネントを mount できる構造を意図している。
 //
 // silent failure ガード:
 //  - mutation.error は React Query が保持し、UI banner で表示 (formatMutationError 経由)
@@ -26,8 +26,9 @@ export function RunControls({ project }: RunControlsProps): React.ReactElement {
   const [specPath, setSpecPath] = React.useState("");
   const [grep, setGrep] = React.useState("");
 
-  // form submit 経路の useStartRunMutation は __root の rerun mutation と別 instance を取得する。
-  // banner 表示先を独立させるため。
+  // useStartRunMutation は呼び出し毎に独立した React Query mutation instance を作る (別の error /
+  // pending state を持つ)。__root の rerun mutation と本コンポーネントの form submit mutation が
+  // 別 banner に流れるよう、ここで独立 instance を取得する。
   const startMutation = useStartRunMutation();
 
   const errorMessage = startMutation.error
@@ -58,7 +59,14 @@ export function RunControls({ project }: RunControlsProps): React.ReactElement {
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (!project) return;
+    // 上の `if (!project) return <Card>...` 分岐で project は実行時には non-null。
+    // しかし TypeScript は handleSubmit closure に対して narrow を保てないため、
+    // 明示的に invariant ガードを置く。null 到達は invariant 違反なので silent return せず log する。
+    if (project === null) {
+      // eslint-disable-next-line no-console -- 到達不能経路を本番でも検知
+      console.error("[RunControls] handleSubmit reached with project=null (invariant violation)");
+      return;
+    }
     const request: RunRequest = {
       projectId: project.id,
       specPath: specPath.trim() || undefined,

@@ -153,4 +153,65 @@ describe("connectWorkbenchEvents", () => {
     unsub();
     stream.close();
   });
+
+  it("close → reconnect 後の 2 つ目 socket でも open に再遷移する", () => {
+    const stream = connectWorkbenchEvents();
+    const seen: WsConnectionState[] = [];
+    stream.subscribeState((s) => seen.push(s));
+    createdSockets[0]?.fire("open");
+    createdSockets[0]?.fire("close");
+    vi.advanceTimersByTime(1500);
+    // 2 つ目の socket が open すれば再び "open" が出る (StatusBar が緑に戻る invariant)
+    createdSockets[1]?.fire("open");
+    expect(seen).toEqual(["connecting", "open", "disconnected", "connecting", "open"]);
+    stream.close();
+  });
+
+  it("error 経路でも 1500ms 後に reconnect が走る", () => {
+    const stream = connectWorkbenchEvents();
+    createdSockets[0]?.fire("open");
+    createdSockets[0]?.fire("error");
+    vi.advanceTimersByTime(1500);
+    expect(createdSockets.length).toBe(2);
+    stream.close();
+  });
+
+  it("event listener が throw しても他 listener には event が届く (isolation)", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stream = connectWorkbenchEvents();
+    const events: unknown[] = [];
+    stream.subscribe(() => {
+      throw new Error("listener bug");
+    });
+    stream.subscribe((event) => {
+      events.push(event);
+    });
+    createdSockets[0]?.fire("message", {
+      data: JSON.stringify({
+        type: "run.stdout",
+        runId: "r1",
+        sequence: 1,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: { chunk: "hello\n" }
+      })
+    });
+    expect(events).toHaveLength(1);
+    expect(consoleSpy).toHaveBeenCalled();
+    stream.close();
+  });
+
+  it("JSON.parse('null') は schema validation で error 化する (silent drop しない)", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stream = connectWorkbenchEvents();
+    const events: unknown[] = [];
+    stream.subscribe((e) => events.push(e));
+    createdSockets[0]?.fire("message", { data: "null" });
+    expect(events).toHaveLength(0);
+    // JSON.parse 自体は成功するため "JSON parse failed" ではなく schema mismatch 経路で log される
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[events] WS event schema mismatch",
+      expect.anything()
+    );
+    stream.close();
+  });
 });

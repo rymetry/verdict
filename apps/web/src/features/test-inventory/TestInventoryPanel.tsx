@@ -1,16 +1,16 @@
 // Playwright が認識する spec/test 一覧を表示するパネル。
 // δ (Issue #11) で Tailwind + shadcn primitives へ移植した。
 //
-// 設計の主な変更:
-//  - error narrowing を `as Error` cast から `instanceof Error` に変更 (silent failure ガード)
+// 設計方針:
+//  - error は formatMutationError 経由で正規化する (`instanceof Error` / `WorkbenchApiError`
+//    判定は `lib/mutation-error.ts` に集約済)。本ファイル内では `as Error` cast を使わない。
 //  - スクロールは Card 内の overflow-y-auto + max-h で実装 (shadcn ScrollArea を使うほどの操作対象でない)
-//  - Run spec / Run test ボタンは Phase 1 の TestInventoryPanel では未配線 (Phase 1 は spec path 入力経由)。
-//    Issue #11 受け入れ条件にも明記がないため、Props を残しつつ render は省略 (削除しない)。
-//    Issue #12/#13 で Developer View へ移植する際に再有効化する。
+//  - Phase 1 では spec/test 単体の直接実行ボタンは持たない (実行は RunControls 経由)。
+//    ε (Issue #12) で Developer View へ移植する際にボタン配線を追加する。
 import * as React from "react";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ProjectSummary, SpecFile, TestCase, TestInventory } from "@pwqa/shared";
+import type { ProjectSummary, SpecFile, TestInventory } from "@pwqa/shared";
 
 import { fetchInventory } from "@/api/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -18,12 +18,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatMutationError } from "@/lib/mutation-error";
 
+// Phase 1 では spec/test 単体の直接実行ボタンを持たないため、Props は project のみ。
+// ε で onRunSpec / onRunTest を追加する際は Type を拡張する (今は dead Props を作らない)。
 interface TestInventoryProps {
   project: ProjectSummary;
-  /** Phase 1 では未使用 (将来 ε / ζ で各 spec/test の直接実行に再配線する)。 */
-  onRunSpec?: (spec: SpecFile) => void;
-  /** Phase 1 では未使用 (将来 ε / ζ で各 spec/test の直接実行に再配線する)。 */
-  onRunTest?: (spec: SpecFile, test: TestCase) => void;
 }
 
 export function TestInventoryPanel({ project }: TestInventoryProps): React.ReactElement {

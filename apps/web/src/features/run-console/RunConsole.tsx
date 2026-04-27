@@ -7,7 +7,10 @@
 //  - state machine は initial state + applyEvent で immutable に更新する。
 //
 // silent failure ガード:
-//  - parse 失敗は events.ts 側で console.error する (本ファイルではフィルタしない)。
+//  - WS envelope の parse 失敗は events.ts 側で console.error する。
+//  - **payload 内側** (RunStdStreamPayload / RunCompletedPayload) の schema 不一致は
+//    本ファイルの applyEvent で `console.error` する (envelope の `payload: z.unknown()` ゆえ
+//    events.ts では検知できない経路を本層で塞ぐ)。
 //  - state listener 内 throw は events.ts 側で握り潰さず log する。
 import * as React from "react";
 import {
@@ -42,8 +45,6 @@ export const initialRunConsoleState: RunConsoleState = {
   stderr: []
 };
 
-const initialState = initialRunConsoleState;
-
 const MAX_LINES = 1000;
 
 function trim(lines: string[], next: string): string[] {
@@ -52,12 +53,18 @@ function trim(lines: string[], next: string): string[] {
 }
 
 export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React.ReactElement {
-  const [state, setState] = React.useState<RunConsoleState>(initialState);
+  const [state, setState] = React.useState<RunConsoleState>(initialRunConsoleState);
   const stdoutRef = React.useRef<HTMLPreElement>(null);
+
+  // activeRunId が変化したら旧 run の log を残さないよう state を毎回リセットする。
+  // useEffect 1 個で「reset → subscribe → cleanup」を扱うと null 遷移時の reset が
+  // 走らないため、reset と subscribe を分離する。
+  React.useEffect(() => {
+    setState(initialRunConsoleState);
+  }, [activeRunId]);
 
   React.useEffect(() => {
     if (!activeRunId) return undefined;
-    setState(initialState);
     const unsubscribe = eventStream.subscribe((event: WorkbenchEvent) => {
       if (event.runId !== activeRunId) return;
       setState((current) => applyEvent(current, event));
@@ -153,18 +160,33 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       return { ...state, status: "running" };
     case "run.stdout": {
       const parsed = RunStdStreamPayloadSchema.safeParse(event.payload);
-      if (!parsed.success) return state;
+      if (!parsed.success) {
+        // payload schema 不一致は Agent contract 違反。silent drop は run の log を黙って欠落させる。
+        // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
+        console.error("[RunConsole] run.stdout payload schema mismatch", parsed.error.issues);
+        return state;
+      }
       return { ...state, stdout: trim(state.stdout, parsed.data.chunk) };
     }
     case "run.stderr": {
       const parsed = RunStdStreamPayloadSchema.safeParse(event.payload);
-      if (!parsed.success) return state;
+      if (!parsed.success) {
+        // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
+        console.error("[RunConsole] run.stderr payload schema mismatch", parsed.error.issues);
+        return state;
+      }
       return { ...state, stderr: trim(state.stderr, parsed.data.chunk) };
     }
     case "run.completed":
     case "run.cancelled":
     case "run.error": {
       const parsed = RunCompletedPayloadSchema.safeParse(event.payload);
+      if (!parsed.success) {
+        // run.cancelled / run.error は payload を捨てても status の決定は可能だが、
+        // run.completed は status を payload から取るため不一致だと "error" にフォールバックされ silent。
+        // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
+        console.error(`[RunConsole] ${event.type} payload schema mismatch`, parsed.error.issues);
+      }
       const payload = parsed.success ? parsed.data : null;
       const status: RunConsoleState["status"] =
         event.type === "run.cancelled"
@@ -192,7 +214,18 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
           : state.summary
       };
     }
-    default:
+    case "snapshot":
+      // snapshot は WS reconnect 直後の Agent 側 replay 用 envelope。RunConsole は state を
+      // 既に保持しているため、ここで再適用すると重複表示になる。意図的に no-op にする
+      // (caller が必要なら separate hook で処理する)。
       return state;
+    default: {
+      // exhaustiveness: WorkbenchEvent に新 type が追加された際に compile error で気付く。
+      // ランタイムにここへ来たら schema 拡張漏れが本番で起きているので痕跡を残す。
+      const _exhaustive: never = event.type;
+      // eslint-disable-next-line no-console -- 未対応 event type を本番でも検知
+      console.warn("[RunConsole] unhandled event type", _exhaustive);
+      return state;
+    }
   }
 }

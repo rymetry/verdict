@@ -1,19 +1,18 @@
 // app-shell route。TopBar / ShellAlert / StatusBar を常時 mount し、
 // `<Outlet />` 配下に persona view (qa/dev/qmo) を切り替える。
 //
-// γ (Issue #10) で App.tsx の責務を分割した:
-//  - shell layout (TopBar + ShellAlert + StatusBar) → 本ファイル
-//  - rerun mutation + activeRunQuery + healthQuery → 本ファイル (TopBar の入力に必要)
-//  - QA / Developer / Insights view 本体 → src/routes/{qa,dev,qmo}.tsx
+// 構成 (γ 分割済 → δ で WS singleton 追加):
+//  - shell layout (TopBar + ShellAlert + StatusBar) — 本ファイル
+//  - rerun mutation + activeRunQuery + healthQuery — 本ファイル (TopBar の入力に必要)
+//  - WebSocket singleton + WorkbenchEventsProvider — 本ファイル (δ で追加。経緯と意図は
+//    `hooks/workbench-events-context.tsx` の冒頭コメント参照)
+//  - QA / Developer / Insights view 本体 — src/routes/{qa,dev,qmo}.tsx
 //
 // 設計決定:
 //  - persona は URL segment (`/qa` `/dev` `/qmo`) を Single Source of Truth とする。
-//    store (β の persona-store) は廃止。`useLocation()` から派生させる。
+//    store ベースの persona は廃止。`useLocation()` から派生させる。
 //  - `r` キーボードショートカットは __root に集約。canRerun / rerun トリガが
 //    TopBar と同じスコープに居るので、shortcut 配線は本ファイルが最も自然。
-//  - WebSocket は __root で 1 つだけ生成して WorkbenchEventsContext で配る (δ で変更)。
-//    γ では qa.tsx に閉じていたが、StatusBar に WS 接続状態を出す要件 (Issue #11) のため
-//    Root scope に singleton 化。route 切替えで切れないので接続状態の点滅を防ぐ。
 import * as React from "react";
 import { createRootRoute, Outlet, useLocation } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";

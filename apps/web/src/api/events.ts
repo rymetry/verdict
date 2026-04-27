@@ -75,18 +75,19 @@ export function connectWorkbenchEvents(): EventStream {
     });
 
     socket.addEventListener("message", (raw) => {
-      const data: unknown = (() => {
-        try {
-          return JSON.parse(raw.data as string);
-        } catch (error) {
-          // 不正 JSON は invariant 違反 (Agent 側で zod validation 済の payload を送る契約)。
-          // silent return せず production でも検出する。
-          // eslint-disable-next-line no-console -- 不正 payload を本番でも検出
-          console.error("[events] WS message JSON parse failed", error);
-          return undefined;
-        }
-      })();
-      if (!data) return;
+      // JSON.parse 失敗時のみ早期 return する。`null` / `0` / `""` 等の **valid JSON だが falsy** な
+      // 値は schema validation に通すことで、Agent contract 違反を `console.error` で捕捉する経路に乗せる。
+      // (旧実装の `if (!data) return;` は falsy をすべて silent drop していた)
+      let data: unknown;
+      try {
+        data = JSON.parse(raw.data as string);
+      } catch (error) {
+        // 不正 JSON は invariant 違反 (Agent 側で zod validation 済の payload を送る契約)。
+        // silent return せず production でも検出する。
+        // eslint-disable-next-line no-console -- 不正 payload を本番でも検出
+        console.error("[events] WS message JSON parse failed", error);
+        return;
+      }
       const parsed = WorkbenchEventSchema.safeParse(data);
       if (!parsed.success) {
         // schema 不一致も Agent 側 contract violation。production でも痕跡を残す
@@ -95,7 +96,16 @@ export function connectWorkbenchEvents(): EventStream {
         console.error("[events] WS event schema mismatch", parsed.error.issues);
         return;
       }
-      for (const listener of listeners) listener(parsed.data);
+      // listener bug が後続 listener の配信を巻き込まないよう個別 try/catch で隔離する
+      // (state listener と同じ防衛、silent-failure 監査での指摘反映)。
+      for (const listener of listeners) {
+        try {
+          listener(parsed.data);
+        } catch (error) {
+          // eslint-disable-next-line no-console -- listener bug を本番でも検知
+          console.error("[events] event listener threw", error);
+        }
+      }
     });
 
     socket.addEventListener("close", () => {

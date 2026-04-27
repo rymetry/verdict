@@ -39,8 +39,9 @@ function QaView(): React.ReactElement {
     );
   }
 
-  // Phase 1: project open 後の 3-col。Right col は active run があるときだけ表示するが、
-  // grid の列数を変えると左右の幅が揺れるため列数は常に 3 で、無いときは右列を空に保つ。
+  // Phase 1: project open 後の 3-col。grid の列数を変えると左右の幅が揺れるため列数は
+  // 常に 3 で固定し、Right 列の `<FailureReview runId={activeRunId} />` 自身が `runId === null`
+  // のときガード文言を出す (= 列の DOM は常に存在し、内容のみ切り替わる)。
   // breakpoint: 1280px 以上で 3-col、未満では 1 列に折り返す (lg: 2-col)。
   return (
     <div

@@ -141,4 +141,42 @@ describe("RunConsole", () => {
     });
     expect(screen.getByText("stderr")).toBeInTheDocument();
   });
+
+  it("activeRunId 切替えで stdout が空にリセットされる", async () => {
+    const stream = makeFakeStream();
+    const { rerender } = render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.stdout",
+        runId: "r1",
+        sequence: 1,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: { chunk: "old run output\n" }
+      });
+    });
+    expect(screen.getByLabelText("標準出力").textContent).toContain("old run output");
+
+    rerender(<RunConsole eventStream={stream} activeRunId="r2" />);
+    expect(screen.getByLabelText("標準出力").textContent ?? "").not.toContain("old run output");
+  });
+
+  it("payload schema 不一致は console.error して state を変えない", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.stdout",
+        runId: "r1",
+        sequence: 1,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: { wrong: "shape" } as never
+      });
+    });
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[RunConsole] run.stdout payload schema mismatch",
+      expect.anything()
+    );
+    expect(screen.getByLabelText("標準出力").textContent ?? "").toBe("");
+  });
 });

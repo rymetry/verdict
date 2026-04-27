@@ -2,13 +2,14 @@
 // δ (Issue #11) で Tailwind + shadcn primitives へ移植した。
 //
 // silent failure ガード:
-//  - error narrowing を `as Error` cast から `instanceof Error` に変更
+//  - error は formatMutationError 経由で正規化する (`instanceof Error` 判定は
+//    `lib/mutation-error.ts` に集約済)。本ファイル内では `as Error` cast を使わない。
 //  - error は production でも console.error する
 //  - run が null のとき query を発火しない (enabled で gate)
 //
-// 注意: 本パネルは active run がある時 (= runId !== null) に限り render する設計。
-//       qa.tsx で `activeRunId ? <FailureReview /> : null` のガードを置く。
-//       したがって本コンポーネント側は `runId` が文字列である前提で組む。
+// 注意: qa.tsx 側は project がある間は本パネルを 3-col の右列に常に mount する設計
+//       (列数の揺らぎを避けるため)。`runId === null` の場合は本コンポーネント自身が
+//       ガード文言を出すので、caller 側で render を gate する必要は無い。
 import * as React from "react";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
