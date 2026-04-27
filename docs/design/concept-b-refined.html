@@ -1,0 +1,2650 @@
+<!doctype html>
+<html lang="ja" data-theme="auto">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Playwright Workbench — Failure Triage</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-sans/style.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-mono/style.min.css" />
+  <style>
+    /* ─────────────────────────────────────────────────────────────
+       Design tokens — white-first, neutral, single accent
+       Dark mode は light の値を反転して導出
+       ───────────────────────────────────────────────────────────── */
+    :root {
+      --sans: "Geist", "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
+      --mono: "Geist Mono", "Noto Sans JP", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+      --radius-sm: 4px;
+      --radius: 6px;
+      --radius-lg: 10px;
+
+      --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+      --shadow-md: 0 1px 2px rgba(15, 23, 42, 0.05), 0 4px 12px rgba(15, 23, 42, 0.04);
+      --shadow-pop: 0 4px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    /* ── LIGHT (v12 Balanced palette) ─────────────────────── */
+    :root,
+    [data-theme="light"] {
+      --bg-0: #fafafa;
+      --bg-1: #f3f4f6;
+      --bg-2: #eceef2;
+      --bg-3: #e3e8ed;
+      --bg-elev: #ffffff;
+      --bg-overlay: rgba(250, 250, 250, 0.86);
+
+      --ink-0: #0f1a14;
+      --ink-1: #2a3540;
+      --ink-2: #475464;
+      --ink-3: #6a7585;
+      --ink-4: #9ca5b1;
+
+      --line: #e3e8ed;
+      --line-strong: #cdd5dc;
+      --line-faint: #eef1f4;
+
+      --accent: oklch(0.52 0.11 156);
+      --accent-hover: oklch(0.45 0.10 156);
+      --accent-soft: oklch(0.96 0.02 156);
+      --accent-ring: oklch(0.52 0.11 156 / 0.20);
+      --accent-ink: #ffffff;
+
+      /* Filled CTA — constant dark green + white text in BOTH modes */
+      --cta: oklch(0.45 0.10 156);
+      --cta-hover: oklch(0.40 0.10 156);
+      --cta-fg: #ffffff;
+
+      --pass: oklch(0.62 0.16 142);
+      --pass-soft: oklch(0.96 0.04 142);
+      --fail: oklch(0.58 0.21 27);
+      --fail-soft: oklch(0.96 0.05 27);
+      --flaky: oklch(0.74 0.16 75);
+      --flaky-soft: oklch(0.96 0.06 75);
+      --skip: oklch(0.55 0.005 270);
+      --skip-soft: oklch(0.96 0 270);
+      --info: oklch(0.58 0.16 240);
+      --info-soft: oklch(0.96 0.04 240);
+    }
+
+    /* ── DARK (v12 Balanced palette) ──────────────────────── */
+    [data-theme="dark"] {
+      --bg-0: #09090b;
+      --bg-1: #131316;
+      --bg-2: #1a1a1f;
+      --bg-3: #222228;
+      --bg-elev: #1a1a1f;
+      --bg-overlay: rgba(9, 9, 11, 0.86);
+
+      --ink-0: #f4f4f5;
+      --ink-1: #d4d6de;
+      --ink-2: #b0b4be;
+      --ink-3: #888d98;
+      --ink-4: #62666e;
+
+      --line: #28282e;
+      --line-strong: #3a3a42;
+      --line-faint: #1c1c20;
+
+      --accent: oklch(0.75 0.10 154);
+      --accent-hover: oklch(0.82 0.07 154);
+      --accent-soft: oklch(0.25 0.025 154);
+      --accent-ring: oklch(0.75 0.10 154 / 0.30);
+      --accent-ink: oklch(0.12 0.01 154);
+
+      /* Filled CTA — same constant dark green as light mode for cross-theme parity */
+      --cta: oklch(0.45 0.10 156);
+      --cta-hover: oklch(0.52 0.11 156);
+      --cta-fg: #ffffff;
+
+      --pass: oklch(0.83 0.18 142);
+      --pass-soft: oklch(0.83 0.18 142 / 0.14);
+      --fail: oklch(0.74 0.18 22);
+      --fail-soft: oklch(0.74 0.18 22 / 0.14);
+      --flaky: oklch(0.86 0.16 80);
+      --flaky-soft: oklch(0.86 0.16 80 / 0.14);
+      --skip: oklch(0.72 0.005 270);
+      --skip-soft: oklch(0.72 0.005 270 / 0.14);
+      --info: oklch(0.78 0.13 232);
+      --info-soft: oklch(0.78 0.13 232 / 0.14);
+    }
+
+    /* ── AUTO ─ system に追従 ──────────────────────────────── */
+    @media (prefers-color-scheme: dark) {
+      [data-theme="auto"] {
+        --bg-0: #09090b; --bg-1: #131316; --bg-2: #1a1a1f; --bg-3: #222228;
+        --bg-elev: #1a1a1f; --bg-overlay: rgba(9, 9, 11, 0.86);
+        --ink-0: #f4f4f5; --ink-1: #d4d6de; --ink-2: #b0b4be; --ink-3: #888d98; --ink-4: #62666e;
+        --line: #28282e; --line-strong: #3a3a42; --line-faint: #1c1c20;
+        --accent: oklch(0.75 0.10 154); --accent-hover: oklch(0.82 0.07 154);
+        --accent-soft: oklch(0.25 0.025 154); --accent-ring: oklch(0.75 0.10 154 / 0.30);
+        --accent-ink: oklch(0.12 0.01 154);
+        --cta: oklch(0.45 0.10 156); --cta-hover: oklch(0.52 0.11 156); --cta-fg: #ffffff;
+        --pass: oklch(0.83 0.18 142); --pass-soft: oklch(0.83 0.18 142 / 0.14);
+        --fail: oklch(0.74 0.18 22); --fail-soft: oklch(0.74 0.18 22 / 0.14);
+        --flaky: oklch(0.86 0.16 80); --flaky-soft: oklch(0.86 0.16 80 / 0.14);
+        --skip: oklch(0.72 0.005 270); --skip-soft: oklch(0.72 0.005 270 / 0.14);
+        --info: oklch(0.78 0.13 232); --info-soft: oklch(0.78 0.13 232 / 0.14);
+      }
+    }
+    /* ── reset ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    button { all: unset; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    button:disabled { cursor: not-allowed; opacity: 0.45; }
+    input, textarea { font: inherit; color: inherit; }
+    a { color: inherit; text-decoration: none; }
+    svg { flex-shrink: 0; }
+
+    body {
+      background: var(--bg-0);
+      color: var(--ink-0);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.55;
+      font-feature-settings: "palt" 1, "tnum" 1, "zero" 1;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      transition: background 200ms var(--ease), color 200ms var(--ease);
+    }
+
+    ::selection { background: var(--accent); color: var(--accent-ink); }
+
+    /* ── chrome (top bar) ──────────────────────────────────── */
+    .chrome {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 20px;
+      align-items: center;
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-overlay);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--cta);
+      color: var(--cta-fg);
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: -0.02em;
+    }
+    .brand-name {
+      font-weight: 600;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+      color: var(--ink-0);
+    }
+    .brand-sub {
+      display: block;
+      margin-top: 1px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--ink-3);
+      letter-spacing: 0;
+    }
+
+    .breadcrumbs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+      color: var(--ink-1);
+      min-width: 0;
+      padding-left: 16px;
+      border-left: 1px solid var(--line);
+    }
+    .crumb {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 9px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      color: var(--ink-1);
+      transition: background 120ms var(--ease), color 120ms var(--ease);
+    }
+    .crumb:hover { background: var(--bg-2); color: var(--ink-0); }
+    .crumb svg { width: 14px; height: 14px; opacity: 0.7; }
+    .crumb-divider {
+      color: var(--ink-4);
+      font-size: 12px;
+      padding: 0 2px;
+    }
+    .crumb-current { color: var(--ink-2); cursor: default; }
+    .crumb-current:hover { background: transparent; color: var(--ink-2); }
+
+    .chrome-actions { display: flex; align-items: center; gap: 8px; }
+
+    /* ── persona segmented control ─────────────────────────── */
+    .persona {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--bg-1);
+      gap: 2px;
+    }
+    .persona button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 11px 7px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--ink-2);
+      transition: background 120ms var(--ease), color 120ms var(--ease);
+    }
+    .persona button:hover { color: var(--ink-0); }
+    .persona button[aria-pressed="true"] {
+      background: var(--bg-elev);
+      color: var(--ink-0);
+      box-shadow: var(--shadow-sm);
+    }
+    .persona kbd {
+      display: inline-grid;
+      place-items: center;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      background: var(--bg-2);
+      color: var(--ink-3);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+    }
+
+    /* ── buttons ───────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--bg-elev);
+      color: var(--ink-0);
+      font-size: 13px;
+      font-weight: 500;
+      transition: background 120ms var(--ease), border-color 120ms var(--ease), transform 80ms var(--ease);
+      box-shadow: var(--shadow-sm);
+    }
+    .btn:hover { background: var(--bg-1); border-color: var(--line-strong); }
+    .btn:active { transform: translateY(1px); }
+    .btn svg { width: 14px; height: 14px; }
+    .btn-primary {
+      background: var(--cta);
+      border-color: var(--cta);
+      color: var(--cta-fg);
+      box-shadow: 0 1px 2px oklch(0.45 0.10 156 / 0.22), 0 4px 12px oklch(0.45 0.10 156 / 0.14);
+    }
+    .btn-primary:hover {
+      background: var(--cta-hover);
+      border-color: var(--cta-hover);
+    }
+    .btn-icon {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+    }
+    .btn kbd {
+      margin-left: 2px;
+      padding: 1px 5px;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      background: var(--bg-2);
+      color: var(--ink-3);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+    .btn-primary kbd {
+      background: rgba(255, 255, 255, 0.16);
+      border-color: rgba(255, 255, 255, 0.28);
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    /* ── theme toggle ──────────────────────────────────────── */
+    .theme-toggle {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--bg-1);
+    }
+    .theme-toggle button {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      color: var(--ink-3);
+      transition: background 120ms var(--ease), color 120ms var(--ease);
+    }
+    .theme-toggle button:hover { color: var(--ink-0); }
+    .theme-toggle button[aria-pressed="true"] {
+      background: var(--bg-elev);
+      color: var(--ink-0);
+      box-shadow: var(--shadow-sm);
+    }
+    .theme-toggle svg { width: 14px; height: 14px; }
+
+    /* ── workspace + view system ───────────────────────────── */
+    .workspace {
+      display: block;
+      height: calc(100vh - 61px - 38px);
+      min-height: 720px;
+      background: var(--bg-0);
+    }
+    .view { display: none; height: 100%; }
+    .workspace[data-view="qa"]  .view-qa  { display: grid; grid-template-columns: 320px minmax(0, 1.05fr) minmax(0, 0.95fr); }
+    .workspace[data-view="dev"] .view-dev { display: grid; grid-template-columns: 280px minmax(0, 1.4fr) minmax(0, 0.9fr); }
+    .workspace[data-view="qmo"] .view-qmo { display: grid; grid-template-columns: minmax(0, 1fr) 360px; overflow: auto; }
+    .col {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .col:last-child { border-right: none; }
+
+    .col-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 18px 13px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-0);
+    }
+    .col-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-0);
+      letter-spacing: -0.005em;
+    }
+    .col-counter {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+
+    .col-body { flex: 1; overflow: auto; }
+    .col-body::-webkit-scrollbar { width: 10px; height: 10px; }
+    .col-body::-webkit-scrollbar-track { background: transparent; }
+    .col-body::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 6px; border: 2px solid var(--bg-0); }
+    .col-body::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
+
+    /* ── filters ──────────────────────────────────────────── */
+    .filterbar {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line-faint);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .search {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .search svg {
+      position: absolute;
+      left: 10px;
+      width: 14px;
+      height: 14px;
+      color: var(--ink-4);
+      pointer-events: none;
+    }
+    .search input {
+      flex: 1;
+      padding: 8px 10px 9px 32px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-1);
+      color: var(--ink-0);
+      font-family: var(--sans);
+      font-size: 13px;
+      transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease), background 120ms var(--ease);
+    }
+    .search input::placeholder { color: var(--ink-4); }
+    .search input:focus {
+      outline: none;
+      background: var(--bg-elev);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-ring);
+    }
+    .search kbd {
+      position: absolute;
+      right: 8px;
+      padding: 1px 6px;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      background: var(--bg-2);
+      color: var(--ink-3);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+    .chips {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      padding: 4px 10px 5px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--bg-elev);
+      color: var(--ink-1);
+      font-size: 12px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 120ms var(--ease);
+    }
+    .chip:hover { border-color: var(--line-strong); color: var(--ink-0); }
+    .chip[aria-pressed="true"] {
+      background: var(--ink-0);
+      color: var(--bg-0);
+      border-color: var(--ink-0);
+    }
+    .chip .count {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      opacity: 0.7;
+      font-weight: 500;
+    }
+
+    /* ── failure list ──────────────────────────────────────── */
+    .failures {
+      list-style: none;
+      margin: 0;
+      padding: 4px 0;
+    }
+    .failures li {
+      position: relative;
+      padding: 11px 14px 12px 18px;
+      cursor: pointer;
+      transition: background 100ms var(--ease);
+      border-bottom: 1px solid var(--line-faint);
+    }
+    .failures li:hover { background: var(--bg-1); }
+    .failures li[aria-selected="true"] {
+      background: var(--accent-soft);
+    }
+    .failures li[aria-selected="true"]::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 6px; bottom: 6px;
+      width: 3px;
+      border-radius: 0 3px 3px 0;
+      background: var(--accent);
+    }
+    .failure-row-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+    .failure-time {
+      margin-left: auto;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+    .failure-title {
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--ink-0);
+      line-height: 1.4;
+      margin-bottom: 4px;
+      letter-spacing: -0.005em;
+    }
+    .failure-title .scope {
+      color: var(--ink-3);
+      font-weight: 400;
+    }
+    .failure-title .scope::after {
+      content: " ›";
+      color: var(--ink-4);
+      margin-right: 4px;
+    }
+    .failure-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-3);
+      flex-wrap: wrap;
+    }
+    .failure-meta .file {
+      color: var(--ink-2);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* ── status badge ─────────────────────────────────────── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px 3px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0;
+      line-height: 1;
+    }
+    .badge::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .badge.failed { color: var(--fail); background: var(--fail-soft); }
+    .badge.flaky { color: var(--flaky); background: var(--flaky-soft); }
+    .badge.passed { color: var(--pass); background: var(--pass-soft); }
+    .badge.skipped { color: var(--skip); background: var(--skip-soft); }
+    .badge.running { color: var(--info); background: var(--info-soft); }
+    .badge.running::before { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: 0.35; } }
+
+    /* ── center: case detail ───────────────────────────────── */
+    .case-header {
+      padding: 22px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-0);
+    }
+    .case-eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--ink-3);
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .case-eyebrow .sep { color: var(--ink-4); }
+    .case-eyebrow .id {
+      font-family: var(--mono);
+      color: var(--ink-2);
+      font-size: 11.5px;
+    }
+    .case-title {
+      font-size: 22px;
+      font-weight: 600;
+      line-height: 1.32;
+      letter-spacing: -0.018em;
+      color: var(--ink-0);
+      margin: 0 0 14px;
+      max-width: 720px;
+    }
+    .case-title .scope {
+      color: var(--ink-3);
+      font-weight: 500;
+    }
+    .case-title .scope::after {
+      content: " › ";
+      color: var(--ink-4);
+    }
+    .case-meta {
+      display: flex;
+      gap: 22px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--ink-2);
+    }
+    .case-meta .item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .case-meta .label {
+      color: var(--ink-3);
+      font-size: 11px;
+    }
+    .case-meta .value {
+      color: var(--ink-1);
+      font-weight: 500;
+      font-family: var(--mono);
+      font-size: 11.5px;
+    }
+    .case-actions {
+      margin-top: 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    /* ── tabs ──────────────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 28px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-0);
+    }
+    .tabs button {
+      padding: 12px 14px;
+      margin-right: 4px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-2);
+      border-bottom: 2px solid transparent;
+      transition: color 120ms var(--ease), border-color 120ms var(--ease);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: -1px;
+    }
+    .tabs button:hover { color: var(--ink-0); }
+    .tabs button[aria-pressed="true"] {
+      color: var(--ink-0);
+      border-bottom-color: var(--accent);
+    }
+    .tab-count {
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: var(--bg-2);
+      color: var(--ink-3);
+      font-family: var(--mono);
+      font-size: 10.5px;
+      font-weight: 500;
+    }
+    .tabs button[aria-pressed="true"] .tab-count {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .case-body {
+      padding: 22px 28px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+    .case-body > *,
+    .evidence-body > * { flex-shrink: 0; }
+
+    /* ── assertion panel ──────────────────────────────────── */
+    .assertion {
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--fail);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+      overflow: hidden;
+    }
+    .assertion-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: var(--fail-soft);
+      color: var(--fail);
+      font-size: 13px;
+      font-weight: 600;
+      border-bottom: 1px solid var(--line);
+    }
+    .assertion-head svg { width: 15px; height: 15px; }
+    .assertion-body {
+      padding: 14px 16px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.7;
+      color: var(--ink-0);
+    }
+    .assertion-body .key { color: var(--ink-3); }
+    .assertion-body .val { color: var(--ink-0); font-weight: 500; }
+    .assertion-body .val-fail { color: var(--fail); font-weight: 600; }
+    .assertion-body .val-expect { color: var(--pass); font-weight: 600; }
+
+    /* ── section ──────────────────────────────────────────── */
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .section-head h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-0);
+      letter-spacing: -0.005em;
+    }
+    .section-head .annot {
+      margin-left: auto;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+
+    /* ── step timeline ────────────────────────────────────── */
+    .steps {
+      list-style: none;
+      margin: 0;
+      padding: 4px 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+      overflow: hidden;
+    }
+    .steps li {
+      display: grid;
+      grid-template-columns: 28px 1fr auto auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 14px;
+      transition: background 100ms var(--ease);
+      border-bottom: 1px solid var(--line-faint);
+    }
+    .steps li:last-child { border-bottom: none; }
+    .steps li:hover { background: var(--bg-1); }
+    .step-no {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-4);
+      text-align: right;
+      font-weight: 500;
+    }
+    .step-icon {
+      width: 16px;
+      height: 16px;
+      display: grid;
+      place-items: center;
+    }
+    .step-icon.pass { color: var(--pass); }
+    .step-icon.fail { color: var(--fail); }
+    .step-icon.skip { color: var(--ink-4); }
+    .step-icon svg { width: 16px; height: 16px; }
+    .step-name {
+      font-size: 13px;
+      color: var(--ink-0);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 400;
+    }
+    .step-dur {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--ink-2);
+    }
+    .steps li.is-fail {
+      background: var(--fail-soft);
+    }
+    .steps li.is-fail .step-no { color: var(--fail); font-weight: 600; }
+    .steps li.is-fail .step-name { color: var(--ink-0); font-weight: 500; }
+    .steps li.is-fail .step-dur { color: var(--fail); font-weight: 500; }
+
+    /* ── stack trace block ────────────────────────────────── */
+    .stack {
+      margin: 0;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-1);
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.75;
+      color: var(--ink-1);
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .stack .at { color: var(--ink-3); }
+    .stack .file { color: var(--accent); }
+    .stack .pos { color: var(--ink-3); }
+    .stack .key { color: var(--ink-3); }
+
+    /* ── command runner ───────────────────────────────────── */
+    .command {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-1);
+    }
+    .command .cmd {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      color: var(--ink-0);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .command .cmd::before {
+      content: "$ ";
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* ── right column: evidence ───────────────────────────── */
+    .evidence-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-0);
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .evidence-tabs::-webkit-scrollbar { display: none; }
+    .evidence-tabs button {
+      padding: 12px 11px;
+      margin-right: 4px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--ink-2);
+      border-bottom: 2px solid transparent;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: -1px;
+      white-space: nowrap;
+    }
+    .evidence-tabs button[aria-pressed="true"] {
+      color: var(--ink-0);
+      border-bottom-color: var(--accent);
+    }
+    .evidence-tabs button:hover { color: var(--ink-0); }
+    .evidence-tabs svg { width: 14px; height: 14px; opacity: 0.85; }
+
+    .evidence-body {
+      padding: 18px 18px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── screenshot mock ──────────────────────────────────── */
+    .screenshot {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+    .screenshot-frame {
+      padding: 9px 12px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+    .screenshot-frame .dots {
+      display: inline-flex;
+      gap: 5px;
+    }
+    .screenshot-frame .dots span {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--bg-3);
+    }
+    .screenshot-canvas {
+      position: relative;
+      aspect-ratio: 16 / 10;
+      background: var(--bg-elev);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .mock-h {
+      height: 14px;
+      width: 35%;
+      border-radius: 4px;
+      background: var(--bg-3);
+    }
+    .mock-card {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 14px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: var(--bg-1);
+    }
+    .mock-row { height: 10px; border-radius: 3px; background: var(--bg-3); }
+    .mock-row.s { width: 50%; }
+    .mock-row.m { width: 75%; }
+    .mock-row.l { width: 90%; }
+    .mock-cta {
+      align-self: flex-start;
+      margin-top: auto;
+      padding: 9px 22px;
+      border-radius: 6px;
+      background: var(--ink-0);
+      color: var(--bg-0);
+      font-size: 12px;
+      font-weight: 600;
+      opacity: 0.4;
+    }
+    .crosshair {
+      position: absolute;
+      pointer-events: none;
+      width: 100px;
+      height: 38px;
+      border: 2px solid var(--fail);
+      border-radius: 6px;
+      box-shadow: 0 0 0 9999px rgba(220, 38, 38, 0.06);
+    }
+    .crosshair::after {
+      content: "Place Order — disabled";
+      position: absolute;
+      top: -24px;
+      left: 0;
+      padding: 3px 8px;
+      background: var(--fail);
+      color: #fff;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      border-radius: 4px;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+
+    /* ── kv ────────────────────────────────────────────────── */
+    .kv {
+      display: grid;
+      grid-template-columns: minmax(0, 110px) minmax(0, 1fr);
+      gap: 0;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+      overflow: hidden;
+    }
+    .kv > * {
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--line-faint);
+    }
+    .kv > *:nth-last-child(-n+2) { border-bottom: none; }
+    .kv dt {
+      margin: 0;
+      font-size: 11.5px;
+      color: var(--ink-3);
+    }
+    .kv dd {
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--ink-0);
+      overflow-wrap: anywhere;
+    }
+
+    /* ── network list ─────────────────────────────────────── */
+    .net {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+      overflow: hidden;
+    }
+    .net li {
+      display: grid;
+      grid-template-columns: 56px 1fr auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line-faint);
+      font-family: var(--mono);
+      font-size: 11.5px;
+    }
+    .net li:last-child { border-bottom: none; }
+    .net .method { color: var(--ink-2); font-weight: 600; }
+    .net .url { color: var(--ink-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .net .status { font-weight: 600; }
+    .net .status-500, .net .status-400 { color: var(--fail); }
+    .net .status-200 { color: var(--pass); }
+    .net .ms { color: var(--ink-3); }
+
+    /* ── files list ───────────────────────────────────────── */
+    .files {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+      overflow: hidden;
+    }
+    .files li {
+      display: grid;
+      grid-template-columns: 28px 1fr auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line-faint);
+      font-size: 12.5px;
+      cursor: pointer;
+      transition: background 100ms var(--ease);
+    }
+    .files li:hover { background: var(--bg-1); }
+    .files li:last-child { border-bottom: none; }
+    .files .icon {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      background: var(--bg-2);
+      color: var(--ink-2);
+    }
+    .files .icon svg { width: 14px; height: 14px; }
+    .files .name { color: var(--ink-0); font-weight: 500; }
+    .files .size { color: var(--ink-3); font-family: var(--mono); font-size: 11px; }
+    .files .download {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      color: var(--ink-3);
+      transition: background 120ms var(--ease), color 120ms var(--ease);
+    }
+    .files .download:hover { background: var(--accent-soft); color: var(--accent); }
+    .files .download svg { width: 14px; height: 14px; }
+
+    /* ── statusbar ─────────────────────────────────────────── */
+    .statusbar {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 9px 24px;
+      border-top: 1px solid var(--line);
+      background: var(--bg-0);
+      font-size: 11.5px;
+      color: var(--ink-3);
+      flex-wrap: wrap;
+    }
+    .statusbar .seg {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .statusbar .seg + .seg::before {
+      content: "";
+      width: 1px;
+      height: 12px;
+      background: var(--line);
+      margin-right: 12px;
+    }
+    .statusbar .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--pass);
+      box-shadow: 0 0 0 3px var(--pass-soft);
+    }
+    .statusbar .agent { color: var(--ink-1); font-weight: 500; }
+    .statusbar .spacer { flex: 1; }
+    .statusbar kbd {
+      display: inline-grid;
+      place-items: center;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      background: var(--bg-1);
+      color: var(--ink-2);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+    }
+
+    /* ── responsive ───────────────────────────────────────── */
+    @media (max-width: 1280px) {
+      .workspace[data-view="qa"]  .view-qa  { grid-template-columns: 280px minmax(0, 1fr) minmax(0, 0.9fr); }
+      .workspace[data-view="dev"] .view-dev { grid-template-columns: 240px minmax(0, 1.3fr) minmax(0, 0.85fr); }
+    }
+    @media (max-width: 1100px) {
+      .workspace { height: auto; }
+      .view { grid-template-columns: 1fr !important; }
+      .col { border-right: none; border-bottom: 1px solid var(--line); }
+    }
+
+    /* ── Developer View ──────────────────────────────────── */
+    .file-tree {
+      list-style: none;
+      margin: 0;
+      padding: 6px 0;
+    }
+    .ft-group {
+      padding: 10px 14px 4px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 0.06em;
+      color: var(--ink-3);
+      text-transform: uppercase;
+    }
+    .ft-item {
+      display: grid;
+      grid-template-columns: 16px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 7px 14px 7px 18px;
+      cursor: pointer;
+      font-size: 12.5px;
+      color: var(--ink-1);
+      transition: background 100ms var(--ease);
+      position: relative;
+    }
+    .ft-item:hover { background: var(--bg-1); color: var(--ink-0); }
+    .ft-item.is-current {
+      background: var(--accent-soft);
+      color: var(--ink-0);
+    }
+    .ft-item.is-current::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 4px; bottom: 4px;
+      width: 2px;
+      border-radius: 0 2px 2px 0;
+      background: var(--accent);
+    }
+    .ft-item svg { width: 14px; height: 14px; color: var(--ink-3); }
+    .ft-item .ft-name { font-family: var(--mono); font-size: 12px; }
+    .ft-item .ft-anno {
+      font-size: 10.5px;
+      color: var(--ink-3);
+      font-family: var(--sans);
+    }
+
+    .codeblock {
+      background: var(--bg-0);
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.7;
+    }
+    .codeblock .row {
+      display: grid;
+      grid-template-columns: 56px 1fr;
+      gap: 0;
+      align-items: stretch;
+    }
+    .codeblock .row + .row { border-top: 0; }
+    .codeblock .ln {
+      text-align: right;
+      padding: 0 14px 0 18px;
+      color: var(--ink-4);
+      user-select: none;
+      border-right: 1px solid var(--line-faint);
+      font-feature-settings: "tnum" 1;
+      background: var(--bg-0);
+    }
+    .codeblock .src {
+      padding: 0 18px;
+      color: var(--ink-1);
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .codeblock .row.is-fail {
+      background: var(--fail-soft);
+    }
+    .codeblock .row.is-fail .ln {
+      color: var(--fail);
+      background: var(--fail-soft);
+      font-weight: 600;
+      border-right-color: var(--fail);
+    }
+    .codeblock .row.is-fail .src { color: var(--ink-0); }
+    .codeblock .row.is-add { background: oklch(0.83 0.18 142 / 0.10); }
+    .codeblock .row.is-add .ln { color: var(--pass); background: oklch(0.83 0.18 142 / 0.10); }
+    .codeblock .row.is-del { background: oklch(0.74 0.18 22 / 0.10); }
+    .codeblock .row.is-del .ln { color: var(--fail); background: oklch(0.74 0.18 22 / 0.10); }
+    .codeblock .kw { color: oklch(0.55 0.18 290); font-weight: 500; }
+    [data-theme="dark"] .codeblock .kw,
+    [data-theme="auto"] .codeblock .kw { color: oklch(0.78 0.14 290); }
+    .codeblock .str { color: oklch(0.45 0.13 30); }
+    [data-theme="dark"] .codeblock .str,
+    [data-theme="auto"] .codeblock .str { color: oklch(0.75 0.13 30); }
+    @media (prefers-color-scheme: dark) {
+      [data-theme="auto"] .codeblock .kw { color: oklch(0.78 0.14 290); }
+      [data-theme="auto"] .codeblock .str { color: oklch(0.75 0.13 30); }
+    }
+    .codeblock .com { color: var(--ink-3); font-style: italic; }
+    .codeblock .fn { color: var(--accent); }
+
+    .terminal {
+      margin: 0;
+      padding: 14px 18px;
+      background: var(--bg-0);
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.65;
+      color: var(--ink-1);
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .terminal .pr { color: var(--accent); font-weight: 600; }
+    .terminal .ok { color: var(--pass); }
+    .terminal .er { color: var(--fail); }
+    .terminal .dim { color: var(--ink-3); }
+
+    .locator-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+      padding: 0;
+      overflow: hidden;
+    }
+    .locator-card > h4 {
+      margin: 0;
+      padding: 11px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+      border-bottom: 1px solid var(--line-faint);
+      background: var(--bg-1);
+    }
+    .locator-card > div { padding: 12px 14px; }
+    .locator-card .loc-input {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--ink-0);
+      background: var(--bg-2);
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      margin-bottom: 10px;
+    }
+    .locator-card .loc-row {
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      gap: 8px;
+      padding: 6px 0;
+      font-size: 12px;
+    }
+    .locator-card .loc-row dt {
+      color: var(--ink-3);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .locator-card .loc-row dd {
+      margin: 0;
+      font-family: var(--mono);
+      color: var(--ink-0);
+      overflow-wrap: anywhere;
+    }
+    .locator-card .loc-row dd.miss { color: var(--fail); }
+    .locator-card .loc-row dd.ok { color: var(--pass); }
+
+    .console-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+      overflow: hidden;
+      font-family: var(--mono);
+      font-size: 11.5px;
+    }
+    .console-list li {
+      display: grid;
+      grid-template-columns: 60px 60px 1fr;
+      gap: 10px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--line-faint);
+      align-items: baseline;
+    }
+    .console-list li:last-child { border-bottom: none; }
+    .console-list .ts { color: var(--ink-3); }
+    .console-list .lvl { font-weight: 600; }
+    .console-list .lvl.warn { color: var(--flaky); }
+    .console-list .lvl.err { color: var(--fail); }
+    .console-list .lvl.info { color: var(--info); }
+    .console-list .msg { color: var(--ink-0); white-space: pre-wrap; word-break: break-word; }
+
+    /* ── QMO View ────────────────────────────────────────── */
+    .qmo-main {
+      padding: 26px 32px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      overflow-y: auto;
+    }
+    .qmo-side {
+      border-left: 1px solid var(--line);
+      padding: 22px 22px 32px;
+      background: var(--bg-1);
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      overflow-y: auto;
+    }
+    .qmo-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 18px;
+      padding: 26px 28px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background:
+        radial-gradient(800px 320px at 0% 0%, var(--accent-soft), transparent 60%),
+        var(--bg-elev);
+    }
+    .qmo-hero h1 {
+      margin: 0 0 6px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .qmo-score {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .qmo-score .num {
+      font-family: var(--sans);
+      font-size: 56px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--ink-0);
+      line-height: 1;
+    }
+    .qmo-score .max {
+      font-family: var(--mono);
+      font-size: 16px;
+      color: var(--ink-3);
+    }
+    .qmo-score .verdict {
+      margin-left: auto;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: var(--pass-soft);
+      color: var(--pass);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border: 1px solid color-mix(in oklch, var(--pass) 30%, transparent);
+    }
+    .qmo-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--bg-3);
+      overflow: hidden;
+      margin-bottom: 14px;
+    }
+    .qmo-bar-fill {
+      height: 100%;
+      width: 86%;
+      background: var(--accent);
+      border-radius: 3px;
+    }
+    .qmo-hero p {
+      margin: 0;
+      color: var(--ink-2);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .qmo-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      border-left: 1px solid var(--line);
+      padding-left: 20px;
+    }
+    .qmo-stat {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: baseline;
+      gap: 12px;
+    }
+    .qmo-stat .label {
+      font-size: 12px;
+      color: var(--ink-3);
+    }
+    .qmo-stat .num {
+      font-family: var(--mono);
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--ink-0);
+      letter-spacing: -0.01em;
+      font-feature-settings: "tnum" 1;
+    }
+    .qmo-stat .num.pass { color: var(--pass); }
+    .qmo-stat .num.fail { color: var(--fail); }
+    .qmo-stat .num.flaky { color: var(--flaky); }
+    .qmo-stat .num.skip { color: var(--ink-2); }
+
+    .qmo-cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .qmo-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--bg-elev);
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .qmo-card-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .qmo-card-head h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-0);
+    }
+    .qmo-card-head .count {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+    .qmo-card-head .more {
+      margin-left: auto;
+      font-size: 11.5px;
+      color: var(--accent);
+      font-weight: 500;
+    }
+    .qmo-card ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .qmo-card ul li {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line-faint);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .qmo-card ul li:last-child { border-bottom: none; }
+    .qmo-card .item-title {
+      font-size: 12.5px;
+      color: var(--ink-0);
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    .qmo-card .item-title .scope {
+      color: var(--ink-3);
+      font-weight: 400;
+    }
+    .qmo-card .item-meta {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+
+    .qmo-ai {
+      padding: 18px 22px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background:
+        radial-gradient(600px 240px at 100% 0%, var(--accent-soft), transparent 70%),
+        var(--bg-elev);
+    }
+    .qmo-ai-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .qmo-ai-head h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-0);
+    }
+    .qmo-ai-head .pill {
+      padding: 2px 8px;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border-radius: 999px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);
+    }
+    .qmo-ai p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--ink-1);
+    }
+    .qmo-ai .verdict {
+      margin-top: 10px;
+      padding: 10px 14px;
+      border-left: 3px solid var(--pass);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      background: var(--pass-soft);
+      color: var(--ink-0);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .rules-table {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+      overflow: hidden;
+    }
+    .rules-table > .head {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-1);
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .rules-table > .head h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-0);
+    }
+    .rules-table > .head .pass-pill {
+      margin-left: auto;
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: var(--pass-soft);
+      color: var(--pass);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .rules-table .rule-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line-faint);
+      font-size: 12px;
+    }
+    .rules-table .rule-row:last-child { border-bottom: none; }
+    .rules-table .rule-name { color: var(--ink-0); font-weight: 500; }
+    .rules-table .rule-thresh { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+    .rules-table .rule-actual {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 1px 8px;
+      border-radius: 999px;
+    }
+    .rules-table .rule-actual.pass { color: var(--pass); background: var(--pass-soft); }
+    .rules-table .rule-actual.fail { color: var(--fail); background: var(--fail-soft); }
+
+    .recent-runs {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-elev);
+      overflow: hidden;
+    }
+    .recent-runs li {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line-faint);
+      font-size: 12px;
+    }
+    .recent-runs li:last-child { border-bottom: none; }
+    .recent-runs .ts { color: var(--ink-1); font-family: var(--mono); font-size: 11.5px; }
+    .recent-runs .pr { font-family: var(--mono); font-weight: 600; font-feature-settings: "tnum" 1; }
+    .recent-runs .pr.up { color: var(--pass); }
+    .recent-runs .pr.dn { color: var(--fail); }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ─── chrome ──────────────────────────────────────────── -->
+  <header class="chrome">
+    <div class="brand">
+      <span class="brand-mark">P</span>
+      <div>
+        <div class="brand-name">Playwright Workbench</div>
+        <span class="brand-sub">v0.1.0 · local</span>
+      </div>
+    </div>
+
+    <nav class="breadcrumbs" aria-label="Project context">
+      <a class="crumb" href="#">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 5a1 1 0 0 1 1-1h3.5l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+        acme-webapp
+      </a>
+      <span class="crumb-divider">/</span>
+      <a class="crumb" href="#">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="4" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="8" r="1.5"/><path d="M5 5.5v5M6.4 4.7c2.5 0 4 1.4 4 3.3"/></svg>
+        main
+      </a>
+      <span class="crumb-divider">/</span>
+      <a class="crumb" href="#">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 1.5"/></svg>
+        Run #4821
+        <span class="badge failed" style="margin-left:4px;">Failed</span>
+      </a>
+      <span class="crumb-divider">·</span>
+      <span class="crumb crumb-current">12 failed · 18.7s · chromium</span>
+    </nav>
+
+    <div class="chrome-actions">
+      <div class="persona" role="tablist" aria-label="Persona view">
+        <button role="tab" aria-pressed="true" data-persona="qa">QA</button>
+        <button role="tab" aria-pressed="false" data-persona="dev">Developer</button>
+        <button role="tab" aria-pressed="false" data-persona="qmo">Insights</button>
+      </div>
+
+      <button class="btn btn-icon" aria-label="Open in editor" title="エディタで開く (o)">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4a1 1 0 0 1 1-1h4M2 4v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8M2 4l5 5M14 2v4M14 2h-4M14 2L9 7"/></svg>
+      </button>
+
+      <button class="btn btn-primary" title="再実行 (r)">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5v9l7-4.5z"/></svg>
+        再実行
+        <kbd>R</kbd>
+      </button>
+
+      <div class="theme-toggle" role="radiogroup" aria-label="Theme">
+        <button role="radio" aria-pressed="false" data-theme-set="light" title="Light">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+            <circle cx="8" cy="8" r="3"/>
+            <path d="M8 1.5v1.5M8 13v1.5M1.5 8h1.5M13 8h1.5M3 3l1.1 1.1M11.9 11.9 13 13M3 13l1.1-1.1M11.9 4.1 13 3"/>
+          </svg>
+        </button>
+        <button role="radio" aria-pressed="true" data-theme-set="auto" title="System">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="12" height="8" rx="1"/><path d="M5.5 13.5h5"/></svg>
+        </button>
+        <button role="radio" aria-pressed="false" data-theme-set="dark" title="Dark">
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M9.5 2.5a5.5 5.5 0 1 0 4.5 8.5 6 6 0 0 1-4.5-8.5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── workspace (view switcher) ──────────────────────── -->
+  <main class="workspace" data-view="qa">
+
+    <!-- ═══ QA View ═══════════════════════════════════════ -->
+    <div class="view view-qa">
+
+    <!-- COL 1 — Failures -------------------------------------- -->
+    <section class="col" aria-label="失敗テスト一覧">
+      <div class="col-header">
+        <div class="col-title">失敗テスト</div>
+        <div class="col-counter">12 / 702</div>
+      </div>
+
+      <div class="filterbar">
+        <div class="search">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="5"/><path d="m11 11 3 3"/></svg>
+          <input type="text" placeholder="テスト名・ファイル・タグで検索…" />
+          <kbd>/</kbd>
+        </div>
+        <div class="chips" role="group" aria-label="ステータス絞り込み">
+          <button class="chip" aria-pressed="false">All <span class="count">702</span></button>
+          <button class="chip" aria-pressed="true">Failed <span class="count">12</span></button>
+          <button class="chip" aria-pressed="false">Flaky <span class="count">3</span></button>
+          <button class="chip" aria-pressed="false">Passed <span class="count">684</span></button>
+        </div>
+      </div>
+
+      <div class="col-body">
+        <ul class="failures" role="listbox" aria-label="失敗テスト">
+          <li role="option" aria-selected="true">
+            <div class="failure-row-top">
+              <span class="badge failed">Failed</span>
+              <span class="failure-time">2分前</span>
+            </div>
+            <div class="failure-title">
+              <span class="scope">checkout</span>should complete purchase
+            </div>
+            <div class="failure-meta">
+              <span class="file">tests/checkout/checkout.spec.ts:87</span>
+              <span>· 18.7s</span>
+              <span>· retry 1/2</span>
+            </div>
+          </li>
+
+          <li role="option" aria-selected="false">
+            <div class="failure-row-top">
+              <span class="badge failed">Failed</span>
+              <span class="failure-time">2分前</span>
+            </div>
+            <div class="failure-title">
+              <span class="scope">profile</span>should update avatar
+            </div>
+            <div class="failure-meta">
+              <span class="file">tests/profile/avatar.spec.ts:45</span>
+              <span>· 7.0s</span>
+            </div>
+          </li>
+
+          <li role="option" aria-selected="false">
+            <div class="failure-row-top">
+              <span class="badge flaky">Flaky</span>
+              <span class="failure-time">3分前</span>
+            </div>
+            <div class="failure-title">
+              <span class="scope">search</span>should filter results
+            </div>
+            <div class="failure-meta">
+              <span class="file">tests/search/filter.spec.ts:63</span>
+              <span>· retry 2/5 で成功</span>
+            </div>
+          </li>
+
+          <li role="option" aria-selected="false">
+            <div class="failure-row-top">
+              <span class="badge failed">Failed</span>
+              <span class="failure-time">3分前</span>
+            </div>
+            <div class="failure-title">
+              <span class="scope">checkout</span>should apply promo code
+            </div>
+            <div class="failure-meta">
+              <span class="file">tests/checkout/promo.spec.ts:72</span>
+              <span>· 5.2s</span>
+            </div>
+          </li>
+
+          <li role="option" aria-selected="false">
+            <div class="failure-row-top">
+              <span class="badge failed">Failed</span>
+              <span class="failure-time">4分前</span>
+            </div>
+            <div class="failure-title">
+              <span class="scope">auth</span>should reject invalid token
+            </div>
+            <div class="failure-meta">
+              <span class="file">tests/auth/token.spec.ts:31</span>
+              <span>· 2.8s</span>
+            </div>
+          </li>
+
+          <li role="option" aria-selected="false">
+            <div class="failure-row-top">
+              <span class="badge passed">Passed</span>
+              <span class="failure-time">4分前</span>
+            </div>
+            <div class="failure-title">
+              <span class="scope">cart</span>should add item
+            </div>
+            <div class="failure-meta">
+              <span class="file">tests/cart/add-item.spec.ts:28</span>
+              <span>· 1.4s</span>
+            </div>
+          </li>
+
+          <li role="option" aria-selected="false">
+            <div class="failure-row-top">
+              <span class="badge passed">Passed</span>
+              <span class="failure-time">5分前</span>
+            </div>
+            <div class="failure-title">
+              <span class="scope">auth</span>should login
+            </div>
+            <div class="failure-meta">
+              <span class="file">tests/auth/login.spec.ts:34</span>
+              <span>· 1.1s</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- COL 2 — Detail ---------------------------------------- -->
+    <section class="col" aria-label="失敗詳細">
+      <div class="case-header">
+        <div class="case-eyebrow">
+          <span class="badge failed">Failed</span>
+          <span class="id">run_2024-05-18 · #4821-01</span>
+          <span class="sep">·</span>
+          <span>chromium 124</span>
+          <span class="sep">·</span>
+          <span>worker 2</span>
+          <span class="sep">·</span>
+          <span>2分前</span>
+        </div>
+        <h1 class="case-title">
+          <span class="scope">checkout</span>should complete purchase
+        </h1>
+        <div class="case-meta">
+          <span class="item"><span class="label">File</span><span class="value">tests/checkout/checkout.spec.ts:87</span></span>
+          <span class="item"><span class="label">Branch</span><span class="value">main · a1b2c3d</span></span>
+          <span class="item"><span class="label">Duration</span><span class="value">18.7s</span></span>
+          <span class="item"><span class="label">Retries</span><span class="value">1 / 2</span></span>
+          <span class="item"><span class="label">Tags</span><span class="value">@checkout @smoke</span></span>
+        </div>
+        <div class="case-actions">
+          <button class="btn btn-primary">
+            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5v9l7-4.5z"/></svg>
+            このテストを再実行
+            <kbd>R</kbd>
+          </button>
+          <button class="btn">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4a1 1 0 0 1 1-1h4M2 4v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8M2 4l5 5M14 2v4M14 2h-4M14 2L9 7"/></svg>
+            エディタで開く
+          </button>
+          <button class="btn">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="9" height="9" rx="1.5"/><path d="M5.5 5.5h6v6"/></svg>
+            コマンドをコピー
+          </button>
+          <button class="btn">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 1 0 6-6"/><path d="M2 2v4h4"/></svg>
+            既知の問題として記録
+          </button>
+        </div>
+      </div>
+
+      <nav class="tabs" aria-label="詳細セクション">
+        <button aria-pressed="true">概要</button>
+        <button aria-pressed="false">スタック <span class="tab-count">14</span></button>
+        <button aria-pressed="false">ステップ <span class="tab-count">7</span></button>
+        <button aria-pressed="false">添付 <span class="tab-count">4</span></button>
+        <button aria-pressed="false">メタデータ</button>
+      </nav>
+
+      <div class="col-body case-body">
+        <!-- Assertion -->
+        <div class="assertion">
+          <div class="assertion-head">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="7"/><path d="M5 5l6 6M11 5l-6 6"/></svg>
+            <span>Expect.toBeVisible failed · タイムアウト 5000ms 超過</span>
+          </div>
+          <div class="assertion-body">
+            <span class="key">locator:</span> getByRole(<span class="val">'button'</span>, { name: <span class="val">'Place Order'</span> })<br>
+            <span class="key">resolved:</span> button.btn.btn-primary.place-order<br>
+            <span class="key">expected:</span> <span class="val-expect">visible</span> &nbsp; <span class="key">received:</span> <span class="val-fail">hidden</span> (disabled attribute)
+          </div>
+        </div>
+
+        <!-- Step Timeline -->
+        <div class="section">
+          <div class="section-head">
+            <h3>ステップタイムライン</h3>
+            <span class="annot">7 ステップ · 18.7s · ステップ 6 で失敗</span>
+          </div>
+          <ol class="steps">
+            <li>
+              <span class="step-no">1</span>
+              <span class="step-icon pass"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3.5 8.5l3 3 6-7"/></svg></span>
+              <span class="step-name">/checkout に遷移</span>
+              <span class="step-dur">2.1s</span>
+            </li>
+            <li>
+              <span class="step-no">2</span>
+              <span class="step-icon pass"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3.5 8.5l3 3 6-7"/></svg></span>
+              <span class="step-name">配送情報を入力</span>
+              <span class="step-dur">3.4s</span>
+            </li>
+            <li>
+              <span class="step-no">3</span>
+              <span class="step-icon pass"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3.5 8.5l3 3 6-7"/></svg></span>
+              <span class="step-name">配送方法を選択</span>
+              <span class="step-dur">1.6s</span>
+            </li>
+            <li>
+              <span class="step-no">4</span>
+              <span class="step-icon pass"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3.5 8.5l3 3 6-7"/></svg></span>
+              <span class="step-name">支払い情報を入力</span>
+              <span class="step-dur">4.2s</span>
+            </li>
+            <li>
+              <span class="step-no">5</span>
+              <span class="step-icon pass"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3.5 8.5l3 3 6-7"/></svg></span>
+              <span class="step-name">注文内容を確認</span>
+              <span class="step-dur">1.8s</span>
+            </li>
+            <li class="is-fail">
+              <span class="step-no">6</span>
+              <span class="step-icon fail"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4l8 8M12 4l-8 8"/></svg></span>
+              <span class="step-name">「Place Order」をクリック</span>
+              <span class="step-dur">5.0s</span>
+            </li>
+            <li>
+              <span class="step-no">7</span>
+              <span class="step-icon skip"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M5 8h6"/></svg></span>
+              <span class="step-name">完了確認を待機</span>
+              <span class="step-dur">—</span>
+            </li>
+          </ol>
+        </div>
+
+        <!-- Stack -->
+        <div class="section">
+          <div class="section-head">
+            <h3>スタックトレース</h3>
+            <span class="annot">14 frames · 4 application · 10 framework</span>
+          </div>
+          <pre class="stack"><span class="at">at</span> Expect.toBeVisible
+   <span class="file">node_modules/playwright-core/lib/client/matchers.js</span><span class="pos">:123:15</span>
+<span class="at">at</span> tests/checkout/checkout.spec.ts<span class="pos">:87:36</span>
+<span class="at">at</span> async tests/checkout/checkout.spec.ts<span class="pos">:60:5</span></pre>
+        </div>
+
+        <!-- Command -->
+        <div class="section">
+          <div class="section-head">
+            <h3>再実行コマンド</h3>
+            <span class="annot">PackageManagerDetector · pnpm</span>
+          </div>
+          <div class="command">
+            <span class="cmd">pnpm exec playwright test tests/checkout/checkout.spec.ts:87 --project=chromium</span>
+            <button class="btn btn-icon" aria-label="コピー">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="9" height="9" rx="1.5"/><path d="M5.5 5.5h6v6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- COL 3 — Evidence -------------------------------------- -->
+    <aside class="col" aria-label="証拠">
+      <div class="col-header">
+        <div class="col-title">証拠</div>
+        <div class="col-counter">4 ファイル</div>
+      </div>
+
+      <nav class="evidence-tabs" aria-label="証拠タイプ">
+        <button aria-pressed="true">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="6" cy="7" r="1.2"/><path d="M2 11l4-3 8 5"/></svg>
+          スクリーンショット
+        </button>
+        <button aria-pressed="false">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12V4l4 2 4-3 4 3v8z"/></svg>
+          Trace
+        </button>
+        <button aria-pressed="false">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 6l4 2-4 2z"/></svg>
+          動画
+        </button>
+        <button aria-pressed="false">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 5h12M2 8h12M2 11h12"/></svg>
+          ネットワーク
+        </button>
+        <button aria-pressed="false">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3h10v10H3z"/><path d="M5 6h6M5 8h6M5 10h4"/></svg>
+          ログ
+        </button>
+      </nav>
+
+      <div class="col-body evidence-body">
+        <!-- Screenshot mock -->
+        <figure class="screenshot">
+          <figcaption class="screenshot-frame">
+            <span class="dots"><span></span><span></span><span></span></span>
+            <span>https://acme-webapp.local/checkout</span>
+          </figcaption>
+          <div class="screenshot-canvas">
+            <div class="mock-h"></div>
+            <div class="mock-card">
+              <div class="mock-row m"></div>
+              <div class="mock-row l"></div>
+              <div class="mock-row s"></div>
+              <div class="mock-cta">Place Order</div>
+            </div>
+            <div class="crosshair" style="bottom: 44px; left: 30px;"></div>
+          </div>
+        </figure>
+
+        <!-- DOM at failure -->
+        <div class="section">
+          <div class="section-head">
+            <h3>DOM (失敗時点)</h3>
+            <span class="annot">selector evaluated</span>
+          </div>
+          <pre class="stack" style="font-size:11.5px;"><span class="at">&lt;button</span> <span class="key">type</span>=<span class="file">"button"</span>
+   <span class="key">class</span>=<span class="file">"btn btn-primary place-order"</span>
+   <span class="key">data-testid</span>=<span class="file">"place-order"</span>
+   <span class="pos">disabled</span>&gt;
+   Place Order
+<span class="at">&lt;/button&gt;</span></pre>
+        </div>
+
+        <!-- Network failed -->
+        <div class="section">
+          <div class="section-head">
+            <h3>失敗したリクエスト</h3>
+            <span class="annot">1 / 38</span>
+          </div>
+          <ul class="net">
+            <li>
+              <span class="method">POST</span>
+              <span class="url">/api/orders</span>
+              <span class="status status-500">500</span>
+              <span class="ms">742ms</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Files -->
+        <div class="section">
+          <div class="section-head">
+            <h3>証拠ファイル</h3>
+            <span class="annot">ローカル保存</span>
+          </div>
+          <ul class="files">
+            <li>
+              <span class="icon">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="6" cy="7" r="1.2"/><path d="M2 11l4-3 8 5"/></svg>
+              </span>
+              <span class="name">screenshot.png</span>
+              <span class="size">218 KB</span>
+              <a class="download" href="#" aria-label="ダウンロード">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2v9M4 7l4 4 4-4M3 14h10"/></svg>
+              </a>
+            </li>
+            <li>
+              <span class="icon">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1"/><path d="M2 7h12"/></svg>
+              </span>
+              <span class="name">trace.zip</span>
+              <span class="size">8.4 MB</span>
+              <a class="download" href="#"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2v9M4 7l4 4 4-4M3 14h10"/></svg></a>
+            </li>
+            <li>
+              <span class="icon">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 6l4 2-4 2z"/></svg>
+              </span>
+              <span class="name">video.webm</span>
+              <span class="size">12.1 MB</span>
+              <a class="download" href="#"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2v9M4 7l4 4 4-4M3 14h10"/></svg></a>
+            </li>
+            <li>
+              <span class="icon">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 5h12M2 8h12M2 11h12"/></svg>
+              </span>
+              <span class="name">network.har</span>
+              <span class="size">210 KB</span>
+              <a class="download" href="#"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2v9M4 7l4 4 4-4M3 14h10"/></svg></a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Run metadata -->
+        <div class="section">
+          <div class="section-head">
+            <h3>Run メタデータ</h3>
+          </div>
+          <dl class="kv">
+            <dt>Run ID</dt><dd>run_2024-05-18_10-24-31</dd>
+            <dt>実行時刻</dt><dd>2024/05/18 10:24:31</dd>
+            <dt>Branch</dt><dd>main · a1b2c3d</dd>
+            <dt>Commit</dt><dd>fix: cart totals rounding</dd>
+            <dt>Project</dt><dd>acme-webapp</dd>
+            <dt>Worker</dt><dd>2 / 4</dd>
+          </dl>
+        </div>
+      </div>
+    </aside>
+    </div><!-- /view-qa -->
+
+    <!-- ═══ Developer View ════════════════════════════════ -->
+    <div class="view view-dev">
+
+      <!-- COL 1: 関連ファイル -->
+      <section class="col" aria-label="関連ファイル">
+        <div class="col-header">
+          <div class="col-title">関連ファイル</div>
+          <div class="col-counter">5</div>
+        </div>
+        <div class="col-body">
+          <ul class="file-tree">
+            <li class="ft-group">tests / checkout /</li>
+            <li class="ft-item is-current">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+              <span class="ft-name">checkout.spec.ts</span>
+              <span class="badge failed">Failed</span>
+            </li>
+            <li class="ft-item">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+              <span class="ft-name">promo.spec.ts</span>
+              <span class="badge failed">Failed</span>
+            </li>
+            <li class="ft-group">pages /</li>
+            <li class="ft-item">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+              <span class="ft-name">checkout.page.ts</span>
+              <span class="ft-anno">Page Object</span>
+            </li>
+            <li class="ft-group">fixtures /</li>
+            <li class="ft-item">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+              <span class="ft-name">checkout.fixture.ts</span>
+              <span class="ft-anno">Fixture</span>
+            </li>
+            <li class="ft-group">config /</li>
+            <li class="ft-item">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+              <span class="ft-name">playwright.config.ts</span>
+              <span class="ft-anno">Config</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- COL 2: source / diff / terminal -->
+      <section class="col" aria-label="ソースビューア">
+        <div class="case-header">
+          <div class="case-eyebrow">
+            <span class="badge failed">Failed</span>
+            <span class="id">tests/checkout/checkout.spec.ts</span>
+            <span class="sep">·</span>
+            <span>line 87 で失敗</span>
+            <span class="sep">·</span>
+            <span>main · a1b2c3d</span>
+          </div>
+          <h1 class="case-title">
+            <span class="scope">checkout</span>should complete purchase
+          </h1>
+          <div class="case-actions">
+            <button class="btn btn-primary">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5v9l7-4.5z"/></svg>
+              再実行
+              <kbd>R</kbd>
+            </button>
+            <button class="btn">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4a1 1 0 0 1 1-1h4M2 4v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8M2 4l5 5M14 2v4M14 2h-4M14 2L9 7"/></svg>
+              エディタで開く (line 87)
+            </button>
+            <button class="btn">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="4" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="8" r="1.5"/><path d="M5 5.5v5M6.4 4.7c2.5 0 4 1.4 4 3.3"/></svg>
+              Git diff
+            </button>
+          </div>
+        </div>
+        <nav class="tabs" aria-label="ソース表示">
+          <button aria-pressed="true">ソース</button>
+          <button aria-pressed="false">差分 <span class="tab-count">+12 / −4</span></button>
+          <button aria-pressed="false">ターミナル</button>
+          <button aria-pressed="false">Locator</button>
+          <button aria-pressed="false">Console <span class="tab-count">3</span></button>
+        </nav>
+        <div class="col-body">
+          <div class="codeblock">
+            <div class="row"><span class="ln">82</span><span class="src">  <span class="kw">test</span>(<span class="str">'should complete purchase'</span>, <span class="kw">async</span> ({ page }) =&gt; {</span></div>
+            <div class="row"><span class="ln">83</span><span class="src">    <span class="kw">await</span> page.<span class="fn">goto</span>(<span class="str">'/checkout'</span>);</span></div>
+            <div class="row"><span class="ln">84</span><span class="src">    <span class="kw">await</span> <span class="fn">fillShipping</span>(page);</span></div>
+            <div class="row"><span class="ln">85</span><span class="src">    <span class="kw">await</span> <span class="fn">selectShipping</span>(page, <span class="str">'standard'</span>);</span></div>
+            <div class="row"><span class="ln">86</span><span class="src">    <span class="kw">await</span> <span class="fn">fillPayment</span>(page, validCard);</span></div>
+            <div class="row is-fail"><span class="ln">87</span><span class="src">    <span class="kw">await</span> <span class="fn">expect</span>(page.<span class="fn">getByRole</span>(<span class="str">'button'</span>, { name: <span class="str">'Place Order'</span> })).<span class="fn">toBeVisible</span>();</span></div>
+            <div class="row"><span class="ln">88</span><span class="src">    <span class="kw">await</span> page.<span class="fn">getByRole</span>(<span class="str">'button'</span>, { name: <span class="str">'Place Order'</span> }).<span class="fn">click</span>();</span></div>
+            <div class="row"><span class="ln">89</span><span class="src">    <span class="kw">await</span> <span class="fn">expect</span>(page.<span class="fn">getByText</span>(<span class="str">'Order confirmed'</span>)).<span class="fn">toBeVisible</span>();</span></div>
+            <div class="row"><span class="ln">90</span><span class="src">  });</span></div>
+            <div class="row"><span class="ln">91</span><span class="src"></span></div>
+            <div class="row"><span class="ln">92</span><span class="src">  <span class="com">// === diff (since last passing run, a1b2c3d^) ===</span></span></div>
+            <div class="row is-del"><span class="ln">−</span><span class="src">    <span class="kw">await</span> <span class="fn">fillPayment</span>(page);</span></div>
+            <div class="row is-add"><span class="ln">+</span><span class="src">    <span class="kw">await</span> <span class="fn">fillPayment</span>(page, validCard);</span></div>
+            <div class="row is-add"><span class="ln">+</span><span class="src">    <span class="kw">await</span> page.<span class="fn">waitForLoadState</span>(<span class="str">'networkidle'</span>);</span></div>
+            <div class="row"><span class="ln">93</span><span class="src"></span></div>
+          </div>
+          <pre class="terminal"><span class="pr">$</span> pnpm exec playwright test tests/checkout/checkout.spec.ts:87
+<span class="dim">Running 1 test using 1 worker</span>
+
+  <span class="er">✘</span> checkout &gt; should complete purchase (chromium) <span class="dim">18.7s</span>
+
+  <span class="dim">at tests/checkout/checkout.spec.ts:87</span>
+  <span class="er">Error: expect(locator).toBeVisible()</span>
+
+  <span class="dim">Locator: getByRole('button', { name: 'Place Order' })</span>
+  <span class="dim">Expected: visible</span>
+  <span class="dim">Received: hidden  (disabled attribute)</span>
+  <span class="dim">Timeout:  5000ms</span>
+
+  <span class="dim">Call log:</span>
+  <span class="dim">  - waiting for getByRole('button', { name: 'Place Order' }) to be visible</span>
+
+<span class="er">  1 failed</span>
+    checkout &gt; should complete purchase
+<span class="dim">    chromium  ·  worker 2  ·  retry 1/2</span>
+</pre>
+        </div>
+      </section>
+
+      <!-- COL 3: Inspector -->
+      <aside class="col" aria-label="検証">
+        <div class="col-header">
+          <div class="col-title">検証</div>
+          <div class="col-counter">3</div>
+        </div>
+        <div class="col-body" style="padding: 18px; display: flex; flex-direction: column; gap: 18px;">
+
+          <div class="locator-card">
+            <h4>Locator (失敗時の状態)</h4>
+            <div>
+              <div class="loc-input">getByRole('button', { name: 'Place Order' })</div>
+              <dl class="loc-row">
+                <dt>解決</dt><dd>button.btn.btn-primary.place-order</dd>
+              </dl>
+              <dl class="loc-row">
+                <dt>visible</dt><dd class="miss">hidden</dd>
+              </dl>
+              <dl class="loc-row">
+                <dt>enabled</dt><dd class="miss">disabled</dd>
+              </dl>
+              <dl class="loc-row">
+                <dt>matched</dt><dd class="ok">1 element</dd>
+              </dl>
+              <dl class="loc-row">
+                <dt>tagName</dt><dd>button</dd>
+              </dl>
+              <dl class="loc-row">
+                <dt>data-testid</dt><dd>place-order</dd>
+              </dl>
+            </div>
+          </div>
+
+          <div class="locator-card">
+            <h4>Console (失敗中の出力)</h4>
+            <ul class="console-list" style="border: none; border-radius: 0;">
+              <li>
+                <span class="ts">+12.34s</span>
+                <span class="lvl warn">warn</span>
+                <span class="msg">[checkout] form validation failed: card_number_expired</span>
+              </li>
+              <li>
+                <span class="ts">+13.10s</span>
+                <span class="lvl err">error</span>
+                <span class="msg">POST /api/orders 500 Internal Server Error</span>
+              </li>
+              <li>
+                <span class="ts">+13.45s</span>
+                <span class="lvl info">info</span>
+                <span class="msg">[checkout] place_order_button_disabled = true</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="locator-card">
+            <h4>Run メタデータ</h4>
+            <div style="padding: 0;">
+              <dl class="kv" style="border: none; border-radius: 0;">
+                <dt>Run ID</dt><dd>run_2024-05-18_10-24-31</dd>
+                <dt>Branch</dt><dd>main · a1b2c3d</dd>
+                <dt>Commit</dt><dd>fix: cart totals rounding</dd>
+                <dt>Worker</dt><dd>2 / 4</dd>
+                <dt>OS</dt><dd>macOS 14.4</dd>
+                <dt>Browser</dt><dd>chromium 124</dd>
+              </dl>
+            </div>
+          </div>
+
+        </div>
+      </aside>
+    </div><!-- /view-dev -->
+
+    <!-- ═══ QMO View ══════════════════════════════════════ -->
+    <div class="view view-qmo">
+      <div class="qmo-main">
+
+        <!-- Hero: Release Readiness -->
+        <section class="qmo-hero">
+          <div>
+            <h1>Release Readiness</h1>
+            <div class="qmo-score">
+              <span class="num">86</span>
+              <span class="max">/ 100</span>
+              <span class="verdict">Ready</span>
+            </div>
+            <div class="qmo-bar"><div class="qmo-bar-fill" style="width: 86%;"></div></div>
+            <p>v2.14.0-rc · 全 6 つの Quality Gate ルールをパス。重大な失敗 3 件と Flaky 3 件を確認すれば本番昇格可。</p>
+          </div>
+          <div class="qmo-stats">
+            <div class="qmo-stat"><span class="label">Total</span><span class="num">2,842</span></div>
+            <div class="qmo-stat"><span class="label">Passed</span><span class="num pass">2,486</span></div>
+            <div class="qmo-stat"><span class="label">Failed</span><span class="num fail">198</span></div>
+            <div class="qmo-stat"><span class="label">Flaky</span><span class="num flaky">37</span></div>
+            <div class="qmo-stat"><span class="label">Skipped</span><span class="num skip">121</span></div>
+          </div>
+        </section>
+
+        <!-- 3-card row: Critical / Known / Flaky -->
+        <section class="qmo-cards">
+          <article class="qmo-card">
+            <div class="qmo-card-head">
+              <h3>重大な失敗</h3>
+              <span class="count">3</span>
+              <a class="more" href="#">すべて表示 ›</a>
+            </div>
+            <ul>
+              <li>
+                <span class="item-title"><span class="scope">checkout ›</span> should complete payment</span>
+                <span class="item-meta">tests/e2e/checkout.spec.ts:112 · chromium · 3m ago</span>
+              </li>
+              <li>
+                <span class="item-title"><span class="scope">search ›</span> filters › price range</span>
+                <span class="item-meta">tests/e2e/search/filters.spec.ts:78 · webkit · 12m ago</span>
+              </li>
+              <li>
+                <span class="item-title"><span class="scope">profile ›</span> update › saves changes</span>
+                <span class="item-meta">tests/e2e/profile/update.spec.ts:54 · firefox · 16m ago</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="qmo-card">
+            <div class="qmo-card-head">
+              <h3>既知の問題</h3>
+              <span class="count">8</span>
+              <a class="more" href="#">すべて表示 ›</a>
+            </div>
+            <ul>
+              <li>
+                <span class="item-title">Payment gateway timeout in CI</span>
+                <span class="item-meta">#1024 · Open · High</span>
+              </li>
+              <li>
+                <span class="item-title">Flaky: product list virtual scroll</span>
+                <span class="item-meta">#987 · Open · Medium</span>
+              </li>
+              <li>
+                <span class="item-title">Intermittent auth redirect</span>
+                <span class="item-meta">#956 · Open · Medium</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="qmo-card">
+            <div class="qmo-card-head">
+              <h3>Top Flaky</h3>
+              <span class="count">37</span>
+              <a class="more" href="#">すべて表示 ›</a>
+            </div>
+            <ul>
+              <li>
+                <span class="item-title"><span class="scope">search ›</span> autocomplete suggestions</span>
+                <span class="item-meta">tests/e2e/search.auto.spec.ts:23 · 24%</span>
+              </li>
+              <li>
+                <span class="item-title"><span class="scope">cart ›</span> remove item</span>
+                <span class="item-meta">tests/e2e/cart.remove.spec.ts:41 · 18%</span>
+              </li>
+              <li>
+                <span class="item-title"><span class="scope">homepage ›</span> hero carousel</span>
+                <span class="item-meta">tests/e2e/home.hero.spec.ts:17 · 15%</span>
+              </li>
+            </ul>
+          </article>
+        </section>
+
+        <!-- AI Summary -->
+        <section class="qmo-ai">
+          <div class="qmo-ai-head">
+            <h3>AI リリース判定 サマリ</h3>
+            <span class="pill">Claude Code · Beta</span>
+          </div>
+          <p>
+            総合品質は良好で、前回比でパス率が +6.1pp 改善。リスクは checkout / search の 3 件の重大な失敗に集中。
+            Flaky リスクは許容範囲内 (7.2%) ですが、上位 3 件は次回 sprint で対処推奨。
+            前回ブロッカー (#1024 Payment gateway timeout) は新規発生していません。
+          </p>
+          <div class="verdict">推奨: <strong>本番昇格可能</strong>。重大な失敗 3 件を確認後、デプロイ可。</div>
+        </section>
+
+      </div>
+
+      <!-- Right sidebar -->
+      <aside class="qmo-side">
+        <!-- Quality Gate -->
+        <div class="rules-table">
+          <div class="head">
+            <h3>Quality Gate</h3>
+            <span class="pass-pill">Passed</span>
+          </div>
+          <div class="rule-row">
+            <span class="rule-name">最低パス率</span>
+            <span class="rule-thresh">≥ 85%</span>
+            <span class="rule-actual pass">88.2%</span>
+          </div>
+          <div class="rule-row">
+            <span class="rule-name">最大失敗数</span>
+            <span class="rule-thresh">≤ 200</span>
+            <span class="rule-actual pass">198</span>
+          </div>
+          <div class="rule-row">
+            <span class="rule-name">重大な失敗</span>
+            <span class="rule-thresh">= 0</span>
+            <span class="rule-actual pass">0</span>
+          </div>
+          <div class="rule-row">
+            <span class="rule-name">Flaky リスク上限</span>
+            <span class="rule-thresh">≤ 10%</span>
+            <span class="rule-actual pass">7.2%</span>
+          </div>
+          <div class="rule-row">
+            <span class="rule-name">最大 Broken</span>
+            <span class="rule-thresh">≤ 40</span>
+            <span class="rule-actual pass">37</span>
+          </div>
+          <div class="rule-row">
+            <span class="rule-name">最低カバレッジ</span>
+            <span class="rule-thresh">≥ 70%</span>
+            <span class="rule-actual pass">74.3%</span>
+          </div>
+        </div>
+
+        <!-- Allure summary -->
+        <div class="rules-table">
+          <div class="head">
+            <h3>Allure サマリ</h3>
+            <a class="more" href="#" style="margin-left: auto; font-size: 11.5px; color: var(--accent);">フルレポート ›</a>
+          </div>
+          <div class="rule-row">
+            <span class="rule-name">パス率 (30 日)</span>
+            <span class="rule-thresh">前回 82.1%</span>
+            <span class="rule-actual pass">88.2%</span>
+          </div>
+          <div class="rule-row">
+            <span class="rule-name">平均所要時間</span>
+            <span class="rule-thresh">前回 2h 47m</span>
+            <span class="rule-actual pass">2h 18m</span>
+          </div>
+          <div class="rule-row">
+            <span class="rule-name">テスト/日</span>
+            <span class="rule-thresh">直近 7 日</span>
+            <span class="rule-actual pass">624</span>
+          </div>
+        </div>
+
+        <!-- Recent runs -->
+        <div>
+          <div style="display: flex; align-items: baseline; padding: 0 0 10px;">
+            <h3 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--ink-0);">最近の Run</h3>
+            <a class="more" href="#" style="margin-left: auto; font-size: 11.5px; color: var(--accent);">すべて表示 ›</a>
+          </div>
+          <ul class="recent-runs">
+            <li>
+              <span class="ts">2024/05/18 10:24</span>
+              <span class="badge passed">Passed</span>
+              <span class="pr up">88.2%</span>
+            </li>
+            <li>
+              <span class="ts">2024/05/16 09:18</span>
+              <span class="badge passed">Passed</span>
+              <span class="pr up">84.6%</span>
+            </li>
+            <li>
+              <span class="ts">2024/05/13 14:51</span>
+              <span class="badge flaky">Flaky</span>
+              <span class="pr">81.3%</span>
+            </li>
+            <li>
+              <span class="ts">2024/05/10 10:05</span>
+              <span class="badge failed">Failed</span>
+              <span class="pr dn">75.2%</span>
+            </li>
+            <li>
+              <span class="ts">2024/05/08 08:44</span>
+              <span class="badge passed">Passed</span>
+              <span class="pr up">83.1%</span>
+            </li>
+          </ul>
+        </div>
+      </aside>
+    </div><!-- /view-qmo -->
+
+  </main>
+
+  <!-- ─── statusbar ──────────────────────────────────────── -->
+  <footer class="statusbar" aria-label="セッションステータス">
+    <span class="seg">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="agent">Agent v0.1.0</span>
+      <span>· 127.0.0.1:4317</span>
+    </span>
+    <span class="seg">project · acme-webapp · pnpm</span>
+    <span class="seg">run · #4821</span>
+    <span class="spacer"></span>
+    <span class="seg"><kbd>↵</kbd> 開く</span>
+    <span class="seg"><kbd>r</kbd> 再実行</span>
+    <span class="seg"><kbd>j</kbd>/<kbd>k</kbd> 次/前</span>
+    <span class="seg"><kbd>?</kbd> ショートカット一覧</span>
+  </footer>
+
+  <script>
+    // Theme toggle (light / dark / auto) with persistence
+    (function () {
+      const root = document.documentElement;
+      const saved = localStorage.getItem("pw-theme") || "auto";
+      root.dataset.theme = saved;
+      document.querySelectorAll("[data-theme-set]").forEach((b) => {
+        b.setAttribute("aria-pressed", b.dataset.themeSet === saved ? "true" : "false");
+        b.addEventListener("click", () => {
+          const next = b.dataset.themeSet;
+          root.dataset.theme = next;
+          localStorage.setItem("pw-theme", next);
+          document.querySelectorAll("[data-theme-set]").forEach((x) => {
+            x.setAttribute("aria-pressed", x.dataset.themeSet === next ? "true" : "false");
+          });
+        });
+      });
+    })();
+
+    // Persona toggle — also drives view switch on .workspace[data-view]
+    const ws = document.querySelector(".workspace");
+    document.querySelectorAll(".persona [data-persona]").forEach((b) => {
+      b.addEventListener("click", () => {
+        document.querySelectorAll(".persona [data-persona]").forEach((x) =>
+          x.setAttribute("aria-pressed", x === b ? "true" : "false")
+        );
+        if (ws) ws.dataset.view = b.dataset.persona;
+      });
+    });
+
+    // Filter chips
+    document.querySelectorAll(".chip").forEach((c) => {
+      c.addEventListener("click", () => {
+        c.parentElement.querySelectorAll(".chip").forEach((x) =>
+          x.setAttribute("aria-pressed", x === c ? "true" : "false")
+        );
+      });
+    });
+
+    // Failure list selection
+    document.querySelectorAll(".failures li").forEach((li) => {
+      li.addEventListener("click", () => {
+        document.querySelectorAll(".failures li").forEach((x) =>
+          x.setAttribute("aria-selected", x === li ? "true" : "false")
+        );
+      });
+    });
+
+    // Tabs
+    document.querySelectorAll(".tabs, .evidence-tabs").forEach((nav) => {
+      nav.querySelectorAll("button").forEach((b) => {
+        b.addEventListener("click", () => {
+          nav.querySelectorAll("button").forEach((x) =>
+            x.setAttribute("aria-pressed", x === b ? "true" : "false")
+          );
+        });
+      });
+    });
+
+    // Keyboard shortcuts
+    window.addEventListener("keydown", (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      const map = { q: 'qa', d: 'dev', m: 'qmo' };
+      if (map[e.key]) {
+        const btn = document.querySelector(`[data-persona="${map[e.key]}"]`);
+        if (btn) btn.click();
+      }
+      if (e.key === "/") {
+        const input = document.querySelector(".search input");
+        if (input) { input.focus(); e.preventDefault(); }
+      }
+      if (e.key === "j" || e.key === "k") {
+        const items = Array.from(document.querySelectorAll(".failures li"));
+        const idx = items.findIndex((x) => x.getAttribute("aria-selected") === "true");
+        const next = e.key === "j" ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
+        if (items[next]) items[next].click();
+      }
+    });
+  </script>
+</body>
+</html>
