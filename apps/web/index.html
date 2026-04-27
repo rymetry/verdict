@@ -7,8 +7,8 @@
     <!--
       テーマ FOUC 抑止用ブートストラップ。
       React がマウントされる前に <html> へ .dark / data-theme を確定させる。
-      `useTheme` の永続化キーと値域を直書きしているのは、JS 起動前に同期実行する必要があるため。
-      キー / 値域を変更した際は src/hooks/use-theme.tsx と同期させること。
+      `useAppStore` の永続化キーと値域を直書きしているのは、JS 起動前に同期実行する必要があるため。
+      キー / 値域を変更した際は src/store/app-store.ts (THEME_STORAGE_KEY / VALID_PREFERENCES) と同期させること。
     -->
     <script>
       (function () {
