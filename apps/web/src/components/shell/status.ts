@@ -27,7 +27,10 @@ export function runStatusBadgeVariant(status: RunStatus): NonNullable<BadgeProps
   }
 }
 
-/** RunStatus → 日本語ラベル (UI 表示用) */
+/**
+ * RunStatus → UI 表示用ラベル。
+ * デザインモック準拠で英語ラベルを返す。i18n 化の際は本関数を差し替え点とする。
+ */
 export function runStatusLabel(status: RunStatus): string {
   switch (status) {
     case "queued":
@@ -46,17 +49,24 @@ export function runStatusLabel(status: RunStatus): string {
 }
 
 /**
- * Agent ヘルスチェックの状態を dot の色クラスに変換する。
- * - reachable: 緑 (--pass)
- * - unreachable / pending: グレー (--skip)
- * - error: 赤 (--fail)
+ * Agent 接続状態を表す離散値。
+ * - reachable: `/health` が 200 + ok=true。緑 (--pass)
+ * - degraded: `/health` は 200 だが ok=false (Agent 自身が degraded を申告)。黄 (--flaky)
+ * - unreachable: 通信失敗 (network error / 5xx / 接続拒否)。赤 (--fail)
+ * - pending: 初回 fetch 中で data も error も無い状態。グレー (--skip)
+ *
+ * 「reachable だが unhealthy」を pending に潰さないために degraded を分離している
+ * (silent failure 監査での指摘反映)。RunStatus と同様、switch には default を置かず
+ * 型の網羅性チェックで新値追加時にコンパイル失敗させる方針。
  */
-export type AgentDotState = "reachable" | "pending" | "unreachable";
+export type AgentDotState = "reachable" | "degraded" | "pending" | "unreachable";
 
 export function agentDotColorClass(state: AgentDotState): string {
   switch (state) {
     case "reachable":
       return "bg-[var(--pass)] shadow-[0_0_0_3px_var(--pass-soft)]";
+    case "degraded":
+      return "bg-[var(--flaky)] shadow-[0_0_0_3px_var(--flaky-soft)]";
     case "unreachable":
       return "bg-[var(--fail)] shadow-[0_0_0_3px_var(--fail-soft)]";
     case "pending":

@@ -88,9 +88,14 @@ export function installThemeEffects(): () => void {
       unsubscribeMedia = subscribeMediaQuery(mql, (event) => {
         useAppStore.getState().setSystemDark(event.matches);
       });
-    } catch {
+    } catch (error) {
       // matchMedia が無効クエリで throw する環境は OS 追従不可で確定。
-      // 既に store の初期値に systemDark=false が入っているのでそのまま。
+      // store の初期値に systemDark=false が入っているのでそのまま続行するが、
+      // dev では「OS 追従が無効になった」事実を可視化する (silent failure 監査反映)。
+      if (typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV)) {
+        // eslint-disable-next-line no-console -- 開発時の診断目的に限定
+        console.warn("[theme-effects] matchMedia subscribe failed; OS 追従無効", error);
+      }
     }
   }
 

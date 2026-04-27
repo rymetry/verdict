@@ -14,23 +14,29 @@ describe("StatusBar", () => {
     ).toBeInTheDocument();
   });
 
-  it("agentState に応じて dot に data-agent-state 属性を反映する (色は class で確認)", () => {
+  it("agentState に応じて dot に data-agent-state 属性 + 対応トークン class を反映する", () => {
     const { rerender } = render(
       <StatusBar agentState="reachable" agentVersion="0.1.0" />
     );
     const dotReachable = screen.getByTestId("agent-status-dot");
     expect(dotReachable).toHaveAttribute("data-agent-state", "reachable");
-    expect(dotReachable.className).toContain("var(--pass)");
+    expect(dotReachable.className).toMatch(/bg-\[var\(--pass\)\]/);
+    expect(dotReachable.className).toMatch(/var\(--pass-soft\)/);
+
+    rerender(<StatusBar agentState="degraded" />);
+    const dotDegraded = screen.getByTestId("agent-status-dot");
+    expect(dotDegraded).toHaveAttribute("data-agent-state", "degraded");
+    expect(dotDegraded.className).toMatch(/bg-\[var\(--flaky\)\]/);
 
     rerender(<StatusBar agentState="unreachable" />);
     const dotUnreachable = screen.getByTestId("agent-status-dot");
     expect(dotUnreachable).toHaveAttribute("data-agent-state", "unreachable");
-    expect(dotUnreachable.className).toContain("var(--fail)");
+    expect(dotUnreachable.className).toMatch(/bg-\[var\(--fail\)\]/);
 
     rerender(<StatusBar agentState="pending" />);
     const dotPending = screen.getByTestId("agent-status-dot");
     expect(dotPending).toHaveAttribute("data-agent-state", "pending");
-    expect(dotPending.className).toContain("var(--skip)");
+    expect(dotPending.className).toMatch(/bg-\[var\(--skip\)\]/);
   });
 
   it("agentVersion を Agent v<version> として表示する", () => {

@@ -7,13 +7,9 @@ import { cleanup } from "@testing-library/react";
 // vite の `define` で注入される `__APP_VERSION__` は本番ビルド時に文字列リテラル化されるが、
 // vitest 経由ではビルドが介在しないため undefined のまま参照されてしまう。
 // テストでは固定値を仕込み、Brand 等の default 表示が ReferenceError を起こさないようにする。
-// (vite-env.d.ts では `declare const __APP_VERSION__: string` 済みのため re-declare を避け、
-//  globalThis 上にだけ実値を載せる)
-{
-  const g = globalThis as Record<string, unknown>;
-  if (typeof g.__APP_VERSION__ !== "string") {
-    g.__APP_VERSION__ = "0.0.0-test";
-  }
+// 型は vite-env.d.ts の `declare global { var __APP_VERSION__: string }` で表現済み。
+if (typeof globalThis.__APP_VERSION__ !== "string") {
+  globalThis.__APP_VERSION__ = "0.0.0-test";
 }
 
 // Node 25 はネイティブ Web Storage を持つが API が不完全 (setItem/getItem 等が無く

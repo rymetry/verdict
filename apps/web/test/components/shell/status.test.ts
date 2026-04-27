@@ -56,17 +56,28 @@ describe("runStatusLabel", () => {
 });
 
 describe("agentDotColorClass", () => {
-  it("reachable は --pass トークンを使う", () => {
-    expect(agentDotColorClass("reachable")).toContain("var(--pass)");
+  it("reachable は --pass + --pass-soft 両トークンを使う (色相と halo の両方を pin)", () => {
+    const cls = agentDotColorClass("reachable");
+    expect(cls).toMatch(/bg-\[var\(--pass\)\]/);
+    expect(cls).toMatch(/shadow-\[.*var\(--pass-soft\).*\]/);
   });
-  it("unreachable は --fail トークンを使う", () => {
-    expect(agentDotColorClass("unreachable")).toContain("var(--fail)");
+  it("degraded は --flaky + --flaky-soft トークンを使う", () => {
+    const cls = agentDotColorClass("degraded");
+    expect(cls).toMatch(/bg-\[var\(--flaky\)\]/);
+    expect(cls).toMatch(/shadow-\[.*var\(--flaky-soft\).*\]/);
   });
-  it("pending は --skip トークンを使う", () => {
-    expect(agentDotColorClass("pending")).toContain("var(--skip)");
+  it("unreachable は --fail + --fail-soft トークンを使う", () => {
+    const cls = agentDotColorClass("unreachable");
+    expect(cls).toMatch(/bg-\[var\(--fail\)\]/);
+    expect(cls).toMatch(/shadow-\[.*var\(--fail-soft\).*\]/);
+  });
+  it("pending は --skip + --skip-soft トークンを使う", () => {
+    const cls = agentDotColorClass("pending");
+    expect(cls).toMatch(/bg-\[var\(--skip\)\]/);
+    expect(cls).toMatch(/shadow-\[.*var\(--skip-soft\).*\]/);
   });
   it("全 state に対し空文字以外を返す", () => {
-    const states: AgentDotState[] = ["reachable", "pending", "unreachable"];
+    const states: AgentDotState[] = ["reachable", "degraded", "pending", "unreachable"];
     for (const s of states) {
       expect(agentDotColorClass(s).length).toBeGreaterThan(0);
     }

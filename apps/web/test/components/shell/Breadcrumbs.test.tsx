@@ -62,4 +62,17 @@ describe("Breadcrumbs", () => {
     expect(screen.getByText("Run #42")).toBeInTheDocument();
     expect(screen.queryByText(/Failed|Passed|Running/)).not.toBeInTheDocument();
   });
+
+  it("branch のみが指定された場合は branch label だけを描画する", () => {
+    render(<Breadcrumbs branch="feature/x" />);
+    expect(screen.getByText("feature/x")).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Project context" })).toBeInTheDocument();
+  });
+
+  it("project + branch (run なし) は両方を描画する", () => {
+    render(<Breadcrumbs projectName="acme" branch="main" />);
+    expect(screen.getByText("acme")).toBeInTheDocument();
+    expect(screen.getByText("main")).toBeInTheDocument();
+    expect(screen.queryByText(/Run #/)).not.toBeInTheDocument();
+  });
 });

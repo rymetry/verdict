@@ -15,8 +15,14 @@ interface BrandProps {
   className?: string;
 }
 
+// Brand を import する経路 (例: 別アプリでの再利用 / SSR ツール) で vite define が無い場合の
+// ReferenceError を避けるため、typeof guard で安全な fallback を返す純粋関数にしておく。
+function readAppVersion(): string {
+  return typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "0.0.0";
+}
+
 export function Brand({
-  version = __APP_VERSION__,
+  version = readAppVersion(),
   environmentLabel = "local",
   className
 }: BrandProps): React.ReactElement {

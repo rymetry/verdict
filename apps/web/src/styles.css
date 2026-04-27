@@ -347,17 +347,14 @@ body {
     padding: 18px;
   }
 
-  .topbar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
+  /* `.topbar` は β で削除済 (TopBar コンポーネント化)。media query 上に残骸を残さない。 */
 
-  .grid,
-  .grid-2col {
+  .shell .grid,
+  .shell .grid-2col {
     grid-template-columns: 1fr;
   }
 
-  .panelPrimary {
+  .shell .panelPrimary {
     min-height: 360px;
     grid-row: auto;
   }

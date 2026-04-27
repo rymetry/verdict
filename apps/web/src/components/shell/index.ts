@@ -4,6 +4,7 @@ export { Brand } from "./Brand";
 export { Breadcrumbs } from "./Breadcrumbs";
 export { PersonaToggle } from "./PersonaToggle";
 export { RerunButton } from "./RerunButton";
+export { ShellAlert } from "./ShellAlert";
 export { StatusBar } from "./StatusBar";
 export { ThemeToggle } from "./ThemeToggle";
 export { TopBar } from "./TopBar";

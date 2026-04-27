@@ -27,12 +27,16 @@ describe("deriveAgentState", () => {
     expect(deriveAgentState(undefined, undefined)).toBe("pending");
   });
 
-  it("data.ok=false かつ error なし なら pending (HTTP 200 だが ok=false の境界)", () => {
-    expect(deriveAgentState(makeHealth(false), null)).toBe("pending");
+  it("data.ok=false なら degraded (HTTP 200 だが Agent が自身を unhealthy と申告)", () => {
+    expect(deriveAgentState(makeHealth(false), null)).toBe("degraded");
   });
 
   it("data.ok=true は error があっても reachable を優先する (古い error が残る場合の境界)", () => {
     expect(deriveAgentState(makeHealth(true), new Error("stale"))).toBe("reachable");
+  });
+
+  it("data.ok=false は error があっても degraded を優先する (data が新しい signal の前提)", () => {
+    expect(deriveAgentState(makeHealth(false), new Error("stale"))).toBe("degraded");
   });
 });
 

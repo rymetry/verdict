@@ -1,10 +1,12 @@
 // QA / Developer / Insights を切り替える segmented control。
-// shadcn/ui Tabs (Radix UI) を使用するため、role="tablist" / role="tab" / aria-selected が
-// 自動付与される (PR #4 のフィードバック反映: aria-pressed ではなく aria-selected)。
+// PersonaToggle は Tabs セマンティクス (排他選択 + 表示切替) が適合するため shadcn/ui Tabs を採用。
+// PR #4 で aria-pressed → aria-selected の指摘があったが、Radix Tabs は自動で
+// role="tablist" / role="tab" / aria-selected を出力するため別途対応不要。
 import * as React from "react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { isDev } from "@/store/env";
 import {
   isPersonaView,
   PERSONA_VIEWS,
@@ -23,6 +25,27 @@ const PERSONA_LABEL: Record<PersonaView, string> = {
   qmo: "Insights"
 };
 
+/**
+ * Radix Tabs の onValueChange (任意 string を流す) を PersonaView に narrow する guard。
+ * - PERSONA_VIEWS と TabsTrigger value は同期している前提なので、ここに invalid 値が来るのは
+ *   invariant 違反 (typo / PERSONA_VIEWS 拡張時の未同期)。dev で console.error し、
+ *   store には絶対にコミットしない (silent failure 監査反映)。
+ * - test から動線を直接検証できるよう named export する。
+ */
+export function dispatchPersonaSafely(
+  raw: string,
+  onValueChange: (next: PersonaView) => void
+): void {
+  if (isPersonaView(raw)) {
+    onValueChange(raw);
+    return;
+  }
+  if (isDev) {
+    // eslint-disable-next-line no-console -- 開発時の診断目的に限定
+    console.error(`[PersonaToggle] Tabs から想定外 value: ${String(raw)}`);
+  }
+}
+
 export function PersonaToggle({
   value,
   onValueChange,
@@ -31,11 +54,7 @@ export function PersonaToggle({
   return (
     <Tabs
       value={value}
-      // Tabs の onValueChange は string を渡してくる。invalid 値は guard で弾き、
-      // 想定外の persona が store にコミットされるサイレント不整合を防ぐ。
-      onValueChange={(raw) => {
-        if (isPersonaView(raw)) onValueChange(raw);
-      }}
+      onValueChange={(raw) => dispatchPersonaSafely(raw, onValueChange)}
       className={className}
     >
       {/* aria-label は role="tablist" を持つ TabsList に付ける (Radix Tabs 仕様) */}

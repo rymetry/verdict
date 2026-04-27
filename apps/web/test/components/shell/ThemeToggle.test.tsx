@@ -1,6 +1,6 @@
 // ThemeToggle の WAI-ARIA radiogroup 準拠と操作仕様を検証する。
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
@@ -78,5 +78,52 @@ describe("ThemeToggle", () => {
     system.focus();
     await user.keyboard("a");
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("ArrowDown は ArrowRight と同方向 (次へ)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<ThemeToggle value="auto" onValueChange={onChange} />);
+    screen.getByRole("radio", { name: "System" }).focus();
+    await user.keyboard("{ArrowDown}");
+    expect(onChange).toHaveBeenLastCalledWith("dark");
+  });
+
+  it("ArrowUp は ArrowLeft と同方向 (前へ)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<ThemeToggle value="auto" onValueChange={onChange} />);
+    screen.getByRole("radio", { name: "System" }).focus();
+    await user.keyboard("{ArrowUp}");
+    expect(onChange).toHaveBeenLastCalledWith("light");
+  });
+
+  it("矢印キー操作で フォーカスが次の radio へ移動する (WAI-ARIA Radio Group 要件)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<ThemeToggle value="auto" onValueChange={onChange} />);
+    const system = screen.getByRole("radio", { name: "System" });
+    system.focus();
+    await user.keyboard("{ArrowRight}");
+    // re-render を待たず value="auto" のままだが、focus は同期的に移動している
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Dark" }));
+  });
+
+  it("値域外の value (型を緩めた緊急退避経路) では onValueChange を呼ばず dev で console.error する", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onChange = vi.fn();
+    render(
+      <ThemeToggle
+        value={"invalid" as "light" | "dark" | "auto"}
+        onValueChange={onChange}
+      />
+    );
+    // 値域外では tabIndex=0 になる radio が存在せず focus が乗らないため、
+    // keydown を radiogroup に対して直接 fire して guard 動線を検証する。
+    const radiogroup = screen.getByRole("radiogroup", { name: "Theme" });
+    fireEvent.keyDown(radiogroup, { key: "ArrowRight" });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    errorSpy.mockRestore();
   });
 });

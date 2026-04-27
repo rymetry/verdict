@@ -11,6 +11,7 @@ import * as React from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { isDev } from "@/store/env";
 import type { ThemePreference } from "@/store/app-store";
 
 interface ThemeToggleProps {
@@ -36,18 +37,34 @@ export function ThemeToggle({
   onValueChange,
   className
 }: ThemeToggleProps): React.ReactElement {
-  // 矢印キーナビゲーション。WAI-ARIA Radio Group pattern に従い ←↑ で前、→↓ で次へ循環。
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  // option 毎の DOM ref。矢印キー操作後にフォーカスを次の選択肢へ移動する WAI-ARIA Radio Group 要件。
+  // useRef を要素数分用意するため固定長配列を一度だけ初期化する。
+  const optionRefs = React.useRef<Array<HTMLButtonElement | null>>(
+    Array(THEME_OPTIONS.length).fill(null)
+  );
+
+  // 矢印キーナビゲーション。WAI-ARIA Radio Group pattern に従い ←↑ で前、→↓ で次へ循環し、
+  // 同時に新しい選択肢へフォーカスを移動する (focus 移動なしだとスクリーンリーダーが追従しない)。
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     const key = event.key;
     if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "ArrowUp" && key !== "ArrowDown") {
       return;
     }
     event.preventDefault();
     const currentIndex = THEME_OPTIONS.findIndex((o) => o.value === value);
-    if (currentIndex < 0) return;
+    if (currentIndex < 0) {
+      // value が型外に逸脱している = invariant 違反。silent 無視せず dev で可視化する。
+      if (isDev) {
+        // eslint-disable-next-line no-console -- 開発時の診断目的に限定
+        console.error(`[ThemeToggle] value="${value}" は THEME_OPTIONS 値域外`);
+      }
+      return;
+    }
     const direction = key === "ArrowLeft" || key === "ArrowUp" ? -1 : 1;
     const nextIndex = (currentIndex + direction + THEME_OPTIONS.length) % THEME_OPTIONS.length;
     onValueChange(THEME_OPTIONS[nextIndex].value);
+    // フォーカス移動: 次の radio へ。re-render を待たず同期的に移動する。
+    optionRefs.current[nextIndex]?.focus();
   };
 
   return (
@@ -60,12 +77,15 @@ export function ThemeToggle({
         className
       )}
     >
-      {THEME_OPTIONS.map((opt) => {
+      {THEME_OPTIONS.map((opt, index) => {
         const Icon = opt.icon;
         const checked = opt.value === value;
         return (
           <button
             key={opt.value}
+            ref={(node) => {
+              optionRefs.current[index] = node;
+            }}
             type="button"
             role="radio"
             aria-checked={checked}

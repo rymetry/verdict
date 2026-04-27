@@ -40,4 +40,14 @@ describe("RerunButton", () => {
     await user.click(screen.getByRole("button", { name: /再実行/ }));
     expect(onRerun).not.toHaveBeenCalled();
   });
+
+  it("canRerun=true でも isRunning=true なら disabled (OR 短絡)", () => {
+    render(<RerunButton canRerun isRunning onRerun={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /実行中/ })).toBeDisabled();
+  });
+
+  it("canRerun=false かつ isRunning=true でも disabled (両条件 OR の境界)", () => {
+    render(<RerunButton canRerun={false} isRunning onRerun={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /実行中/ })).toBeDisabled();
+  });
 });

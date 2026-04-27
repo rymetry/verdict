@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { runStatusBadgeVariant, runStatusLabel } from "@/components/shell/status";
 
+// 「未指定」の正規形は呼び出し側で `null` に統一する設計 (main.tsx の selector がそう吐く)。
+// ただし `undefined` で来ても guard が等価に弾けるよう `?: T | null` を許容している。
 interface BreadcrumbsProps {
   projectName?: string | null;
   branch?: string | null;
