@@ -127,6 +127,16 @@ describe("FailureReview", () => {
     expect(screen.getByText("/runs/r1/screenshot.png")).toBeInTheDocument();
   });
 
+  it("status=running + summary 不在のとき '完了を待機中' 案内を出す", async () => {
+    // 4 つ目の三項分岐 (failedTests 無し / passed でない / summary 無し) を pin。
+    // 分岐順序を入れ替えると "完了を待機中…" が誤表示になるため文言をピン留めする。
+    vi.mocked(fetchRun).mockResolvedValue(
+      makeRunMetadata("r1", { status: "running", summary: undefined })
+    );
+    renderWithRunId("r1");
+    expect(await screen.findByText(/Run の完了を待機中/)).toBeInTheDocument();
+  });
+
   it("Header の '<n> failed' badge を表示する", async () => {
     vi.mocked(fetchRun).mockResolvedValue(
       makeRunMetadata("r1", {

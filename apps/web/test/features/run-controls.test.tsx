@@ -137,4 +137,16 @@ describe("RunControls", () => {
       expect(screen.queryByText("first")).not.toBeInTheDocument();
     });
   });
+
+  it("pending 中の連続 click は startRun を 1 回しか呼ばない (multi-run 防止)", async () => {
+    // never-resolve Promise で submit を pending 状態に固定し、button disabled が
+    // mutate の重複呼び出しを実際に防ぐことを pin (`disabled={... || isPending}` の有効性)。
+    vi.mocked(startRun).mockReturnValue(new Promise(() => {}));
+    const { user } = renderControls(makeProject());
+    const button = screen.getByRole("button", { name: /Run Playwright/ });
+    await user.click(button);
+    await user.click(button);
+    await user.click(button);
+    expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
+  });
 });

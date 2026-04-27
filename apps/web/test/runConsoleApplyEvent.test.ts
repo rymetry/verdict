@@ -92,6 +92,40 @@ describe("RunConsole applyEvent", () => {
     expect(state.stdout[999]).toBe("1001");
   });
 
+  it("run.completed (failed) は failed status に遷移する", () => {
+    const next = applyEvent(
+      initialRunConsoleState,
+      evt({
+        type: "run.completed",
+        payload: {
+          exitCode: 1,
+          status: "failed",
+          durationMs: 555,
+          summary: { total: 2, passed: 0, failed: 2, skipped: 0, flaky: 0, failedTests: [] }
+        }
+      })
+    );
+    expect(next.status).toBe("failed");
+    expect(next.exitCode).toBe(1);
+    expect(next.summary?.failed).toBe(2);
+  });
+
+  it("run.error は payload に関わらず error status に遷移する", () => {
+    const next = applyEvent(
+      initialRunConsoleState,
+      evt({
+        type: "run.error",
+        payload: {
+          exitCode: 137,
+          status: "error",
+          durationMs: 0
+        }
+      })
+    );
+    expect(next.status).toBe("error");
+    expect(next.exitCode).toBe(137);
+  });
+
   it("snapshot event は no-op (state 不変) で console.warn しない", () => {
     const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const before = { ...initialRunConsoleState, stdout: ["a", "b"] };
