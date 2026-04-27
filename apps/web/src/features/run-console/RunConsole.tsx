@@ -20,12 +20,14 @@ interface RunConsoleState {
   summary?: { total: number; passed: number; failed: number; skipped: number; flaky: number };
 }
 
-const initialState: RunConsoleState = {
+export const initialRunConsoleState: RunConsoleState = {
   status: "idle",
   exitCode: null,
   stdout: [],
   stderr: []
 };
+
+const initialState = initialRunConsoleState;
 
 const MAX_LINES = 1000;
 
@@ -85,7 +87,7 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps) {
   );
 }
 
-function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunConsoleState {
+export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunConsoleState {
   switch (event.type) {
     case "run.queued":
       return { ...state, status: "running" };

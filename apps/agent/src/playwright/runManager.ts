@@ -1,12 +1,10 @@
 import * as fs from "node:fs/promises";
-import * as fsSync from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   type DetectedPackageManager,
   type RunMetadata,
   type RunRequest,
-  type RunStatus,
   type TestResultSummary
 } from "@pwqa/shared";
 import type { CommandRunner } from "../commands/runner.js";
@@ -14,7 +12,13 @@ import { redact } from "../commands/redact.js";
 import type { EventBus } from "../events/bus.js";
 import { runPathsFor, workbenchPaths } from "../storage/paths.js";
 import { buildPlaywrightTestCommand } from "./builder.js";
-import { summarizePlaywrightJson } from "./jsonReport.js";
+import {
+  runArtifactsStore as defaultArtifactsStore,
+  type RunArtifactsStore
+} from "./runArtifactsStore.js";
+import { deriveOutcome } from "./runOutcome.js";
+import { playwrightJsonReportProvider } from "../reporting/PlaywrightJsonReportProvider.js";
+import type { ReportProvider } from "../reporting/ReportProvider.js";
 
 export interface RunStartParams {
   projectId: string;
@@ -30,13 +34,8 @@ export interface ActiveRunHandle {
   finished: Promise<RunMetadata>;
 }
 
-export interface RunRecord {
-  metadata: RunMetadata;
-}
-
 export interface RunManager {
   startRun(params: RunStartParams): Promise<ActiveRunHandle>;
-  getRun(runId: string): Promise<RunMetadata | undefined>;
   listRuns(projectId?: string): Promise<RunMetadata[]>;
   cancelRun(runId: string): boolean;
 }
@@ -44,10 +43,13 @@ export interface RunManager {
 interface RunManagerDeps {
   runner: CommandRunner;
   bus: EventBus;
+  /** Optional injection points (defaults wired for production). */
+  artifactsStore?: RunArtifactsStore;
+  reportProvider?: ReportProvider;
 }
 
-function ensureDirSync(p: string): void {
-  fsSync.mkdirSync(p, { recursive: true });
+function newRunId(): string {
+  return `run-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 }
 
 async function safeReadJson<T>(filePath: string): Promise<T | undefined> {
@@ -59,26 +61,27 @@ async function safeReadJson<T>(filePath: string): Promise<T | undefined> {
   }
 }
 
-export function createRunManager({ runner, bus }: RunManagerDeps): RunManager {
+export function createRunManager({
+  runner,
+  bus,
+  artifactsStore = defaultArtifactsStore,
+  reportProvider = playwrightJsonReportProvider
+}: RunManagerDeps): RunManager {
   const active = new Map<string, ActiveRunHandle>();
 
   async function startRun(params: RunStartParams): Promise<ActiveRunHandle> {
     if (params.packageManager.blockingExecution) {
       throw new Error(
-        `Run blocked: ${params.packageManager.errors.join(" ") || "package manager status prevents execution."}`
+        `Run blocked: ${
+          params.packageManager.errors.join(" ") ||
+          "package manager status prevents execution."
+        }`
       );
     }
 
-    const runId = `run-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+    const runId = newRunId();
     const paths = runPathsFor(params.projectRoot, runId);
-    ensureDirSync(paths.runDir);
-    ensureDirSync(paths.playwrightHtml);
-
-    // §18: ensure top-level workbench dirs exist
-    const wb = workbenchPaths(params.projectRoot);
-    ensureDirSync(wb.runsDir);
-    ensureDirSync(wb.reportsDir);
-    ensureDirSync(wb.configDir);
+    artifactsStore.ensureDirs(params.projectRoot, paths.runDir, paths.playwrightHtml);
 
     const { command, env } = buildPlaywrightTestCommand({
       packageManager: params.packageManager,
@@ -89,7 +92,7 @@ export function createRunManager({ runner, bus }: RunManagerDeps): RunManager {
     });
 
     const startedAt = new Date();
-    const metadata: RunMetadata = {
+    const initialMetadata: RunMetadata = {
       runId,
       projectId: params.projectId,
       projectRoot: params.projectRoot,
@@ -104,22 +107,21 @@ export function createRunManager({ runner, bus }: RunManagerDeps): RunManager {
       signal: null
     };
 
-    await fs.writeFile(paths.metadataJson, JSON.stringify(metadata, null, 2), "utf8");
+    await artifactsStore.writeMetadata(paths.metadataJson, initialMetadata);
     bus.publish({ type: "run.queued", runId, payload: { request: params.request } });
 
-    // Buffered file writers for stdout/stderr.
-    const stdoutFile = await fs.open(paths.stdoutLog, "w");
-    const stderrFile = await fs.open(paths.stderrLog, "w");
+    const logStreams = await artifactsStore.openLogStreams(paths.stdoutLog, paths.stderrLog);
 
+    let runningMetadata: RunMetadata;
     let handle;
     try {
+      runningMetadata = { ...initialMetadata, status: "running" };
+      await artifactsStore.writeMetadata(paths.metadataJson, runningMetadata);
       bus.publish({
         type: "run.started",
         runId,
-        payload: { command, cwd: params.projectRoot, startedAt: metadata.startedAt }
+        payload: { command, cwd: params.projectRoot, startedAt: runningMetadata.startedAt }
       });
-      metadata.status = "running";
-      await fs.writeFile(paths.metadataJson, JSON.stringify(metadata, null, 2), "utf8");
 
       handle = runner.run(
         {
@@ -132,33 +134,31 @@ export function createRunManager({ runner, bus }: RunManagerDeps): RunManager {
         {
           onStdout: (chunk) => {
             const safe = redact(chunk);
-            stdoutFile.write(safe).catch(() => undefined);
+            logStreams.stdout.write(safe).catch(() => undefined);
             bus.publish({ type: "run.stdout", runId, payload: { chunk: safe } });
           },
           onStderr: (chunk) => {
             const safe = redact(chunk);
-            stderrFile.write(safe).catch(() => undefined);
+            logStreams.stderr.write(safe).catch(() => undefined);
             bus.publish({ type: "run.stderr", runId, payload: { chunk: safe } });
           }
         }
       );
     } catch (error) {
-      // Ensure file handles do not leak when the runner rejects synchronously
-      // (e.g. CommandPolicyError on a forbidden executable).
-      await stdoutFile.close().catch(() => undefined);
-      await stderrFile.close().catch(() => undefined);
-      const completedAt = new Date();
-      const completed: RunMetadata = {
-        ...metadata,
+      // CommandPolicyError or similar synchronous throw before the child
+      // exists. Close streams, persist an error metadata snapshot, propagate.
+      await logStreams.closeAll();
+      const failed: RunMetadata = {
+        ...runningMetadata!,
         status: "error",
-        completedAt: completedAt.toISOString(),
-        durationMs: completedAt.getTime() - startedAt.getTime(),
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAt.getTime(),
         warnings: [
-          ...metadata.warnings,
+          ...initialMetadata.warnings,
           `Runner rejected the command: ${error instanceof Error ? error.message : String(error)}`
         ]
       };
-      await fs.writeFile(paths.metadataJson, JSON.stringify(completed, null, 2), "utf8");
+      await artifactsStore.writeMetadata(paths.metadataJson, failed);
       bus.publish({
         type: "run.error",
         runId,
@@ -168,80 +168,68 @@ export function createRunManager({ runner, bus }: RunManagerDeps): RunManager {
     }
 
     const finished: Promise<RunMetadata> = (async () => {
-      let summary: TestResultSummary | undefined;
-      let status: RunStatus = "running";
       try {
         const result = await handle.result;
-        await stdoutFile.close();
-        await stderrFile.close();
-        const playwrightJsonRaw = await fs.readFile(paths.playwrightJson, "utf8").catch(() => "");
-        if (playwrightJsonRaw) {
-          const summaryResult = summarizePlaywrightJson(params.projectRoot, playwrightJsonRaw);
-          summary = summaryResult.summary;
-          metadata.warnings.push(...summaryResult.warnings);
-        }
-        if (result.cancelled) {
-          status = "cancelled";
-        } else if (result.timedOut) {
-          status = "error";
-          metadata.warnings.push("Run timed out and was terminated.");
-        } else if (result.exitCode === 0) {
-          status = "passed";
-        } else if (typeof result.exitCode === "number") {
-          status = "failed";
-        } else {
-          status = "error";
-        }
-        const completedAt = new Date();
+        await logStreams.closeAll();
+
+        const summary = await readSummarySafely(reportProvider, {
+          projectRoot: params.projectRoot,
+          runDir: paths.runDir,
+          playwrightJsonPath: paths.playwrightJson
+        });
+        const warnings = [...runningMetadata.warnings, ...(summary?.warnings ?? [])];
+
+        const outcome = deriveOutcome(result, startedAt);
+        if (outcome.warning) warnings.push(outcome.warning);
+
         const completed: RunMetadata = {
-          ...metadata,
-          status,
-          exitCode: result.exitCode,
-          signal: result.signal,
-          durationMs: completedAt.getTime() - startedAt.getTime(),
-          completedAt: completedAt.toISOString(),
-          summary
+          ...runningMetadata,
+          status: outcome.status,
+          exitCode: outcome.exitCode,
+          signal: outcome.signal,
+          durationMs: outcome.durationMs,
+          completedAt: new Date().toISOString(),
+          summary: summary?.summary,
+          warnings
         };
-        await fs.writeFile(paths.metadataJson, JSON.stringify(completed, null, 2), "utf8");
+        await artifactsStore.writeMetadata(paths.metadataJson, completed);
+
         bus.publish({
           type:
-            status === "cancelled"
+            outcome.status === "cancelled"
               ? "run.cancelled"
-              : status === "error"
+              : outcome.status === "error"
                 ? "run.error"
                 : "run.completed",
           runId,
           payload: {
-            exitCode: result.exitCode,
-            signal: result.signal,
-            status,
-            durationMs: completed.durationMs ?? 0,
-            summary
+            exitCode: outcome.exitCode,
+            signal: outcome.signal,
+            status: outcome.status,
+            durationMs: outcome.durationMs,
+            summary: summary?.summary
           }
         });
         active.delete(runId);
         return completed;
       } catch (error) {
-        await stdoutFile.close();
-        await stderrFile.close();
+        await logStreams.closeAll();
         const completedAt = new Date();
         const completed: RunMetadata = {
-          ...metadata,
+          ...runningMetadata,
           status: "error",
           completedAt: completedAt.toISOString(),
           durationMs: completedAt.getTime() - startedAt.getTime(),
           warnings: [
-            ...metadata.warnings,
+            ...runningMetadata.warnings,
             `Runner failed: ${error instanceof Error ? error.message : String(error)}`
           ]
         };
-        await fs.writeFile(paths.metadataJson, JSON.stringify(completed, null, 2), "utf8");
+        await artifactsStore.writeMetadata(paths.metadataJson, completed);
         bus.publish({
           type: "run.error",
           runId,
-          payload: {
-            message: error instanceof Error ? error.message : String(error)
-          }
+          payload: { message: error instanceof Error ? error.message : String(error) }
         });
         active.delete(runId);
         return completed;
@@ -250,7 +238,7 @@ export function createRunManager({ runner, bus }: RunManagerDeps): RunManager {
 
     const activeHandle: ActiveRunHandle = {
       runId,
-      metadata,
+      metadata: runningMetadata,
       finished,
       cancel(reason?: string) {
         handle.cancel(reason);
@@ -260,26 +248,34 @@ export function createRunManager({ runner, bus }: RunManagerDeps): RunManager {
     return activeHandle;
   }
 
-  async function getRun(runId: string): Promise<RunMetadata | undefined> {
-    const activeHandle = active.get(runId);
-    if (activeHandle) return activeHandle.metadata;
-    // Fallback: load from disk by scanning known projects? For PoC, if not active, the caller
-    // must provide projectRoot context via API. We expose `findRun` instead via listRuns.
-    return undefined;
-  }
-
   async function listRuns(): Promise<RunMetadata[]> {
-    return Array.from(active.values()).map((handle) => handle.metadata);
+    return Array.from(active.values()).map((value) => value.metadata);
   }
 
   function cancelRun(runId: string): boolean {
-    const handle = active.get(runId);
-    if (!handle) return false;
-    handle.cancel("user-request");
+    const value = active.get(runId);
+    if (!value) return false;
+    value.cancel("user-request");
     return true;
   }
 
-  return { startRun, getRun, listRuns, cancelRun };
+  return { startRun, listRuns, cancelRun };
+}
+
+async function readSummarySafely(
+  provider: ReportProvider,
+  input: { projectRoot: string; runDir: string; playwrightJsonPath: string }
+): Promise<{ summary?: TestResultSummary; warnings: string[] } | undefined> {
+  try {
+    const result = await provider.readSummary(input);
+    return result;
+  } catch (error) {
+    return {
+      warnings: [
+        `${provider.name} report read failed: ${error instanceof Error ? error.message : String(error)}`
+      ]
+    };
+  }
 }
 
 /**
@@ -310,7 +306,7 @@ export async function loadRunsFromDisk(projectRoot: string): Promise<RunMetadata
  * Returns the freshest view of every run for a project: in-memory active runs
  * override disk metadata when the same runId appears in both.
  */
-export async function combineRuns(
+export async function mergeActiveAndPersistedRuns(
   manager: RunManager,
   projectRoot: string
 ): Promise<RunMetadata[]> {

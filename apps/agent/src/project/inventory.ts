@@ -65,7 +65,7 @@ function buildListCommand(packageManager: DetectedPackageManager): CommandTempla
   };
 }
 
-function findFirstJsonObject(stdout: string): string | undefined {
+function extractJsonBody(stdout: string): string | undefined {
   // Playwright sometimes prefixes the JSON with banner lines; locate the first '{'
   // at column 0 of a line and parse from there to end.
   const idx = stdout.indexOf("\n{");
@@ -218,7 +218,7 @@ export async function buildInventory(
     };
   }
 
-  const jsonBody = findFirstJsonObject(result.stdout) ?? result.stdout;
+  const jsonBody = extractJsonBody(result.stdout) ?? result.stdout;
   const { specs, warnings, errors } = parsePlaywrightListJson(request.projectRoot, jsonBody);
   return {
     projectId: request.projectId,

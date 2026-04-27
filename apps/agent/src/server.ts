@@ -1,5 +1,5 @@
-import * as fs from "node:fs/promises";
 import * as fsSync from "node:fs";
+import * as path from "node:path";
 import { Hono } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
@@ -70,37 +70,10 @@ function persistAuditEntry(rootDir: string | undefined, entry: AuditEntry): void
   if (!rootDir) return;
   const wb = workbenchPaths(rootDir);
   fsSync.mkdirSync(wb.workbenchDir, { recursive: true });
-  const line = `${JSON.stringify(entry)}\n`;
-  // sync append to keep ordering even if many runs start back-to-back.
-  fsSync.appendFileSync(wb.workbenchDir + "/audit.log", line, "utf8");
+  fsSync.appendFileSync(path.join(wb.workbenchDir, "audit.log"), `${JSON.stringify(entry)}\n`, "utf8");
 }
 
-export function buildApp(options: BuildAppOptions): BuildAppResult {
-  const { env } = options;
-  const logger = createLogger(env.logLevel);
-  const policy = options.policy ?? defaultPolicy(env);
-
-  const bus = createEventBus({ onListenerError: (error) => logger.debug({ err: error }, "ws listener error") });
-  const runner = createNodeCommandRunner({
-    policy,
-    audit: (entry) => {
-      logger.info({ audit: entry }, "command audit");
-      try {
-        persistAuditEntry(env.initialProjectRoot, entry);
-      } catch (error) {
-        logger.warn(
-          { err: error instanceof Error ? error.message : String(error) },
-          "failed to persist audit log entry"
-        );
-      }
-      options.audit?.(entry);
-    }
-  });
-  const projectStore = createProjectStore();
-  const runManager = createRunManager({ runner, bus });
-
-  const app = new Hono();
-
+function attachCors(app: Hono): void {
   app.use("*", async (c, next) => {
     const origin = c.req.header("Origin");
     if (origin && ALLOWED_ORIGINS.has(origin)) {
@@ -114,7 +87,9 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     }
     await next();
   });
+}
 
+function attachHealth(app: Hono): void {
   app.get("/health", (c) => {
     const response: HealthResponse = HealthResponseSchema.parse({
       ok: true,
@@ -124,19 +99,15 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     });
     return c.json(response);
   });
+}
 
-  app.route(
-    "/",
-    projectsRoutes({
-      projectStore,
-      runner,
-      allowedRoots: env.allowedRoots
-    })
-  );
-  app.route("/", runsRoutes({ projectStore, runManager }));
-
-  // WebSocket channel (PLAN.v2 §7 / §33: factory pattern keeps the door open
-  // for a raw `ws` fallback if @hono/node-ws becomes unstable).
+function attachWebSocket(
+  app: Hono,
+  bus: EventBus,
+  logger: ReturnType<typeof createLogger>
+): (server: ServerType) => void {
+  // PLAN.v2 §7 / §33: factory pattern leaves the door open for a raw `ws`
+  // fallback if @hono/node-ws becomes unstable.
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
   app.get(
     "/ws",
@@ -145,9 +116,6 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       return {
         onOpen(_evt: Event, ws: WSContext) {
           unsubscribe = bus.subscribe((event) => {
-            // Only send while the socket is open. The bus dispatches synchronously
-            // and a stale listener could otherwise throw repeatedly into the bus
-            // catch-all.
             const ready = (ws as unknown as { readyState?: number }).readyState;
             if (ready !== undefined && ready !== 1 /* OPEN */) return;
             try {
@@ -181,8 +149,47 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       };
     })
   );
+  return injectWebSocket;
+}
 
-  // Bootstrap initial project root (CLI flag) if provided.
+export function buildApp(options: BuildAppOptions): BuildAppResult {
+  const { env } = options;
+  const logger = createLogger(env.logLevel);
+  const policy = options.policy ?? defaultPolicy(env);
+
+  const bus = createEventBus({
+    onListenerError: (error) => logger.debug({ err: error }, "ws listener error")
+  });
+
+  const runner = createNodeCommandRunner({
+    policy,
+    audit: (entry) => {
+      logger.info({ audit: entry }, "command audit");
+      try {
+        persistAuditEntry(env.initialProjectRoot, entry);
+      } catch (error) {
+        logger.warn(
+          { err: error instanceof Error ? error.message : String(error) },
+          "failed to persist audit log entry"
+        );
+      }
+      options.audit?.(entry);
+    }
+  });
+
+  const projectStore = createProjectStore();
+  const runManager = createRunManager({ runner, bus });
+
+  const app = new Hono();
+  attachCors(app);
+  attachHealth(app);
+  app.route(
+    "/",
+    projectsRoutes({ projectStore, runner, allowedRoots: env.allowedRoots })
+  );
+  app.route("/", runsRoutes({ projectStore, runManager }));
+  const injectWebSocket = attachWebSocket(app, bus, logger);
+
   if (env.initialProjectRoot) {
     void scanProject({
       rootPath: env.initialProjectRoot,
@@ -218,10 +225,6 @@ async function main(): Promise<void> {
   );
   injectWebSocket(server);
 }
-
-// Keep `fs` import warnings at bay in CI where the type-only import would be
-// unused if the audit path is never invoked.
-void fs.access;
 
 const isDirectExecution = process.argv[1]
   ? import.meta.url === new URL(`file://${process.argv[1]}`).href

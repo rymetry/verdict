@@ -1,13 +1,16 @@
-import * as fs from "node:fs/promises";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import {
   RunRequestSchema,
   type RunListItem,
-  type RunListResponse
+  type RunListResponse,
+  type RunMetadata
 } from "@pwqa/shared";
 import type { RunManager } from "../playwright/runManager.js";
-import { combineRuns } from "../playwright/runManager.js";
+import { mergeActiveAndPersistedRuns } from "../playwright/runManager.js";
 import type { ProjectStore } from "../project/store.js";
+import { apiError } from "../lib/apiError.js";
+import { pathExists } from "../lib/pathExists.js";
 
 interface Deps {
   projectStore: ProjectStore;
@@ -21,33 +24,21 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
     const body = await c.req.json().catch(() => ({}));
     const parsed = RunRequestSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json(
-        {
-          error: {
-            code: "INVALID_INPUT",
-            message: parsed.error.issues.map((i) => i.message).join("; ")
-          }
-        },
+      return apiError(
+        c,
+        "INVALID_INPUT",
+        parsed.error.issues.map((i) => i.message).join("; "),
         400
       );
     }
     const current = projectStore.getById(parsed.data.projectId);
-    if (!current) {
-      return c.json(
-        { error: { code: "NO_PROJECT", message: "Project is not open." } },
-        404
-      );
-    }
+    if (!current) return apiError(c, "NO_PROJECT", "Project is not open.", 404);
     if (current.packageManager.blockingExecution) {
-      return c.json(
-        {
-          error: {
-            code: "RUN_BLOCKED",
-            message:
-              current.packageManager.errors.join(" ") ||
-              "Run blocked by package manager status."
-          }
-        },
+      return apiError(
+        c,
+        "RUN_BLOCKED",
+        current.packageManager.errors.join(" ") ||
+          "Run blocked by package manager status.",
         409
       );
     }
@@ -60,77 +51,38 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
       });
       return c.json({ runId: handle.runId, metadata: handle.metadata }, 202);
     } catch (error) {
-      return c.json(
-        {
-          error: {
-            code: "RUN_FAILED",
-            message: error instanceof Error ? error.message : "Failed to start run"
-          }
-        },
+      return apiError(
+        c,
+        "RUN_FAILED",
+        error instanceof Error ? error.message : "Failed to start run",
         500
       );
     }
   });
 
-  router.get("/runs", async (c): Promise<Response> => {
+  router.get("/runs", async (c) => {
     const current = projectStore.get();
     if (!current) {
       const empty: RunListResponse = { runs: [] };
       return c.json(empty);
     }
-    const runs = await combineRuns(runManager, current.summary.rootPath);
-    const listed: RunListItem[] = runs.map((run) => ({
-      runId: run.runId,
-      projectId: run.projectId,
-      status: run.status,
-      startedAt: run.startedAt,
-      completedAt: run.completedAt,
-      durationMs: run.durationMs,
-      exitCode: run.exitCode ?? null,
-      summary: run.summary
-    }));
+    const runs = await mergeActiveAndPersistedRuns(runManager, current.summary.rootPath);
+    const listed: RunListItem[] = runs.map(toListItem);
     return c.json({ runs: listed } satisfies RunListResponse);
   });
 
   router.get("/runs/:runId", async (c) => {
-    const runId = c.req.param("runId");
-    const current = projectStore.get();
-    if (!current) {
-      return c.json(
-        { error: { code: "NO_PROJECT", message: "Project is not open." } },
-        404
-      );
-    }
-    const runs = await combineRuns(runManager, current.summary.rootPath);
-    const run = runs.find((r) => r.runId === runId);
-    if (!run) {
-      return c.json(
-        { error: { code: "NOT_FOUND", message: `Run ${runId} not found.` } },
-        404
-      );
-    }
-    return c.json(run);
+    const result = await loadRun(c, runManager, projectStore);
+    if (!("run" in result)) return result.response;
+    return c.json(result.run);
   });
 
   router.get("/runs/:runId/artifacts", async (c) => {
-    const runId = c.req.param("runId");
-    const current = projectStore.get();
-    if (!current) {
-      return c.json(
-        { error: { code: "NO_PROJECT", message: "Project is not open." } },
-        404
-      );
-    }
-    const runs = await combineRuns(runManager, current.summary.rootPath);
-    const run = runs.find((r) => r.runId === runId);
-    if (!run) {
-      return c.json(
-        { error: { code: "NOT_FOUND", message: `Run ${runId} not found.` } },
-        404
-      );
-    }
+    const result = await loadRun(c, runManager, projectStore);
+    if (!("run" in result)) return result.response;
+    const { run } = result;
     return c.json({
-      runId,
+      runId: run.runId,
       paths: run.paths,
       hasPlaywrightJson: await pathExists(run.paths.playwrightJson),
       hasPlaywrightHtml: await pathExists(run.paths.playwrightHtml),
@@ -140,35 +92,19 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
   });
 
   router.get("/runs/:runId/report-summary", async (c) => {
-    const runId = c.req.param("runId");
-    const current = projectStore.get();
-    if (!current) {
-      return c.json(
-        { error: { code: "NO_PROJECT", message: "Project is not open." } },
-        404
-      );
-    }
-    const runs = await combineRuns(runManager, current.summary.rootPath);
-    const run = runs.find((r) => r.runId === runId);
-    if (!run) {
-      return c.json(
-        { error: { code: "NOT_FOUND", message: `Run ${runId} not found.` } },
-        404
-      );
-    }
+    const result = await loadRun(c, runManager, projectStore);
+    if (!("run" in result)) return result.response;
+    const { run } = result;
     if (!run.summary) {
-      return c.json(
-        {
-          error: {
-            code: "NO_SUMMARY",
-            message: "Playwright JSON summary is not yet available for this run."
-          }
-        },
+      return apiError(
+        c,
+        "NO_SUMMARY",
+        "Playwright JSON summary is not yet available for this run.",
         409
       );
     }
     return c.json({
-      runId,
+      runId: run.runId,
       summary: run.summary,
       status: run.status,
       completedAt: run.completedAt
@@ -179,15 +115,7 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
     const runId = c.req.param("runId");
     const cancelled = runManager.cancelRun(runId);
     if (!cancelled) {
-      return c.json(
-        {
-          error: {
-            code: "NOT_ACTIVE",
-            message: `Run ${runId} is not currently active.`
-          }
-        },
-        404
-      );
+      return apiError(c, "NOT_ACTIVE", `Run ${runId} is not currently active.`, 404);
     }
     return c.json({ runId, cancelled: true });
   });
@@ -195,11 +123,35 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
   return router;
 }
 
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
+function toListItem(run: RunMetadata): RunListItem {
+  return {
+    runId: run.runId,
+    projectId: run.projectId,
+    status: run.status,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    durationMs: run.durationMs,
+    exitCode: run.exitCode ?? null,
+    summary: run.summary
+  };
+}
+
+type LoadRunResult = { run: RunMetadata } | { response: Response };
+
+async function loadRun(
+  c: Context,
+  runManager: RunManager,
+  projectStore: ProjectStore
+): Promise<LoadRunResult> {
+  const runId = c.req.param("runId");
+  const current = projectStore.get();
+  if (!current) {
+    return { response: apiError(c, "NO_PROJECT", "Project is not open.", 404) };
   }
+  const runs = await mergeActiveAndPersistedRuns(runManager, current.summary.rootPath);
+  const run = runs.find((entry) => entry.runId === runId);
+  if (!run) {
+    return { response: apiError(c, "NOT_FOUND", `Run ${runId} not found.`, 404) };
+  }
+  return { run };
 }
