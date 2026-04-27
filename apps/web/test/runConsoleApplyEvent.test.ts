@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyEvent,
   initialRunConsoleState
@@ -16,6 +16,10 @@ function evt(partial: Partial<WorkbenchEvent>): WorkbenchEvent {
   } as WorkbenchEvent;
 }
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("RunConsole applyEvent", () => {
   it("transitions to running on run.queued", () => {
     const next = applyEvent(initialRunConsoleState, evt({ type: "run.queued" }));
@@ -30,12 +34,18 @@ describe("RunConsole applyEvent", () => {
     expect(next.stdout).toEqual(["hello"]);
   });
 
-  it("ignores malformed payload (defends against version skew)", () => {
+  it("malformed payload は console.error して state を維持する", () => {
+    // δ R1: silent drop は破棄。schema 不一致は本番でも痕跡を残す invariant を pin。
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const next = applyEvent(
       initialRunConsoleState,
       evt({ type: "run.stdout", payload: { not_chunk: 42 } })
     );
     expect(next.stdout).toEqual([]);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[RunConsole] run.stdout payload schema mismatch",
+      expect.anything()
+    );
   });
 
   it("captures summary from run.completed payload", () => {
@@ -63,5 +73,64 @@ describe("RunConsole applyEvent", () => {
       evt({ type: "run.cancelled", payload: {} })
     );
     expect(next.status).toBe("cancelled");
+  });
+
+  it("MAX_LINES (1000) 到達後は先頭が drop され末尾が保たれる", () => {
+    // メモリリーク防衛の boundary 検証。1000 件 push 後にもう 1 件入れると、
+    // stdout[0] が "1" ではなく "2" になり、長さは 1000 で固定される。
+    let state = initialRunConsoleState;
+    for (let i = 1; i <= 1000; i++) {
+      state = applyEvent(state, evt({ type: "run.stdout", payload: { chunk: String(i) } }));
+    }
+    expect(state.stdout).toHaveLength(1000);
+    expect(state.stdout[0]).toBe("1");
+    expect(state.stdout[999]).toBe("1000");
+
+    state = applyEvent(state, evt({ type: "run.stdout", payload: { chunk: "1001" } }));
+    expect(state.stdout).toHaveLength(1000);
+    expect(state.stdout[0]).toBe("2");
+    expect(state.stdout[999]).toBe("1001");
+  });
+
+  it("run.completed (failed) は failed status に遷移する", () => {
+    const next = applyEvent(
+      initialRunConsoleState,
+      evt({
+        type: "run.completed",
+        payload: {
+          exitCode: 1,
+          status: "failed",
+          durationMs: 555,
+          summary: { total: 2, passed: 0, failed: 2, skipped: 0, flaky: 0, failedTests: [] }
+        }
+      })
+    );
+    expect(next.status).toBe("failed");
+    expect(next.exitCode).toBe(1);
+    expect(next.summary?.failed).toBe(2);
+  });
+
+  it("run.error は payload に関わらず error status に遷移する", () => {
+    const next = applyEvent(
+      initialRunConsoleState,
+      evt({
+        type: "run.error",
+        payload: {
+          exitCode: 137,
+          status: "error",
+          durationMs: 0
+        }
+      })
+    );
+    expect(next.status).toBe("error");
+    expect(next.exitCode).toBe(137);
+  });
+
+  it("snapshot event は no-op (state 不変) で console.warn しない", () => {
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const before = { ...initialRunConsoleState, stdout: ["a", "b"] };
+    const next = applyEvent(before, evt({ type: "snapshot", payload: {} }));
+    expect(next).toEqual(before);
+    expect(consoleSpy).not.toHaveBeenCalled();
   });
 });

@@ -1,20 +1,27 @@
 // Developer View route。ε (Issue #12) で本実装を行う placeholder。
-// γ (Issue #10) のスコープでは「URL でアクセスできる」「persona toggle で active になる」ことを満たすだけで十分。
+// δ (Issue #11) で Tailwind/shadcn primitives 化した。
+// γ のスコープでは「URL でアクセスできる」「persona toggle で active になる」ことを満たすだけで十分。
 import * as React from "react";
 import { createRoute } from "@tanstack/react-router";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { rootRoute } from "./__root";
 
 function DeveloperView(): React.ReactElement {
   return (
-    <section className="grid" data-testid="dev-view">
-      <article className="panel">
-        <p className="panelLabel">Developer View</p>
-        <p className="muted">
-          spec / fixture / POM / locator / Git diff を扱う Developer 向けビューは ε (Issue #12)
-          で実装します。
-        </p>
-      </article>
+    <section data-testid="dev-view" className="mx-auto max-w-3xl">
+      <Card>
+        <CardHeader>
+          <CardTitle>Developer View</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-[var(--ink-3)]">
+            spec / fixture / POM / locator / Git diff を扱う Developer 向けビューは ε (Issue #12)
+            で実装します。
+          </p>
+        </CardContent>
+      </Card>
     </section>
   );
 }

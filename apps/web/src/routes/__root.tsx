@@ -1,18 +1,18 @@
 // app-shell route。TopBar / ShellAlert / StatusBar を常時 mount し、
 // `<Outlet />` 配下に persona view (qa/dev/qmo) を切り替える。
 //
-// γ (Issue #10) で App.tsx の責務を分割した:
-//  - shell layout (TopBar + ShellAlert + StatusBar) → 本ファイル
-//  - rerun mutation + activeRunQuery + healthQuery → 本ファイル (TopBar の入力に必要)
-//  - QA / Developer / Insights view 本体 → src/routes/{qa,dev,qmo}.tsx
+// 構成 (γ 分割済 → δ で WS singleton 追加):
+//  - shell layout (TopBar + ShellAlert + StatusBar) — 本ファイル
+//  - rerun mutation + activeRunQuery + healthQuery — 本ファイル (TopBar の入力に必要)
+//  - WebSocket singleton + WorkbenchEventsProvider — 本ファイル (δ で追加。経緯と意図は
+//    `hooks/workbench-events-context.tsx` の冒頭コメント参照)
+//  - QA / Developer / Insights view 本体 — src/routes/{qa,dev,qmo}.tsx
 //
 // 設計決定:
 //  - persona は URL segment (`/qa` `/dev` `/qmo`) を Single Source of Truth とする。
-//    store (β の persona-store) は廃止。`useLocation()` から派生させる。
+//    store ベースの persona は廃止。`useLocation()` から派生させる。
 //  - `r` キーボードショートカットは __root に集約。canRerun / rerun トリガが
 //    TopBar と同じスコープに居るので、shortcut 配線は本ファイルが最も自然。
-//  - useWorkbenchEvents は qa.tsx に閉じる。Phase 1 では RunConsole のみが consumer のため、
-//    qa を離れた瞬間に WS をクローズしても情報損失はない。
 import * as React from "react";
 import { createRootRoute, Outlet, useLocation } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,6 +21,8 @@ import { fetchHealth, fetchRun } from "@/api/client";
 import { ShellAlert, StatusBar, TopBar } from "@/components/shell";
 import { useCurrentProjectQuery } from "@/hooks/use-current-project-query";
 import { useStartRunMutation } from "@/hooks/use-start-run-mutation";
+import { useWorkbenchEvents, useWsConnectionState } from "@/hooks/use-workbench-events";
+import { WorkbenchEventsProvider } from "@/hooks/workbench-events-context";
 import { deriveAgentState, deriveProjectDisplayName } from "@/lib/shell-derive";
 import { formatMutationError } from "@/lib/mutation-error";
 import { isPersonaView, type PersonaView } from "@/lib/persona-view";
@@ -65,6 +67,11 @@ function shouldIgnoreShortcut(event: KeyboardEvent): boolean {
 function RootLayout(): React.ReactElement {
   const queryClient = useQueryClient();
   const location = useLocation();
+
+  // Workbench WebSocket は Root scope で 1 度だけ作る (route 切替えで切れないように)。
+  // 接続状態は StatusBar に渡し、stream 自体は Provider 経由で qa route に届ける。
+  const eventStream = useWorkbenchEvents();
+  const wsState = useWsConnectionState(eventStream);
 
   const activeRunId = useRunStore((s) => s.activeRunId);
   const lastRequest = useRunStore((s) => s.lastRequest);
@@ -283,14 +290,17 @@ function RootLayout(): React.ReactElement {
         />
       ) : null}
 
-      <main className="shell flex-1">
-        <Outlet />
+      <main className="flex-1 px-6 py-5">
+        <WorkbenchEventsProvider stream={eventStream}>
+          <Outlet />
+        </WorkbenchEventsProvider>
       </main>
 
       <StatusBar
         agentState={agentState}
         agentVersion={healthQuery.data?.version}
         agentEndpoint={AGENT_ENDPOINT_DISPLAY}
+        wsState={wsState}
         projectName={projectDisplayName}
         packageManager={project?.packageManager.name ?? null}
         activeRunId={activeRunId}

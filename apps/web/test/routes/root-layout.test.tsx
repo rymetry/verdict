@@ -38,8 +38,16 @@ import {
 
 // WebSocket 接続は本テストの対象外 (production の status 更新経路は bypass している)。
 // 自然消去シナリオは E2E 層で別途検証する想定。
+// δ: useWorkbenchEvents は EventStream を返す契約に変わったため、テスト用に最小実装を返す。
+// useWsConnectionState は React の useSyncExternalStore 経路。テストでは固定値を返す。
 vi.mock("@/hooks/use-workbench-events", () => ({
-  useWorkbenchEvents: () => ({ events: [], status: "closed" })
+  useWorkbenchEvents: () => ({
+    subscribe: () => () => {},
+    subscribeState: () => () => {},
+    getState: () => "open",
+    close: () => {}
+  }),
+  useWsConnectionState: () => "open"
 }));
 
 // `as ProjectSummary` cast を避け、戻り型を明示することで TS が必須 field を強制する。

@@ -29,7 +29,15 @@ import {
 } from "@/api/client";
 
 vi.mock("@/hooks/use-workbench-events", () => ({
-  useWorkbenchEvents: () => ({ events: [], status: "closed" })
+  // δ: useWorkbenchEvents は EventStream を返す契約に変わったため、テスト用に最小実装を返す。
+  // useWsConnectionState は React の useSyncExternalStore 経路。テストでは固定値を返す。
+  useWorkbenchEvents: () => ({
+    subscribe: () => () => {},
+    subscribeState: () => () => {},
+    getState: () => "open",
+    close: () => {}
+  }),
+  useWsConnectionState: () => "open"
 }));
 
 beforeEach(() => {
@@ -135,10 +143,54 @@ describe("pathnameToPersona (URL → persona 派生)", () => {
 });
 
 describe("各 persona route の直接アクセス", () => {
-  it("`/qa` を直接開くと QA の Run controls / Project picker が描画される", async () => {
+  it("`/qa` を直接開くとプロジェクト未オープン状態で ProjectPicker が描画される", async () => {
+    // δ で QA View は project null のとき ProjectPicker のみを中央に表示する設計に変更
+    // (Run controls / inventory / failure review は project が前提のため空で出さない)。
     renderWithRouter({ initialPath: "/qa" });
-    expect(await screen.findByText("Run controls")).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("Absolute path to a Playwright project")
+    ).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "QA", selected: true })).toBeInTheDocument();
+    // project=null では 3-col grid は組まれない (data-testid="qa-view-grid" は非存在)
+    expect(screen.queryByTestId("qa-view-grid")).not.toBeInTheDocument();
+  });
+
+  it("project が open のとき 3-col grid (qa-view-grid) で 3 features が同時 mount される", async () => {
+    // δ: project null のときは ProjectPicker のみ、open のときは 3-col grid。
+    // mockResolvedValue で fetchCurrentProject に project を返させ、初回 render から open 状態にする。
+    vi.mocked(fetchCurrentProject).mockResolvedValue({
+      id: "p1",
+      rootPath: "/p",
+      packageJsonPath: "/p/package.json",
+      packageManager: {
+        name: "pnpm",
+        status: "ok",
+        confidence: "high",
+        reason: "fixture",
+        warnings: [],
+        errors: [],
+        lockfiles: ["pnpm-lock.yaml"],
+        commandTemplates: {
+          playwrightTest: { executable: "pnpm", args: ["exec", "playwright", "test"] }
+        },
+        hasPlaywrightDevDependency: true,
+        localBinaryUsable: true,
+        blockingExecution: false
+      },
+      hasAllurePlaywright: false,
+      hasAllureCli: false,
+      warnings: [],
+      blockingExecution: false
+    });
+
+    renderWithRouter({ initialPath: "/qa" });
+
+    // 3-col grid (左: ProjectPicker + Test inventory / 中: Run controls + Run console / 右: Failure review)
+    expect(await screen.findByTestId("qa-view-grid")).toBeInTheDocument();
+    expect(await screen.findByText("Run controls")).toBeInTheDocument();
+    expect(screen.getByText("Test inventory")).toBeInTheDocument();
+    expect(screen.getByText("Run console")).toBeInTheDocument();
+    expect(screen.getByText("Failure review")).toBeInTheDocument();
   });
 
   it("`/dev` を直接開くと Developer View placeholder が描画される", async () => {

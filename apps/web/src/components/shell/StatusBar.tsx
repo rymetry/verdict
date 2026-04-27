@@ -1,14 +1,19 @@
 // 画面下部の statusbar。
 // - Agent 接続状態 (dot + バージョン + endpoint)
+// - Local Agent との WebSocket 接続状態 (Issue #11 で追加: 通信不能を可視化する)
 // - project / package manager
 // - active run id
 // - キーボードヒント (r 再実行 など)
-//
-// キーボードショートカット本体の実装は別 issue。ここでは UI hint のみ。
 import * as React from "react";
 
-import { agentDotColorClass, type AgentDotState } from "@/components/shell/status";
+import {
+  agentDotColorClass,
+  type AgentDotState,
+  wsDotColorClass,
+  wsStateLabel
+} from "@/components/shell/status";
 import { cn } from "@/lib/utils";
+import type { WsConnectionState } from "@/api/events";
 
 interface StatusBarProps {
   /** Agent 接続状態 */
@@ -17,6 +22,8 @@ interface StatusBarProps {
   agentVersion?: string;
   /** Agent endpoint (例: "127.0.0.1:4317") */
   agentEndpoint?: string;
+  /** Workbench WebSocket 接続状態 (open / connecting / disconnected) */
+  wsState: WsConnectionState;
   /** プロジェクト名 (未オープンのときは undefined) */
   projectName?: string | null;
   /** package manager 名 (例: "pnpm") */
@@ -65,6 +72,7 @@ export function StatusBar({
   agentState,
   agentVersion,
   agentEndpoint,
+  wsState,
   projectName,
   packageManager,
   activeRunId,
@@ -89,6 +97,16 @@ export function StatusBar({
           {agentVersion ? `Agent v${agentVersion}` : "Agent —"}
         </span>
         {agentEndpoint ? <span>· {agentEndpoint}</span> : null}
+      </Segment>
+
+      <Segment>
+        <span
+          aria-hidden="true"
+          data-testid="ws-status-dot"
+          data-ws-state={wsState}
+          className={cn("h-1.5 w-1.5 rounded-full", wsDotColorClass(wsState))}
+        />
+        <span className="font-medium text-[var(--ink-1)]">WS · {wsStateLabel(wsState)}</span>
       </Segment>
 
       {projectName ? (
