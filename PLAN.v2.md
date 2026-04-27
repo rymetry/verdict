@@ -115,16 +115,18 @@ Workbench本体:
 4. 複数lockfileがあり、`packageManager` がない場合は**ambiguousとして実行をブロック**し、GUIでユーザーに選択を必須とする。暫定defaultによる自動決定はしない。
 5. lockfileなしの場合はnpm fallback。ただし警告を表示する。
 
-実行コマンド生成:
+実行コマンド生成とlocal binary保証:
 
-- npm: `npx playwright test`
-- pnpm: `pnpm exec playwright test`
-- yarn: `yarn playwright test`
-- bun: `bunx playwright test`
+共通前提: ProjectScannerが `package.json` の dependencies/devDependencies に `@playwright/test` が含まれることを検証済みとする。含まれていない場合はテスト実行をブロックする。
 
-CommandRunnerではshell stringではなく、必ずcommand + args配列として保持する。
+| PM | 実行コマンド | Local binary保証 |
+|----|-------------|-----------------|
+| npm | `npx --no-install playwright test` | `--no-install` で暗黙install防止。`node_modules/.bin/playwright` 不在時はエラー |
+| pnpm | `pnpm exec playwright test` | `pnpm exec` はlocal依存のみ解決。workspace/store内で見つからなければエラー |
+| yarn | `yarn playwright test` | Yarn Classic: `node_modules/.bin/` 解決。Yarn PnP: `.pnp.cjs` 経由で解決。いずれも暗黙installなし |
+| bun | `bunx --bun playwright test` | `bunx` はlocal `node_modules` を優先。`@playwright/test` 依存確認済みなら安全 |
 
-Local binary解決: PackageManagerDetectorがプロジェクト検出済みの場合、`node_modules/.bin/playwright` の存在を検証する。local binaryが存在しない場合はエラーとし、`npx` / `bunx` による暗黙のグローバルinstallに依存しない。npmの場合は実質的に `npx --no-install` 相当の挙動を保証する。
+CommandRunnerではshell stringではなく、必ずcommand + args配列として保持する。PM別のexecコマンドがlocal binary不在時にエラーを返すことを各PMの実装で検証する。暗黙のグローバルinstallに依存する構成はPoC標準にしない。
 
 Bun:
 
@@ -447,18 +449,24 @@ Allure出力方針:
 
 実行設計:
 
-allure-playwrightの `resultsDir` はユーザーの `playwright.config.ts` で設定される（デフォルト: プロジェクトルートの `allure-results/`）。ユーザーconfigを自動変更しない方針のため、PoCでは **pre-clean/post-copy パターン** を標準とする。
+allure-playwrightの `resultsDir` はユーザーの `playwright.config.ts` で設定される（デフォルト: プロジェクトルートの `allure-results/`）。ユーザーconfigを自動変更しない方針のため、PoCでは **detect/archive/copy パターン** を標準とする。Workbenchはユーザー成果物を削除しない。
+
+resultsDir 検出:
+
+- ProjectScannerが `playwright.config.ts` のallure-playwright reporter設定から `resultsDir` をヒューリスティック検出する（テキスト検索）。
+- 検出成功時: そのパスを対象ディレクトリとする。
+- 検出不能時（reporter設定が動的、環境変数参照など）: デフォルト `allure-results/` を仮定せず、Workbench configまたはGUIでユーザーに確認を求める。確認なしではAllure連携をスキップする。
 
 allure-results ライフサイクル（1 run あたり）:
 
-1. **Pre-clean**: テスト実行前に、プロジェクトルートの `allure-results/` 内の既存ファイルを削除する（前回runの残留物を排除）。
-2. **テスト実行**: allure-playwrightがプロジェクトルートの `allure-results/` に結果を出力する（ユーザー設定に従う）。
-3. **Post-copy**: テスト完了後、`allure-results/` の内容を `.playwright-workbench/runs/<runId>/allure-results/` にコピーする。
-4. **Report生成**: Allure CLIで `allure-results/` からHTMLレポートを生成し、`.playwright-workbench/runs/<runId>/allure-report/` に出力する。`--output`, `--history-path` のCLI overrideを使う。
+1. **Archive**: テスト実行前に、検出された `resultsDir` 内の既存ファイルを `.playwright-workbench/archive/<timestamp>/` へ移動する（ユーザー成果物の保護）。ディレクトリが空であればスキップ。
+2. **テスト実行**: allure-playwrightが `resultsDir` に結果を出力する（ユーザー設定に従う）。
+3. **Post-copy**: テスト完了後、`resultsDir` の内容を `.playwright-workbench/runs/<runId>/allure-results/` にコピーする。
+4. **Report生成**: Allure CLIでコピー先の `runs/<runId>/allure-results/` からHTMLレポートを生成し、`.playwright-workbench/runs/<runId>/allure-report/` に出力する。`--output`, `--history-path` のCLI overrideを使う。
 5. **Quality Gate**: `allure quality-gate` を実行し、結果を `.playwright-workbench/runs/<runId>/quality-gate-result.json` に保存する。
 6. **次回run前**: 1に戻る。
 
-env var (`ALLURE_RESULTS_DIR`) によるrun単位ディレクトリ直接出力が可能かは実装時に公式docsで確認する。可能であればpre-clean/post-copyの代替としてOpen Questionに記載する。
+env var (`ALLURE_RESULTS_DIR`) によるrun単位ディレクトリ直接出力が可能かは実装時に公式docsで確認する。可能であればarchive/copyの代替として採用検討する。
 
 本運用でfastFailが必要な場合は `allure run -- <test command>` を検討する。
 
@@ -817,7 +825,7 @@ Phase 10:
 実装前に確認する事項:
 
 - Allure Report 3 / Allure CLI / allure-playwrightの正確な最新package名、version、CLI syntax。
-- Allure resultsDirをCLI/envでrun単位に制御する最適手段。PoCは pre-clean/post-copy を標準とするが、`ALLURE_RESULTS_DIR` env var や allure-playwright の `resultsDir` をrun時にoverride可能かを確認する。可能であればpre-clean/post-copyの代替として採用検討。
+- Allure resultsDirをCLI/envでrun単位に制御する最適手段。PoCは detect/archive/copy を標準とするが、`ALLURE_RESULTS_DIR` env var や allure-playwright の `resultsDir` をrun時にoverride可能かを確認する。可能であればarchive/copyの代替として採用検討。
 - `allure quality-gate` のstdout出力形式（JSON前提にせず、まずraw保存）。
 - `allure quality-gate` と `allure run` のPoC採用順。
 - `allure log` / `allure csv` の出力形式とAI context生成への利用方法。
@@ -906,7 +914,7 @@ Prompt 2:
 
 Prompt 3:
 
-「Playwright run pipelineにAllure output directory strategyを追加してください。Allure resultsをrun directoryに保存し、Allure HTML reportを生成し、report pathとURLをrun metadataに保存してください。既存Playwright configは自動変更しないでください。」
+「Playwright run pipelineにAllure output directory strategyを追加してください。Allure resultsをrun directoryに保存し、Allure HTML reportを生成し、report pathとURLをrun metadataに保存してください。既存Playwright configは自動変更しないでください。Workbenchはユーザー成果物を削除しません。既存allure-resultsは削除ではなくarchiveディレクトリへ退避してください。resultsDirが検出できない場合はユーザー確認を必須としてください。」
 
 Prompt 4:
 
@@ -953,8 +961,13 @@ v1 (PLAN.md) からの変更点:
 
 v2 レビュー指摘反映 (2026-04-27):
 
-14. **[P1] Allure results出力先制御**: §22にpre-clean/post-copyパターンの具体フローを追記。`allure-playwright` の `resultsDir` はユーザーconfig依存のため、プロジェクトルート `allure-results/` からのpost-copyをPoC標準とする。`ALLURE_RESULTS_DIR` env var調査をOpen Questionsに追加。
+14. **[P1] Allure results出力先制御**: §22にdetect/archive/copyパターンの具体フローを追記。`allure-playwright` の `resultsDir` はユーザーconfig依存のため、検出→archive→copyをPoC標準とする。`ALLURE_RESULTS_DIR` env var調査をOpen Questionsに追加。
 15. **[P2] history保存先統一**: §10のパスを `.playwright-workbench/reports/allure-history.jsonl` に修正し、§18/§22と統一。
 16. **[P2] テスト列挙の出力形式**: §24に調査順序（JSON → custom reporter → テキスト）と判断基準を明記。テキスト形式parseを最終手段に格下げ。
 17. **[P2] `npx` 暗黙install回避**: §8にlocal binary解決ポリシーを追記。`node_modules/.bin/playwright` の存在検証を必須とし、暗黙installに依存しない。
-18. **[P3] 文字化け修正**: 3箇所の置換文字を修正。
+18. **[P3] 文字化け修正**: 6箇所の置換文字を修正。
+
+v2 再レビュー指摘反映 (2026-04-27):
+
+19. **[P1] pre-clean → detect/archive/copy**: §22のpre-cleanを廃止。ユーザー成果物を削除しない原則を明記。`resultsDir` をヒューリスティック検出し、既存ファイルは `.playwright-workbench/archive/` へ退避。検出不能時はユーザー確認を必須とする。§38実装プロンプトにも原則を追記。
+20. **[P2] local binary検証のPM別明文化**: §8の実行コマンドをPM別テーブルに整理。npm: `--no-install`、pnpm/yarn/bun: 各PMのlocal exec保証。`node_modules/.bin/` 一律チェックを廃止し、Yarn PnP等を正しく扱う。
