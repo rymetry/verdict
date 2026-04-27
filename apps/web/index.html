@@ -9,6 +9,7 @@
       React がマウントされる前に <html> へ .dark / data-theme を確定させる。
       `useAppStore` の永続化キーと値域を直書きしているのは、JS 起動前に同期実行する必要があるため。
       キー / 値域を変更した際は src/store/app-store.ts (THEME_STORAGE_KEY / VALID_PREFERENCES) と同期させること。
+      drift は test/store/bootstrap-sync.test.ts が文字列レベルで CI 検出する。
     -->
     <script>
       (function () {

@@ -14,6 +14,10 @@ import {
   type ThemePreference
 } from "./app-store";
 import { writeSafe } from "./safe-storage";
+//
+// 同期 invariant: 本ファイルの subscribe ロジックと永続化キーは
+// `apps/web/index.html` の FOUC bootstrap script と完全一致している必要がある。
+// drift 検出は `apps/web/test/store/bootstrap-sync.test.ts` が文字列レベルで CI ガードする。
 
 /** <html> への class / data 属性反映 (テストから直接呼べるよう export) */
 export function applyDocumentTheme(resolved: ResolvedTheme, preference: ThemePreference): void {
@@ -66,11 +70,12 @@ export function installThemeEffects(): () => void {
   applyDocumentTheme(selectResolvedTheme(initial), initial.theme);
 
   // 2-3. store 変化 → 永続化 + <html> 反映
-  let lastPersistedTheme: ThemePreference = initial.theme;
-  const unsubscribeStore = useAppStore.subscribe((state) => {
-    if (state.theme !== lastPersistedTheme) {
+  // zustand v5 の subscribe は (state, prev) を受け取る。subscribe は selector を
+  // 取らないため systemDark 変化でも発火するが、prev.theme との比較で「実際に theme が
+  // 変わった時だけ persist する」ことで無駄な localStorage write を避ける。
+  const unsubscribeStore = useAppStore.subscribe((state, prev) => {
+    if (state.theme !== prev.theme) {
       writeSafe(THEME_STORAGE_KEY, state.theme);
-      lastPersistedTheme = state.theme;
     }
     applyDocumentTheme(selectResolvedTheme(state), state.theme);
   });

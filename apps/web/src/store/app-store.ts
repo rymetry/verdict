@@ -6,6 +6,10 @@
 //   さらに subscribe ベースにすることで `useAppStore.setState({ theme })` 経路 (HMR や test) でも
 //   永続化が走る invariant が保てる。setTheme 内では state 更新だけを行う。
 // - <html> への反映と matchMedia 監視も副作用のため store の外 (theme-effects.ts) に置く。
+//
+// 同期相手:
+//   - apps/web/index.html (FOUC bootstrap script) — THEME_STORAGE_KEY / VALID_PREFERENCES の値域
+//   - apps/web/test/store/bootstrap-sync.test.ts — 上記 drift を文字列レベルで CI 検出
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 
