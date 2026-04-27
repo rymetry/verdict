@@ -22,36 +22,52 @@ interface ThemeContextValue {
 
 const ThemeContext = React.createContext<ThemeContextValue | null>(null);
 
+/** dev ビルド時のみ握りつぶした例外を console.warn する */
+function warnDev(scope: string, error: unknown): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+    // eslint-disable-next-line no-console -- 開発時の診断目的に限定
+    console.warn(`[useTheme] ${scope}`, error);
+  }
+}
+
 /** localStorage アクセスを安全に行うラッパ */
 const safeStorage = {
   read(): ThemePreference | null {
     try {
       const value = window.localStorage.getItem(STORAGE_KEY);
       return isThemePreference(value) ? value : null;
-    } catch {
-      // Safari Private Mode などで throw する場合は黙って null を返す
+    } catch (error) {
+      // Safari Private Mode などで throw した場合は黙って null を返す
+      warnDev("localStorage.getItem failed (Private Mode 等)", error);
       return null;
     }
   },
   write(value: ThemePreference): void {
     try {
       window.localStorage.setItem(STORAGE_KEY, value);
-    } catch {
+    } catch (error) {
       // Quota 超過 / Private Mode で throw した場合も UI は壊さない
+      warnDev("localStorage.setItem failed (Quota 超過 等)", error);
     }
   }
 };
 
-function isThemePreference(value: unknown): value is ThemePreference {
+/** 公開エクスポート: 外部 (ToggleGroup 等) でも値域チェックに利用できる */
+export function isThemePreference(value: unknown): value is ThemePreference {
   return typeof value === "string" && VALID_PREFERENCES.includes(value as ThemePreference);
 }
 
-/** OS のダークモード設定を読む。SSR / 古環境では false にフォールバック */
+/** OS のダークモード設定を読む。SSR / 古環境 / matchMedia throw 時は false */
 function getSystemDark(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
     return false;
   }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  try {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  } catch (error) {
+    warnDev("matchMedia failed; OS theme detection disabled", error);
+    return false;
+  }
 }
 
 function resolveTheme(pref: ThemePreference, systemDark: boolean): ResolvedTheme {
@@ -88,20 +104,38 @@ export function ThemeProvider({
   });
   const [systemDark, setSystemDark] = React.useState<boolean>(() => getSystemDark());
 
-  // OS の prefers-color-scheme 変化を監視
+  // OS の prefers-color-scheme 変化を監視 (auto モードで OS 設定変更へ追従するため)
   React.useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    let mql: MediaQueryList;
+    try {
+      mql = window.matchMedia("(prefers-color-scheme: dark)");
+    } catch (error) {
+      warnDev("matchMedia subscription failed", error);
+      return;
+    }
     const handler = (event: MediaQueryListEvent): void => {
       setSystemDark(event.matches);
     };
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
+    // モダンブラウザ: addEventListener / 古い Safari: addListener の両対応
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", handler);
+      return () => mql.removeEventListener("change", handler);
+    }
+    const legacy = mql as unknown as {
+      addListener?: (h: (event: MediaQueryListEvent) => void) => void;
+      removeListener?: (h: (event: MediaQueryListEvent) => void) => void;
+    };
+    if (typeof legacy.addListener === "function") {
+      legacy.addListener(handler);
+      return () => legacy.removeListener?.(handler);
+    }
+    return;
   }, []);
 
   const resolvedTheme = resolveTheme(theme, systemDark);
 
-  // ドキュメントへ反映
+  // 解決後のテーマを <html> へ反映 (auto は OS 変化で自動再計算される)
   React.useEffect(() => {
     applyDocumentTheme(resolvedTheme, theme);
   }, [resolvedTheme, theme]);

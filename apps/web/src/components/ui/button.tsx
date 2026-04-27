@@ -20,9 +20,9 @@ const buttonVariants = cva(
         // 静かな操作 (削除以外の二次操作)
         ghost:
           "bg-transparent text-[var(--ink-1)] hover:bg-[var(--bg-2)] hover:text-[var(--ink-0)]",
-        // 破壊的操作
+        // 破壊的操作。前景色は `--color-destructive-foreground` トークン経由
         destructive:
-          "bg-[var(--fail)] text-white shadow-sm hover:opacity-90",
+          "bg-[var(--fail)] text-[var(--color-destructive-foreground)] shadow-sm hover:bg-[oklch(from_var(--fail)_calc(l-0.06)_c_h)]",
         // テキストリンク
         link:
           "text-[var(--accent)] underline-offset-4 hover:underline"

@@ -43,9 +43,31 @@ describe("<Button />", () => {
     expect(screen.getByRole("button")).toHaveClass("h-10");
   });
 
+  it("size=icon で正方形クラスが付く", () => {
+    render(<Button size="icon" aria-label="icon" />);
+    expect(screen.getByRole("button")).toHaveClass("w-9");
+    expect(screen.getByRole("button")).toHaveClass("h-9");
+  });
+
+  it("variant=link はテキストリンクスタイル", () => {
+    render(<Button variant="link">詳細</Button>);
+    expect(screen.getByRole("button")).toHaveClass("text-[var(--accent)]");
+  });
+
   it("buttonVariants() がクラス文字列を返す", () => {
     const cls = buttonVariants({ variant: "destructive", size: "sm" });
     expect(cls).toContain("bg-[var(--fail)]");
     expect(cls).toContain("h-8");
+  });
+
+  it("asChild=true で渡した <a> が button スタイルを引き継ぐ (Slot 経路)", () => {
+    render(
+      <Button asChild>
+        <a href="/x">リンク</a>
+      </Button>
+    );
+    const link = screen.getByRole("link", { name: "リンク" });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveClass("bg-[var(--cta)]");
   });
 });

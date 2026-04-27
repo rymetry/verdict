@@ -1,9 +1,34 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Playwright QA Workbench</title>
+    <!--
+      テーマ FOUC 抑止用ブートストラップ。
+      React がマウントされる前に <html> へ .dark / data-theme を確定させる。
+      `useTheme` の永続化キーと値域を直書きしているのは、JS 起動前に同期実行する必要があるため。
+      キー / 値域を変更した際は src/hooks/use-theme.tsx と同期させること。
+    -->
+    <script>
+      (function () {
+        try {
+          var KEY = "pwqa-theme";
+          var raw = localStorage.getItem(KEY);
+          var pref = raw === "light" || raw === "dark" || raw === "auto" ? raw : "auto";
+          var systemDark =
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var resolved = pref === "auto" ? (systemDark ? "dark" : "light") : pref;
+          var html = document.documentElement;
+          if (resolved === "dark") html.classList.add("dark");
+          html.dataset.theme = resolved;
+          html.dataset.themePreference = pref;
+        } catch (_) {
+          /* Private Mode 等で throw した場合はライト固定で続行 */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

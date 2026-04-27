@@ -22,7 +22,7 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@/components/ui/tooltip";
-import { useTheme, type ThemePreference } from "@/hooks/use-theme";
+import { useTheme, isThemePreference } from "@/hooks/use-theme";
 
 export function FoundationPreview(): React.ReactElement {
   const { theme, resolvedTheme, setTheme } = useTheme();
@@ -43,9 +43,11 @@ export function FoundationPreview(): React.ReactElement {
               type="single"
               value={theme}
               onValueChange={(value) => {
-                // Radix ToggleGroup は空文字を返すことがあるためガード
-                if (value === "light" || value === "dark" || value === "auto") {
-                  setTheme(value as ThemePreference);
+                // Radix ToggleGroup は単一選択モードでも、現在値の Item を再クリックすると
+                // 空文字 ("") を返す (deselect)。本アプリでは "deselected テーマ" を許さない
+                // ため、許容 3 値に該当しない場合は前値を維持する。
+                if (isThemePreference(value)) {
+                  setTheme(value);
                 }
               }}
               aria-label="テーマ切替"
