@@ -124,6 +124,18 @@ describe("installThemeEffects()", () => {
     }).not.toThrow();
   });
 
+  it("matchMedia が throw した場合 dev で console.warn する (silent failure 監査反映)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(window, "matchMedia").mockImplementation(() => {
+      throw new SyntaxError("invalid media query");
+    });
+    const cleanup = installThemeEffects();
+    cleanup();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toMatch(/theme-effects.*matchMedia/);
+    warnSpy.mockRestore();
+  });
+
   // -- 永続化 (theme-effects subscribe で実装される invariant) --
 
   it("setTheme で localStorage に書き込まれる (subscribe 経由)", () => {

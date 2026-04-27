@@ -1,6 +1,6 @@
 // useAppStore に紐付く副作用 (永続化 / matchMedia 連動 / <html> 反映) のハブ。
 // React tree の外で 1 回だけ install することで:
-//  * Provider のネストを回避し、view router (γ) を後から差し込んでも影響しない
+//  * Provider 化しないことで tree 上の位置に依存せず、view router (γ) を後から差し込んでも影響しない
 //  * `useAppStore.setState` 経由 (HMR / test) の更新でも localStorage 書き出しが走る invariant を維持
 //  * <html> への class / data 属性反映を idempotent な代入だけで完結させる
 // なお `useAppStore.subscribe` は selector を取らないため**全 state 変化**で listener が発火する。
@@ -88,9 +88,14 @@ export function installThemeEffects(): () => void {
       unsubscribeMedia = subscribeMediaQuery(mql, (event) => {
         useAppStore.getState().setSystemDark(event.matches);
       });
-    } catch {
+    } catch (error) {
       // matchMedia が無効クエリで throw する環境は OS 追従不可で確定。
-      // 既に store の初期値に systemDark=false が入っているのでそのまま。
+      // store の初期値に systemDark=false が入っているのでそのまま続行するが、
+      // dev では「OS 追従が無効になった」事実を可視化する (silent failure 監査反映)。
+      if (typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV)) {
+        // eslint-disable-next-line no-console -- 開発時の診断目的に限定
+        console.warn("[theme-effects] matchMedia subscribe failed; OS 追従無効", error);
+      }
     }
   }
 
