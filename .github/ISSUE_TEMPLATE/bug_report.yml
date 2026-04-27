@@ -1,0 +1,36 @@
+name: バグ報告
+description: バグや不具合を報告する
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: バグの内容
+      description: 何が起きているか簡潔に説明してください
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: バグを再現するための手順
+      placeholder: |
+        1. '...' にアクセス
+        2. '...' をクリック
+        3. エラーが発生
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する動作
+      description: 本来どう動くべきか
+    validations:
+      required: false
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: スクリーンショット
+      description: 該当する場合は画像を添付してください
+    validations:
+      required: false
