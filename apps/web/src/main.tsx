@@ -1,24 +1,25 @@
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   QueryClient,
   QueryClientProvider,
   useMutation,
-  useQuery,
-  useQueryClient
+  useQuery
 } from "@tanstack/react-query";
-import type { ProjectSummary, RunRequest } from "@pwqa/shared";
 import {
-  fetchHealth,
-  fetchCurrentProject,
-  startRun,
-  WorkbenchApiError
-} from "./api/client";
+  RunCompletedPayloadSchema,
+  type RunRequest,
+  type RunStatus
+} from "@pwqa/shared";
+import { fetchHealth, fetchCurrentProject, startRun } from "./api/client";
 import { connectWorkbenchEvents, type EventStream } from "./api/events";
-import { ProjectPicker } from "./features/project-picker/ProjectPicker";
-import { TestInventoryPanel } from "./features/test-inventory/TestInventoryPanel";
-import { RunConsole } from "./features/run-console/RunConsole";
-import { FailureReview } from "./features/failure-review/FailureReview";
+import { Chrome } from "./components/Chrome";
+import { Statusbar } from "./components/Statusbar";
+import { useTheme } from "./components/ThemeToggle";
+import type { Persona } from "./components/PersonaToggle";
+import { QAView } from "./views/QAView";
+import { DeveloperView } from "./views/DeveloperView";
+import { InsightsView } from "./views/InsightsView";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -28,7 +29,11 @@ const queryClient = new QueryClient({
 });
 
 function App() {
+  const [persona, setPersona] = useState<Persona>("qa");
+  const [theme, setTheme] = useTheme();
   const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined);
+  const [activeRunStatus, setActiveRunStatus] = useState<RunStatus | null>(null);
+  const [lastRequest, setLastRequest] = useState<RunRequest | null>(null);
   const [eventStream] = useState<EventStream>(() => connectWorkbenchEvents());
 
   useEffect(() => () => eventStream.close(), [eventStream]);
@@ -46,129 +51,86 @@ function App() {
 
   const project = currentProjectQuery.data ?? null;
 
-  return (
-    <main className="shell">
-      <header className="topbar" aria-label="Workbench status">
-        <div>
-          <p className="eyebrow">Local control plane</p>
-          <h1>Playwright Workbench</h1>
-        </div>
-        <div className={healthQuery.data?.ok ? "status statusReady" : "status statusPending"}>
-          <span aria-hidden="true" />
-          {healthQuery.data?.ok
-            ? `Agent v${healthQuery.data.version}`
-            : healthQuery.error
-              ? "Agent unreachable"
-              : "Connecting…"}
-        </div>
-      </header>
-
-      <section className="grid">
-        <ProjectPicker />
-        <RunControls
-          project={project}
-          onRunStarted={(id) => setActiveRunId(id)}
-        />
-      </section>
-
-      {project ? (
-        <section className="grid grid-2col">
-          <TestInventoryPanel project={project} />
-          <RunConsole eventStream={eventStream} activeRunId={activeRunId} />
-        </section>
-      ) : null}
-
-      {activeRunId ? <FailureReview runId={activeRunId} /> : null}
-    </main>
-  );
-}
-
-interface RunControlsProps {
-  project: ProjectSummary | null;
-  onRunStarted: (runId: string) => void;
-}
-
-function RunControls({ project, onRunStarted }: RunControlsProps) {
-  const queryClientLocal = useQueryClient();
-  const [specPath, setSpecPath] = useState("");
-  const [grep, setGrep] = useState("");
-
-  const startMutation = useMutation({
-    mutationFn: async (request: RunRequest) => startRun(request),
-    onSuccess: (response) => {
-      onRunStarted(response.runId);
-      void queryClientLocal.invalidateQueries({ queryKey: ["runs"] });
+  // Track active run status via event stream (for Chrome breadcrumb badge).
+  useEffect(() => {
+    if (!activeRunId) {
+      setActiveRunStatus(null);
+      return;
     }
+    setActiveRunStatus("running");
+    const unsubscribe = eventStream.subscribe((event) => {
+      if (event.runId !== activeRunId) return;
+      if (event.type === "run.queued" || event.type === "run.started") {
+        setActiveRunStatus("running");
+        return;
+      }
+      if (event.type === "run.completed") {
+        const parsed = RunCompletedPayloadSchema.safeParse(event.payload);
+        if (parsed.success) setActiveRunStatus(parsed.data.status);
+        return;
+      }
+      if (event.type === "run.cancelled") setActiveRunStatus("cancelled");
+      if (event.type === "run.error") setActiveRunStatus("error");
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [eventStream, activeRunId]);
+
+  const rerunMutation = useMutation({
+    mutationFn: async (request: RunRequest) => startRun(request),
+    onSuccess: (response) => setActiveRunId(response.runId)
   });
 
-  const errorMessage = useMemo(() => {
-    if (!startMutation.error) return null;
-    if (startMutation.error instanceof WorkbenchApiError) {
-      return `${startMutation.error.code}: ${startMutation.error.message}`;
-    }
-    return startMutation.error instanceof Error
-      ? startMutation.error.message
-      : "Failed to start run";
-  }, [startMutation.error]);
+  const handleRunStarted = (runId: string, request?: RunRequest) => {
+    setActiveRunId(runId);
+    if (request) setLastRequest(request);
+  };
 
-  if (!project) {
-    return (
-      <article className="panel">
-        <p className="panelLabel">Run controls</p>
-        <p className="muted">Open a project to enable runs.</p>
-      </article>
-    );
-  }
+  const handleRerun = () => {
+    if (!lastRequest) return;
+    rerunMutation.mutate(lastRequest);
+  };
 
-  const blocked = project.blockingExecution;
+  const agentReady = Boolean(healthQuery.data?.ok);
+  const agentVersion = healthQuery.data?.ok ? healthQuery.data.version : null;
+  const rerunDisabled = !lastRequest || rerunMutation.isPending;
 
   return (
-    <article className="panel">
-      <p className="panelLabel">Run controls</p>
-      <form
-        className="picker"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const request: RunRequest = {
-            projectId: project.id,
-            specPath: specPath.trim() || undefined,
-            grep: grep.trim() || undefined,
-            headed: false
-          };
-          startMutation.mutate(request);
-        }}
-      >
-        <label htmlFor="spec-path" className="muted">
-          Spec path (relative; optional)
-        </label>
-        <input
-          id="spec-path"
-          type="text"
-          placeholder="tests/auth.spec.ts"
-          value={specPath}
-          onChange={(event) => setSpecPath(event.target.value)}
-        />
-        <label htmlFor="grep" className="muted">
-          Grep pattern (optional)
-        </label>
-        <input
-          id="grep"
-          type="text"
-          placeholder="@smoke"
-          value={grep}
-          onChange={(event) => setGrep(event.target.value)}
-        />
-        <button type="submit" disabled={blocked || startMutation.isPending}>
-          {startMutation.isPending ? "Starting…" : "Run Playwright"}
-        </button>
-      </form>
-      {blocked ? (
-        <p className="errorBlock">
-          Runs are blocked while the package manager status requires user resolution.
-        </p>
-      ) : null}
-      {errorMessage ? <p className="errorBlock">{errorMessage}</p> : null}
-    </article>
+    <>
+      <Chrome
+        project={project}
+        activeRunId={activeRunId ?? null}
+        activeRunStatus={activeRunStatus}
+        persona={persona}
+        theme={theme}
+        onPersonaChange={setPersona}
+        onThemeChange={setTheme}
+        onRerun={handleRerun}
+        rerunDisabled={rerunDisabled}
+        rerunLabel={rerunMutation.isPending ? "Starting…" : "再実行"}
+      />
+
+      <main className="workspace" data-view={persona}>
+        {persona === "qa" ? (
+          <QAView
+            project={project}
+            activeRunId={activeRunId}
+            eventStream={eventStream}
+            onRunStarted={handleRunStarted}
+          />
+        ) : null}
+        {persona === "dev" ? <DeveloperView /> : null}
+        {persona === "qmo" ? <InsightsView /> : null}
+      </main>
+
+      <Statusbar
+        agentVersion={agentVersion}
+        agentReady={agentReady}
+        project={project}
+        activeRunId={activeRunId ?? null}
+      />
+    </>
   );
 }
 

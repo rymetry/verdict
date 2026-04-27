@@ -28,13 +28,30 @@ export const initialRunConsoleState: RunConsoleState = {
 };
 
 const initialState = initialRunConsoleState;
-
 const MAX_LINES = 1000;
 
 function trim(lines: string[], next: string): string[] {
   if (lines.length < MAX_LINES) return [...lines, next];
   return [...lines.slice(lines.length - MAX_LINES + 1), next];
 }
+
+const STATUS_LABEL: Record<RunConsoleState["status"], string> = {
+  idle: "idle",
+  running: "running",
+  passed: "passed",
+  failed: "failed",
+  cancelled: "cancelled",
+  error: "error"
+};
+
+const STATUS_BADGE: Record<RunConsoleState["status"], string> = {
+  idle: "skipped",
+  running: "running",
+  passed: "passed",
+  failed: "failed",
+  cancelled: "skipped",
+  error: "failed"
+};
 
 export function RunConsole({ eventStream, activeRunId }: RunConsoleProps) {
   const [state, setState] = useState<RunConsoleState>(initialState);
@@ -58,31 +75,104 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps) {
     }
   }, [state.stdout]);
 
-  const statusLabel = useMemo(() => {
-    if (!activeRunId) return "Idle — start a run from the inventory above.";
-    return `Run ${activeRunId.slice(0, 12)} · ${state.status}`;
+  const headline = useMemo(() => {
+    if (!activeRunId) return "アイドル — 上で run を開始してください";
+    return `Run ${activeRunId.slice(0, 12)} · ${STATUS_LABEL[state.status]}`;
   }, [activeRunId, state.status]);
 
   return (
-    <article className="panel panelPrimary">
-      <p className="panelLabel">Run console</p>
-      <p className="muted">{statusLabel}</p>
-      {state.summary ? (
-        <p className="summary">
-          {state.summary.passed} passed · {state.summary.failed} failed · {state.summary.skipped}{" "}
-          skipped · {state.summary.flaky} flaky · total {state.summary.total}
-          {state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}
-        </p>
-      ) : null}
-      <pre ref={stdoutRef} className="console">
-        {state.stdout.join("")}
-      </pre>
-      {state.stderr.length > 0 ? (
-        <details className="stderr">
-          <summary>stderr</summary>
-          <pre>{state.stderr.join("")}</pre>
-        </details>
-      ) : null}
+    <article className="locator-card" aria-label="Run console">
+      <h4>
+        Run コンソール
+        <span style={{ marginLeft: 8 }}>
+          <span className={`badge ${STATUS_BADGE[state.status]}`}>
+            {STATUS_LABEL[state.status]}
+          </span>
+        </span>
+      </h4>
+      <div>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--ink-3)" }}>{headline}</p>
+        {state.summary ? (
+          <p
+            style={{
+              margin: "10px 0 0",
+              padding: "10px 12px",
+              border: "1px solid var(--line)",
+              borderRadius: "var(--radius)",
+              background: "var(--bg-2)",
+              fontFamily: "var(--mono)",
+              fontSize: 12.5,
+              color: "var(--ink-0)",
+              fontFeatureSettings: '"tnum" 1'
+            }}
+          >
+            <span style={{ color: "var(--accent)", fontWeight: 600 }}>Σ </span>
+            <span style={{ color: "var(--pass)" }}>{state.summary.passed} passed</span>
+            {" · "}
+            <span style={{ color: "var(--fail)" }}>{state.summary.failed} failed</span>
+            {" · "}
+            <span style={{ color: "var(--ink-2)" }}>{state.summary.skipped} skipped</span>
+            {" · "}
+            <span style={{ color: "var(--flaky)" }}>{state.summary.flaky} flaky</span>
+            {" · total "}
+            {state.summary.total}
+            {state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}
+          </p>
+        ) : null}
+        <pre
+          ref={stdoutRef}
+          className="terminal"
+          style={{
+            marginTop: 10,
+            border: "1px solid var(--line)",
+            borderLeft: "2px solid var(--accent)",
+            borderRadius: "var(--radius)",
+            maxHeight: 320,
+            overflowY: "auto",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word"
+          }}
+        >
+          {state.stdout.length > 0
+            ? state.stdout.join("")
+            : "▌ run の出力を待機中…"}
+        </pre>
+        {state.stderr.length > 0 ? (
+          <details
+            style={{
+              marginTop: 10,
+              border: "1px solid var(--line)",
+              borderLeft: "2px solid var(--fail)",
+              borderRadius: "var(--radius)"
+            }}
+          >
+            <summary
+              style={{
+                padding: "8px 12px",
+                color: "var(--fail)",
+                fontSize: 11,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+                fontWeight: 600
+              }}
+            >
+              stderr
+            </summary>
+            <pre
+              className="terminal"
+              style={{
+                margin: 0,
+                padding: "0 12px 12px",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word"
+              }}
+            >
+              {state.stderr.join("")}
+            </pre>
+          </details>
+        ) : null}
+      </div>
     </article>
   );
 }

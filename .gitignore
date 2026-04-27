@@ -41,3 +41,9 @@ coverage/
 tests/smoke/_artifacts/
 tests/smoke/test-results/
 tests/smoke/playwright-report/
+
+# Playwright MCP scratch (snapshots, console logs, screenshots)
+.playwright-mcp/
+design-v*.png
+v[0-9]*-*.png
+concept-b-refined*.png

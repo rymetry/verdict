@@ -17,30 +17,56 @@ export function TestInventoryPanel({ project, onRunSpec, onRunTest }: TestInvent
 
   if (project.blockingExecution) {
     return (
-      <article className="panel">
-        <p className="panelLabel">Test inventory</p>
-        <p className="muted">
-          Test inventory is unavailable while project execution is blocked.
-        </p>
-      </article>
+      <div className="locator-card">
+        <h4>テストインベントリ</h4>
+        <div>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--ink-3)" }}>
+            プロジェクト実行がブロックされているため、インベントリを取得できません。
+          </p>
+        </div>
+      </div>
     );
   }
 
   return (
-    <article className="panel">
-      <p className="panelLabel">Test inventory</p>
-      {inventoryQuery.isLoading ? (
-        <p className="muted">Listing tests via Playwright CLI…</p>
-      ) : inventoryQuery.error ? (
-        <p className="errorBlock">{(inventoryQuery.error as Error).message}</p>
-      ) : inventoryQuery.data ? (
-        <InventoryView
-          inventory={inventoryQuery.data}
-          onRunSpec={onRunSpec}
-          onRunTest={onRunTest}
-        />
-      ) : null}
-    </article>
+    <div className="locator-card">
+      <h4>
+        テストインベントリ
+        {inventoryQuery.data ? (
+          <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-3)", marginLeft: 8 }}>
+            {inventoryQuery.data.totals.specFiles} specs · {inventoryQuery.data.totals.tests} tests
+          </span>
+        ) : null}
+      </h4>
+      <div>
+        {inventoryQuery.isLoading ? (
+          <p style={{ margin: 0, fontSize: 12, color: "var(--ink-3)" }}>
+            Playwright CLI からテスト一覧を取得中…
+          </p>
+        ) : inventoryQuery.error ? (
+          <p
+            style={{
+              margin: 0,
+              padding: "10px 12px",
+              border: "1px solid color-mix(in oklch, var(--fail) 40%, transparent)",
+              borderLeft: "3px solid var(--fail)",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--fail-soft)",
+              color: "var(--fail)",
+              fontSize: 12
+            }}
+          >
+            ✕ {(inventoryQuery.error as Error).message}
+          </p>
+        ) : inventoryQuery.data ? (
+          <InventoryView
+            inventory={inventoryQuery.data}
+            onRunSpec={onRunSpec}
+            onRunTest={onRunTest}
+          />
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -52,50 +78,137 @@ interface InventoryViewProps {
 
 function InventoryView({ inventory, onRunSpec, onRunTest }: InventoryViewProps) {
   if (inventory.error) {
-    return <p className="errorBlock">{inventory.error}</p>;
+    return (
+      <p
+        style={{
+          margin: 0,
+          padding: "10px 12px",
+          border: "1px solid color-mix(in oklch, var(--fail) 40%, transparent)",
+          borderLeft: "3px solid var(--fail)",
+          borderRadius: "var(--radius-sm)",
+          background: "var(--fail-soft)",
+          color: "var(--fail)",
+          fontSize: 12
+        }}
+      >
+        ✕ {inventory.error}
+      </p>
+    );
   }
   if (inventory.specs.length === 0) {
-    return <p className="muted">No specs detected by Playwright.</p>;
+    return (
+      <p style={{ margin: 0, fontSize: 12, color: "var(--ink-3)" }}>
+        Playwright がテストを検出できませんでした。
+      </p>
+    );
   }
   return (
-    <div className="inventory">
-      <p className="muted">
-        {inventory.totals.specFiles} spec files · {inventory.totals.tests} tests
-      </p>
-      <ul className="specList">
-        {inventory.specs.map((spec) => (
-          <li key={spec.relativePath}>
-            <div className="specHeader">
-              <strong>{spec.relativePath}</strong>
-              {onRunSpec ? (
-                <button type="button" onClick={() => onRunSpec(spec)}>
-                  Run spec
-                </button>
-              ) : null}
-            </div>
-            <ul className="testList">
-              {spec.tests.map((test) => (
-                <li key={test.id}>
-                  <span className="testTitle">{test.title}</span>
-                  <span className="muted"> · line {test.line}</span>
-                  {test.tags.length > 0 ? (
-                    <span className="tags">{test.tags.join(" ")}</span>
-                  ) : null}
-                  {onRunTest ? (
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => onRunTest(spec, test)}
-                    >
-                      Run
-                    </button>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ul
+      style={{
+        margin: 0,
+        padding: 0,
+        listStyle: "none",
+        display: "flex",
+        flexDirection: "column",
+        gap: 12
+      }}
+    >
+      {inventory.specs.map((spec) => (
+        <li key={spec.relativePath}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 8
+            }}
+          >
+            <strong
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: 12,
+                fontWeight: 500,
+                color: "var(--ink-0)"
+              }}
+            >
+              ▸ {spec.relativePath}
+            </strong>
+            {onRunSpec ? (
+              <button type="button" className="btn" onClick={() => onRunSpec(spec)}>
+                Run spec
+              </button>
+            ) : null}
+          </div>
+          <ul
+            style={{
+              margin: "6px 0 0",
+              padding: 0,
+              listStyle: "none",
+              display: "flex",
+              flexDirection: "column",
+              gap: 2
+            }}
+          >
+            {spec.tests.map((test) => (
+              <li
+                key={test.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "3px 0 3px 18px",
+                  fontSize: 12,
+                  position: "relative",
+                  color: "var(--ink-1)"
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    color: "var(--ink-4)",
+                    fontFamily: "var(--mono)",
+                    fontSize: 11
+                  }}
+                >
+                  └─
+                </span>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {test.title}
+                </span>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: "var(--ink-3)" }}>
+                  :{test.line}
+                </span>
+                {test.tags.length > 0 ? (
+                  <span
+                    style={{
+                      padding: "1px 6px",
+                      border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-sm)",
+                      background: "var(--accent-soft)",
+                      color: "var(--accent)",
+                      fontFamily: "var(--mono)",
+                      fontSize: 10
+                    }}
+                  >
+                    {test.tags.join(" ")}
+                  </span>
+                ) : null}
+                {onRunTest ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ padding: "3px 8px", fontSize: 10.5 }}
+                    onClick={() => onRunTest(spec, test)}
+                  >
+                    Run
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
   );
 }
