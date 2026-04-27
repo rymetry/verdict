@@ -14,14 +14,20 @@
 
 ## 確認方法
 
+このリポジトリは pnpm/Node ベースなので **同じスタックの static server** を使うのが望ましい:
+
 ```bash
-# どこかで HTTP サーバを立てて開く (file:// では Google Fonts 等が読み込めないため)
+# 推奨 (このリポのスタックと一貫)
+pnpm dlx serve docs/design
+# → http://localhost:3000/concept-b-refined.html
+
+# 代替 (Python が手元にある場合)
 cd docs/design
 python3 -m http.server 8765
-# ブラウザで http://127.0.0.1:8765/concept-b-refined.html
+# → http://127.0.0.1:8765/concept-b-refined.html
 ```
 
-または ngrok / VS Code Live Server / Vite preview server 等。
+`file://` で開くと Google Fonts 等の CDN リソースが CORS で読み込めない。
 
 ## 実装方針 (Phase 1 後続作業)
 
@@ -39,18 +45,43 @@ python3 -m http.server 8765
 
 ## 後続作業の構成 (推奨 PR 分割)
 
-| # | PR タイトル案 | スコープ |
-|---|---|---|
-| α | `feat(web): foundation - Tailwind + shadcn/ui + design tokens` | tailwind.config.ts、shadcn 初期化、v10 oklch トークンを CSS variables → Tailwind theme へ移行 |
-| β | `feat(web): chrome (top bar + statusbar)` | brand / breadcrumbs / theme toggle / persona toggle / 再実行 ボタン (shadcn primitives 利用) |
-| γ | `feat(web): view router (TanStack Router)` | `/qa` `/dev` `/qmo` の route 化、deep link / browser back 対応 |
-| δ | `feat(web): qa view migration (Phase 1 機能)` | ProjectPicker / TestInventory / RunConsole / FailureReview を新 design system に移植 |
-| ε | `feat(web): developer view placeholder` | 関連ファイル / source viewer / locator inspector の placeholder cards |
-| ζ | `feat(web): insights view (static mock)` | Release Readiness / Quality Gate / AI Summary (Phase 1.2 で Allure 統合時にデータ接続) |
-| η | `feat(web): zustand store + state hoisting` | main.tsx の useState 群を store に集約 |
-| θ | `test(web): foundation tests` | useTheme / statusToBadge / global keyboard / Persona の vitest テスト |
+依存順序を踏まえて並べ替え。**θ (foundation tests) は α と並走** (TDD 原則: テスト先行)、**η (Zustand) は γ より前** (state を view router に渡す前に store 化、後で書き直さない):
+
+| # | PR タイトル案 | スコープ | 依存 |
+|---|---|---|---|
+| α | `feat(web): foundation - Tailwind + shadcn/ui + design tokens` | tailwind.config.ts、shadcn 初期化、v10 oklch トークンを CSS variables → Tailwind theme へ移行 | — |
+| θ | `test(web): foundation tests` (α と並走) | 設計トークン / theme switching / 共通 primitive の vitest + @testing-library/react テスト | — |
+| η | `feat(web): zustand store + state hoisting` | persona / theme / activeRunId / lastRequest を store に集約 (view 化の前に整理) | α |
+| β | `feat(web): chrome (top bar + statusbar)` | brand / breadcrumbs / theme toggle / persona toggle / 再実行 ボタン (shadcn primitives + lucide-react 使用) | α, η |
+| γ | `feat(web): view router (TanStack Router)` | `/qa` `/dev` `/qmo` の route 化、deep link / browser back 対応 | β |
+| δ | `feat(web): qa view migration (Phase 1 機能)` | ProjectPicker / TestInventory / RunConsole / FailureReview を新 design system に移植 | γ |
+| ε | `feat(web): developer view placeholder` | 関連ファイル / source viewer / locator inspector の placeholder cards | γ |
+| ζ | `feat(web): insights view (static mock)` | Release Readiness / Quality Gate / AI Summary。**Phase 1.2 で Allure 接続予定** (詳細は次節 "Allure 同期モデル") | γ |
 
 各 PR は約 500 行以内、レビュー粒度を保つ。
+
+### Allure 同期モデル (ζ で実装)
+
+Insights view の Allure サマリは **pull モデル**:
+- `apps/agent` 側で Allure JSON / history.jsonl を読む `AllureReportProvider` (PLAN.v2 §16) を実装
+- `apps/web` 側は `GET /runs/:id/report-summary` (PLAN.v2 §19) で読み取り、TanStack Query で 5 秒間隔 polling (initial Phase 1.2)
+- watch / push 化は Phase 2 以降の最適化対象
+
+これにより Insights は **Allure を埋め込まず参照する** 形 (棲み分け原則を保持)。
+
+### i18n 戦略
+
+PoC は **日本語 only** (`<html lang="ja">` 固定、UI 文字列ハードコード)。理由:
+- ユーザーは日本語ネイティブ、共同開発者も日本語想定
+- PLAN.v2 §11 (Personas) に英語要件なし
+- i18n を最初から入れると過度に YAGNI 違反
+
+**英語化が必要になったタイミングで別 PR**:
+- `react-i18next` または `next-intl` 導入
+- 全文字列を `t()` 関数経由に変換
+- 言語切替トグルを Chrome に追加
+
+ハードコード文字列のうち翻訳必要箇所の grep が容易になるよう、PoC 中も `// i18n` コメントは付けない (将来の bulk 抽出時にノイズが減る)。
 
 ## 設計判断ログ (なぜこの形か)
 
