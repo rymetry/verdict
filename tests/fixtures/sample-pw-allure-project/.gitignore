@@ -1,0 +1,12 @@
+# Allure outputs (generated each run, not committed)
+allure-results/
+allure-report/
+allure-history.jsonl
+
+# Playwright outputs (generated each run, not committed)
+playwright-results.json
+playwright-report/
+test-results/
+
+# Node modules
+node_modules/
