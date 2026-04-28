@@ -1,11 +1,8 @@
 // Run-lifecycle internal types. Generic structured-log helpers live in
-// `apps/agent/src/lib/structuredLog.ts`; re-exported below so existing
-// run-scoped imports keep working without circular reference.
-export {
-  type ArtifactKind,
-  errorCode,
-  errorLogFields
-} from "../lib/structuredLog.js";
+// `apps/agent/src/lib/structuredLog.ts`; this module retains only the
+// run-lifecycle-specific contracts (`RunManagerLogger`, `StreamRedactor`).
+// Importers requiring `ArtifactKind` / `errorCode` / `errorLogFields` must
+// reach for `../lib/structuredLog.js` directly (Issue #30 項目 C).
 
 /**
  * Structured logger contract for run lifecycle operations. `error` is required
@@ -16,8 +13,9 @@ export {
  * (where applicable) `artifactKind` and `code`, so log aggregators can
  * correlate entries with the user-visible `code=...` strings that surface in
  * run warnings. Absolute filesystem paths must not be added to log payloads —
- * use `artifactKind` (closed `ArtifactKind` union) instead. The
- * `errorLogFields(error)` helper enforces this for thrown values.
+ * use `artifactKind` (closed `ArtifactKind` union from
+ * `apps/agent/src/lib/structuredLog.ts`) instead. The `errorLogFields(error)`
+ * helper enforces this for thrown values.
  */
 export interface RunManagerLogger {
   error(payload: Record<string, unknown>, message: string): void;

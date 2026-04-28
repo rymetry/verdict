@@ -46,3 +46,7 @@ tests/smoke/playwright-report/
 # モックアップを更新する際の作業ファイルはここに置く: docs/design/_scratch/
 .playwright-mcp/
 docs/design/_scratch/
+
+# Autonomous-loop session state (per-session, not committed)
+.PLAN_v2_AUTORUN.lock
+PROGRESS.md

@@ -1,6 +1,34 @@
-import { describe, expect, it } from "vitest";
-import { errorCode, errorLogFields, projectIdHash } from "../src/lib/structuredLog.js";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import {
+  errorCode,
+  errorLogFields,
+  projectIdHash,
+  type ArtifactKind
+} from "../src/lib/structuredLog.js";
 import { AuditPersistenceError } from "../src/lib/errors.js";
+
+// Issue #30 項目 A: 型レベル regression。closed string union が意図せず
+// widening (例: string への退化、新規メンバー追加時の凍結漏れ) を起こさない
+// よう、メンバー集合を凍結する。Phase 1.2 で `allure-results` 等を追加する
+// 際は本 assertion を意図的に更新する作業が必要となり、その時点で関連する
+// logger 呼び出し(runManager.ts / streamRedactor.ts)の `satisfies` チェック
+// がコンパイルエラーで顕在化する。
+describe("ArtifactKind type-level regression (Issue #30-A)", () => {
+  it("freezes the closed-union member set", () => {
+    expectTypeOf<ArtifactKind>().toEqualTypeOf<
+      | "playwright-json"
+      | "playwright-json-redaction"
+      | "playwright-json-summary"
+      | "stdout-log"
+      | "stderr-log"
+      | "metadata"
+      | "html-report"
+      | "stream-redaction"
+      | "runs-directory"
+      | "audit-log"
+    >();
+  });
+});
 
 describe("errorCode", () => {
   it("returns the .code property when error is an Error with a string code", () => {
