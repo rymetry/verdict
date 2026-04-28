@@ -205,10 +205,16 @@ describe("各 persona route の直接アクセス", () => {
     expect(screen.getByRole("tab", { name: "Developer", selected: true })).toBeInTheDocument();
   });
 
-  it("`/qmo` を直接開くと Insights View placeholder が描画される", async () => {
+  it("`/qmo` を直接開くと Insights View placeholder が 2-col grid で描画される", async () => {
+    // ζ (Issue #13) で /qmo は Hero / 3-card row / AI summary / Sidebar の 2-col placeholder を表示。
+    // section の aria-label + 各セクションの testid で pin する (visible heading "Insights" は sr-only)。
     renderWithRouter({ initialPath: "/qmo" });
-    expect(await screen.findByTestId("qmo-view")).toBeInTheDocument();
-    expect(screen.getByText(/Insights View/)).toBeInTheDocument();
+    expect(await screen.findByTestId("qmo-view")).toHaveAttribute("aria-label", "Insights View");
+    expect(screen.getByTestId("insights-view-grid")).toBeInTheDocument();
+    expect(screen.getByTestId("insights-hero")).toBeInTheDocument();
+    expect(screen.getByTestId("insights-main-cards")).toBeInTheDocument();
+    expect(screen.getByTestId("insights-ai-card")).toBeInTheDocument();
+    expect(screen.getByTestId("insights-sidebar")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Insights", selected: true })).toBeInTheDocument();
   });
 });
