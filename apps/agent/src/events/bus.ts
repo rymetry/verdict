@@ -5,7 +5,8 @@ import {
   RunTerminalPayloadSchema,
   SnapshotPayloadSchema,
   terminalStatusMatchesEvent,
-  type WorkbenchEvent
+  type WorkbenchEvent,
+  type WorkbenchEventInput
 } from "@pwqa/shared";
 
 export type EventListener = (event: WorkbenchEvent) => void;
@@ -13,7 +14,7 @@ export type EventListener = (event: WorkbenchEvent) => void;
 const RUN_HISTORY_LIMIT = 2_000;
 
 export interface EventBus {
-  publish(event: Omit<WorkbenchEvent, "sequence" | "timestamp">): WorkbenchEvent;
+  publish(event: WorkbenchEventInput): WorkbenchEvent;
   /** Subscribe to all events. Returns an unsubscribe function. */
   subscribe(listener: EventListener): () => void;
   /** Snapshot of historical events for a run, used on WS reconnect. */
@@ -28,12 +29,21 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled event type: ${String(value)}`);
 }
 
+class PayloadValidationError extends Error {
+  readonly code = "PAYLOAD_VALIDATION_FAILED" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PayloadValidationError";
+  }
+}
+
 /**
  * Producer-side contract check for WS payloads. Envelope validation alone keeps
  * `payload` unknown, so publish validates the event-specific body before it can
  * enter history or reach subscribers.
  */
-function assertValidPayload(input: Omit<WorkbenchEvent, "sequence" | "timestamp">): void {
+function assertValidPayload(input: WorkbenchEventInput): void {
   switch (input.type) {
     case "run.queued": {
       const result = RunQueuedPayloadSchema.safeParse(input.payload);
@@ -57,7 +67,9 @@ function assertValidPayload(input: Omit<WorkbenchEvent, "sequence" | "timestamp"
       const parsed = RunTerminalPayloadSchema.safeParse(input.payload);
       if (!parsed.success) throwPayloadError(input.type, parsed.error.issues);
       if (!terminalStatusMatchesEvent(input.type, parsed.data.status)) {
-        throw new Error(`Invalid ${input.type} payload: status ${parsed.data.status} does not match event type`);
+        throw new PayloadValidationError(
+          `Invalid ${input.type} payload: status ${parsed.data.status} does not match event type`
+        );
       }
       return;
     }
@@ -67,7 +79,7 @@ function assertValidPayload(input: Omit<WorkbenchEvent, "sequence" | "timestamp"
       return;
     }
     default:
-      assertNever(input.type);
+      assertNever(input);
   }
 }
 
@@ -75,7 +87,7 @@ function throwPayloadError(
   type: WorkbenchEvent["type"],
   issues: Array<{ message: string }>
 ): never {
-  throw new Error(`Invalid ${type} payload: ${issues.map((i) => i.message).join("; ")}`);
+  throw new PayloadValidationError(`Invalid ${type} payload: ${issues.map((i) => i.message).join("; ")}`);
 }
 
 export function createEventBus(options: CreateEventBusOptions = {}): EventBus {

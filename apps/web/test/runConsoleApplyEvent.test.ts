@@ -5,13 +5,13 @@ import {
 } from "../src/features/run-console/RunConsole";
 import type { WorkbenchEvent } from "@pwqa/shared";
 
-function evt(partial: Partial<WorkbenchEvent>): WorkbenchEvent {
+function evt(partial: Record<string, unknown>): WorkbenchEvent {
   return {
     type: "run.queued",
     sequence: 1,
     timestamp: new Date().toISOString(),
     runId: "run-1",
-    payload: {},
+    payload: { request: { projectId: "p1", headed: false } },
     ...partial
   } as WorkbenchEvent;
 }
@@ -108,7 +108,7 @@ describe("RunConsole applyEvent", () => {
     expect(next.exitCode).toBeNull();
     expect(next.warnings).toEqual([]);
     expect(consoleSpy).toHaveBeenCalledWith(
-      "[RunConsole] run.cancelled payload schema mismatch",
+      "[RunConsole] run.cancelled payload event/status mismatch",
       expect.arrayContaining([
         expect.objectContaining({
           message: expect.stringContaining("does not match event type run.cancelled")
@@ -175,7 +175,13 @@ describe("RunConsole applyEvent", () => {
   it("snapshot event は no-op (state 不変) で console.warn しない", () => {
     const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const before = { ...initialRunConsoleState, stdout: ["a", "b"] };
-    const next = applyEvent(before, evt({ type: "snapshot", payload: {} }));
+    const next = applyEvent(
+      before,
+      evt({
+        type: "snapshot",
+        payload: { service: "playwright-workbench-agent", version: "0.1.0" }
+      })
+    );
     expect(next).toEqual(before);
     expect(consoleSpy).not.toHaveBeenCalled();
   });

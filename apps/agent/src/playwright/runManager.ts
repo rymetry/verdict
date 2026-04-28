@@ -6,7 +6,8 @@ import {
   type RunMetadata,
   type RunRequest,
   type TestResultSummary,
-  type WorkbenchEvent
+  type TerminalEventType,
+  type WorkbenchEventInput
 } from "@pwqa/shared";
 import type { CommandRunner } from "../commands/runner.js";
 import { redact } from "../commands/redact.js";
@@ -164,8 +165,18 @@ function createLogWriteTracker({
   };
 }
 
-type PublishInput = Omit<WorkbenchEvent, "sequence" | "timestamp">;
+type PublishInput = WorkbenchEventInput;
+type TerminalPublishInput = Extract<PublishInput, { type: TerminalEventType }>;
 
+type PublishResult =
+  | { ok: true }
+  | { ok: false; error: unknown; code: string };
+
+/**
+ * Publishes a run event without letting producer-side schema checks or adapter
+ * failures escape runner callbacks. The caller decides whether a failed publish
+ * needs a user-visible terminal warning.
+ */
 function publishEventSafely({
   bus,
   logger,
@@ -176,49 +187,60 @@ function publishEventSafely({
   logger?: RunManagerLogger;
   event: PublishInput;
   message: string;
-}): unknown | null {
+}): PublishResult {
   try {
     bus.publish(event);
-    return null;
+    return { ok: true };
   } catch (error) {
+    const code = errorCode(error);
     logger?.error(
       {
         runId: event.runId,
         eventType: event.type,
-        code: errorCode(error),
+        code,
         err: error instanceof Error ? error.message : String(error)
       },
       message
     );
-    return error;
+    return { ok: false, error, code };
   }
 }
 
+/**
+ * Terminal events are the UI's primary completion signal. If the original
+ * terminal payload is rejected, send a sanitized run.error fallback once; if
+ * that also fails, emit a process warning as the last local observability path.
+ */
 function publishTerminalEventSafely({
   bus,
   logger,
   event,
-  fallbackWarnings
+  fallbackWarnings,
+  isFallback = false
 }: {
   bus: EventBus;
   logger?: RunManagerLogger;
-  event: PublishInput;
+  event: TerminalPublishInput;
   fallbackWarnings: string[];
+  isFallback?: boolean;
 }): void {
-  const error = publishEventSafely({
+  const result = publishEventSafely({
     bus,
     logger,
     event,
-    message: "terminal event publish failed"
+    message: isFallback ? "terminal fallback event publish failed" : "terminal event publish failed"
   });
-  if (!error || event.type === "run.error") return;
+  if (result.ok) return;
+  if (isFallback) {
+    process.emitWarning("Terminal fallback event publish failed", {
+      code: "PWQA_TERMINAL_FALLBACK_PUBLISH_FAILED"
+    });
+    return;
+  }
 
-  const payload =
-    typeof event.payload === "object" && event.payload !== null
-      ? (event.payload as { durationMs?: unknown; exitCode?: unknown; signal?: unknown })
-      : {};
-  const code = errorCode(error);
-  publishEventSafely({
+  const payload = event.payload;
+  const originalStatus = "status" in payload ? payload.status : "unknown";
+  publishTerminalEventSafely({
     bus,
     logger,
     event: {
@@ -232,12 +254,40 @@ function publishTerminalEventSafely({
         durationMs: typeof payload.durationMs === "number" ? payload.durationMs : 0,
         warnings: [
           ...fallbackWarnings,
-          `Terminal event could not be delivered. code=${code}`
+          `Terminal event could not be delivered. code=${result.code}; originalEvent=${event.type}; originalStatus=${originalStatus}`
         ]
       }
     },
-    message: "terminal fallback event publish failed"
+    fallbackWarnings,
+    isFallback: true
   });
+}
+
+function redactChunkSafely({
+  chunk,
+  logger,
+  runId,
+  stream
+}: {
+  chunk: string;
+  logger?: RunManagerLogger;
+  runId: string;
+  stream: "stdout" | "stderr";
+}): string {
+  try {
+    return redact(chunk);
+  } catch (error) {
+    logger?.error(
+      {
+        runId,
+        stream,
+        code: errorCode(error),
+        err: error instanceof Error ? error.message : String(error)
+      },
+      "run stream redaction failed"
+    );
+    return "[redaction failed]\n";
+  }
 }
 
 export function createRunManager({
@@ -297,6 +347,24 @@ export function createRunManager({
 
     const logStreams = await artifactsStore.openLogStreams(paths.stdoutLog, paths.stderrLog);
     const logWriter = createLogWriteTracker({ logStreams, logger, runId });
+    const streamPublishFailures: Record<"stdout" | "stderr", { count: number; codes: Set<string> }> = {
+      stdout: { count: 0, codes: new Set() },
+      stderr: { count: 0, codes: new Set() }
+    };
+    const recordStreamPublishFailure = (stream: "stdout" | "stderr", result: PublishResult): void => {
+      if (result.ok) return;
+      streamPublishFailures[stream].count += 1;
+      streamPublishFailures[stream].codes.add(result.code);
+    };
+    const flushStreamPublishWarnings = (): string[] =>
+      (["stdout", "stderr"] as const).flatMap((stream) => {
+        const failure = streamPublishFailures[stream];
+        if (failure.count === 0) return [];
+        const codes = Array.from(failure.codes).join(",");
+        return [
+          `${stream} websocket delivery failed; persisted log may contain additional output. codes=${codes}; failures=${failure.count}`
+        ];
+      });
 
     let runningMetadata: RunMetadata;
     let handle;
@@ -325,24 +393,26 @@ export function createRunManager({
         },
         {
           onStdout: (chunk) => {
-            const safe = redact(chunk);
+            const safe = redactChunkSafely({ chunk, logger, runId, stream: "stdout" });
             logWriter.write("stdout", safe);
-            publishEventSafely({
+            const result = publishEventSafely({
               bus,
               logger,
               event: { type: "run.stdout", runId, payload: { chunk: safe } },
               message: "run stdout event publish failed"
             });
+            recordStreamPublishFailure("stdout", result);
           },
           onStderr: (chunk) => {
-            const safe = redact(chunk);
+            const safe = redactChunkSafely({ chunk, logger, runId, stream: "stderr" });
             logWriter.write("stderr", safe);
-            publishEventSafely({
+            const result = publishEventSafely({
               bus,
               logger,
               event: { type: "run.stderr", runId, payload: { chunk: safe } },
               message: "run stderr event publish failed"
             });
+            recordStreamPublishFailure("stderr", result);
           }
         }
       );
@@ -406,6 +476,7 @@ export function createRunManager({
         const warnings = [
           ...runningMetadata.warnings,
           ...logWriteWarnings,
+          ...flushStreamPublishWarnings(),
           ...(summary?.warnings ?? [])
         ];
         if (redactionWarning) warnings.push(redactionWarning);
@@ -426,46 +497,49 @@ export function createRunManager({
         await artifactsStore.writeMetadata(paths.metadataJson, completed);
 
         // terminal event ごとに payload shape が異なるため、summary/message の混在をここで防ぐ。
-        const terminalPayload =
+        const terminalEvent: TerminalPublishInput =
           outcome.status === "cancelled"
             ? {
-                exitCode: outcome.exitCode,
-                signal: outcome.signal,
-                status: "cancelled" as const,
-                durationMs: outcome.durationMs,
-                warnings
-              }
-            : outcome.status === "error"
-              ? {
-                  message: "Run completed with error status.",
+                type: "run.cancelled",
+                runId,
+                payload: {
                   exitCode: outcome.exitCode,
                   signal: outcome.signal,
-                  status: "error" as const,
+                  status: "cancelled",
                   durationMs: outcome.durationMs,
                   warnings
                 }
+              }
+            : outcome.status === "error"
+              ? {
+                  type: "run.error",
+                  runId,
+                  payload: {
+                    message: "Run completed with error status.",
+                    exitCode: outcome.exitCode,
+                    signal: outcome.signal,
+                    status: "error",
+                    durationMs: outcome.durationMs,
+                    warnings
+                  }
+                }
               : {
-                  exitCode: outcome.exitCode,
-                  signal: outcome.signal,
-                  status: outcome.status,
-                  durationMs: outcome.durationMs,
-                  summary: summary?.summary,
-                  warnings
+                  type: "run.completed",
+                  runId,
+                  payload: {
+                    exitCode: outcome.exitCode,
+                    signal: outcome.signal,
+                    status: outcome.status === "passed" ? "passed" : "failed",
+                    durationMs: outcome.durationMs,
+                    summary: summary?.summary,
+                    warnings
+                  }
                 };
         publishTerminalEventSafely({
           bus,
           logger,
           fallbackWarnings: warnings,
-          event: {
-            type:
-              outcome.status === "cancelled"
-                ? "run.cancelled"
-                : outcome.status === "error"
-                  ? "run.error"
-                  : "run.completed",
-            runId,
-            payload: terminalPayload
-          }
+          event: terminalEvent
         });
         active.delete(runId);
         return completed;
@@ -481,6 +555,7 @@ export function createRunManager({
           warnings: [
             ...runningMetadata.warnings,
             ...logWriteWarnings,
+            ...flushStreamPublishWarnings(),
             `Runner failed after spawn. code=${errorCode(error)}`
           ]
         };

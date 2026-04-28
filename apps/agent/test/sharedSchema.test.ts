@@ -7,6 +7,7 @@ import {
   RunQueuedPayloadSchema,
   RunStartedPayloadSchema,
   SnapshotPayloadSchema,
+  WorkbenchEventSchema,
   terminalStatusMatchesEvent
 } from "@pwqa/shared";
 
@@ -164,5 +165,24 @@ describe("shared run warning schemas", () => {
     expect(terminalStatusMatchesEvent("run.completed", "error")).toBe(false);
     expect(terminalStatusMatchesEvent("run.cancelled", "cancelled")).toBe(true);
     expect(terminalStatusMatchesEvent("run.error", "error")).toBe(true);
+  });
+
+  it("rejects mismatched event type and payload combinations at the envelope boundary", () => {
+    expect(() =>
+      WorkbenchEventSchema.parse({
+        type: "run.completed",
+        sequence: 1,
+        timestamp: "2026-04-28T00:00:00.000Z",
+        runId: "run-1",
+        payload: {
+          message: "invalid combination",
+          exitCode: null,
+          signal: null,
+          status: "error",
+          durationMs: 1,
+          warnings: []
+        }
+      })
+    ).toThrow();
   });
 });

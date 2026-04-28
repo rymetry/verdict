@@ -10,7 +10,7 @@
 //  - WS envelope の parse 失敗は events.ts 側で console.error する。
 //  - **payload 内側** (RunStdStreamPayload / RunTerminalPayload) の schema 不一致と
 //    terminal event type/status の不一致は本ファイルの applyEvent で `console.error` する
-//    (envelope の `payload: z.unknown()` ゆえ events.ts では検知できない経路を本層で塞ぐ)。
+//    (古い Agent や再接続履歴が壊れた payload を届けた場合の防御層)。
 //  - state listener 内 throw は events.ts 側で握り潰さず log する。
 import * as React from "react";
 import {
@@ -102,6 +102,15 @@ function parseTerminalPayload(event: WorkbenchEvent): TerminalPayloadParseResult
     };
   }
   return { ok: true, payload: parsed.data };
+}
+
+function logTerminalPayloadMismatch(event: WorkbenchEvent, parsed: Exclude<TerminalPayloadParseResult, { ok: true }>): void {
+  const label =
+    parsed.reason === "event-type-mismatch"
+      ? "payload event/status mismatch"
+      : "payload schema mismatch";
+  // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
+  console.error(`[RunConsole] ${event.type} ${label}`, parsed.issues);
 }
 
 export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React.ReactElement {
@@ -236,8 +245,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       // payload が壊れても cancelled/error と誤認せず、この event は error fallback に留める。
       const parsed = parseTerminalPayload(event);
       if (!parsed.ok) {
-        // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
-        console.error("[RunConsole] run.completed payload schema mismatch", parsed.issues);
+        logTerminalPayloadMismatch(event, parsed);
       }
       const payload =
         parsed.ok && (parsed.payload.status === "passed" || parsed.payload.status === "failed")
@@ -265,8 +273,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       // を補うためだけに使い、schema 不一致はログに残して既存 state を保つ。
       const parsed = parseTerminalPayload(event);
       if (!parsed.ok) {
-        // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
-        console.error("[RunConsole] run.cancelled payload schema mismatch", parsed.issues);
+        logTerminalPayloadMismatch(event, parsed);
       }
       const payload = parsed.ok ? parsed.payload : null;
       return {
@@ -280,8 +287,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       // ユーザー向け詳細は sanitized warnings に限定する。
       const parsed = parseTerminalPayload(event);
       if (!parsed.ok) {
-        // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
-        console.error("[RunConsole] run.error payload schema mismatch", parsed.issues);
+        logTerminalPayloadMismatch(event, parsed);
       }
       const payload = parsed.ok ? parsed.payload : null;
       return {
@@ -298,7 +304,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
     default: {
       // exhaustiveness: WorkbenchEvent に新 type が追加された際に compile error で気付く。
       // ランタイムにここへ来たら schema 拡張漏れが本番で起きているので痕跡を残す。
-      const _exhaustive: never = event.type;
+      const _exhaustive: never = event;
       // eslint-disable-next-line no-console -- 未対応 event type を本番でも検知
       console.warn("[RunConsole] unhandled event type", _exhaustive);
       return state;

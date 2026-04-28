@@ -147,8 +147,8 @@ function attachWebSocket(
                 payload
               } satisfies WorkbenchEvent)
             );
-          } catch {
-            // socket already closed before snapshot could be delivered
+          } catch (error) {
+            logger.debug({ err: error }, "snapshot publish failed");
           }
         },
         onClose() {

@@ -1,17 +1,18 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { unsafelyAllowAnyArgsValidator } from "../src/commands/policy.js";
 import { createNodeCommandRunner } from "../src/commands/runner.js";
-import { createEventBus } from "../src/events/bus.js";
+import { createEventBus, type EventBus } from "../src/events/bus.js";
 import { createRunManager } from "../src/playwright/runManager.js";
 import { runArtifactsStore } from "../src/playwright/runArtifactsStore.js";
 import {
   RunCompletedPayloadSchema,
   RunErrorPayloadSchema,
   type DetectedPackageManager,
-  type WorkbenchEvent
+  type WorkbenchEvent,
+  type WorkbenchEventInput
 } from "@pwqa/shared";
 
 let workdir: string;
@@ -311,15 +312,17 @@ describe("RunManager", () => {
     expect(errors).toHaveLength(3);
   });
 
-  it("does not let stdout publish validation failures escape runner callbacks", async () => {
-    const published: Array<Omit<WorkbenchEvent, "sequence" | "timestamp">> = [];
-    const bus = {
-      publish(event: Omit<WorkbenchEvent, "sequence" | "timestamp">) {
+  it("does not let stream publish validation failures escape runner callbacks", async () => {
+    const published: WorkbenchEventInput[] = [];
+    const bus: EventBus = {
+      publish(event: WorkbenchEventInput) {
         published.push(event);
-        if (event.type === "run.stdout") {
-          throw new Error("invalid stdout payload");
+        if (event.type === "run.stdout" || event.type === "run.stderr") {
+          throw Object.assign(new Error(`invalid ${event.type} payload`), {
+            code: "PAYLOAD_VALIDATION_FAILED"
+          });
         }
-        return { ...event, sequence: published.length, timestamp: new Date().toISOString() };
+        return { ...event, sequence: published.length, timestamp: new Date().toISOString() } as WorkbenchEvent;
       },
       subscribe() {
         return () => undefined;
@@ -330,8 +333,12 @@ describe("RunManager", () => {
     };
     const runner = {
       run(_spec: unknown, handlers = {}) {
-        const streamHandlers = handlers as { onStdout?: (chunk: string) => void };
+        const streamHandlers = handlers as {
+          onStdout?: (chunk: string) => void;
+          onStderr?: (chunk: string) => void;
+        };
         expect(() => streamHandlers.onStdout?.("hello")).not.toThrow();
+        expect(() => streamHandlers.onStderr?.("warn")).not.toThrow();
         return {
           result: Promise.resolve({
             exitCode: 0,
@@ -340,7 +347,7 @@ describe("RunManager", () => {
             endedAt: new Date().toISOString(),
             durationMs: 1,
             stdout: "hello",
-            stderr: "",
+            stderr: "warn",
             cancelled: false,
             timedOut: false,
             command: { executable: "node", args: [], cwd: workdir }
@@ -375,24 +382,31 @@ describe("RunManager", () => {
     const completed = await handle.finished;
 
     expect(completed.status).toBe("passed");
-    expect(errors).toEqual([
+    expect(completed.warnings.join("\n")).toContain("stdout websocket delivery failed");
+    expect(completed.warnings.join("\n")).toContain("stderr websocket delivery failed");
+    expect(errors).toEqual(expect.arrayContaining([
       expect.objectContaining({
         runId: handle.runId,
         eventType: "run.stdout",
-        code: "UNKNOWN"
+        code: "PAYLOAD_VALIDATION_FAILED"
+      }),
+      expect.objectContaining({
+        runId: handle.runId,
+        eventType: "run.stderr",
+        code: "PAYLOAD_VALIDATION_FAILED"
       })
-    ]);
+    ]));
   });
 
   it("emits a sanitized run.error fallback when terminal completion publish fails", async () => {
-    const published: Array<Omit<WorkbenchEvent, "sequence" | "timestamp">> = [];
-    const bus = {
-      publish(event: Omit<WorkbenchEvent, "sequence" | "timestamp">) {
+    const published: WorkbenchEventInput[] = [];
+    const bus: EventBus = {
+      publish(event: WorkbenchEventInput) {
         published.push(event);
         if (event.type === "run.completed") {
           throw new Error("terminal schema drift at /private/path");
         }
-        return { ...event, sequence: published.length, timestamp: new Date().toISOString() };
+        return { ...event, sequence: published.length, timestamp: new Date().toISOString() } as WorkbenchEvent;
       },
       subscribe() {
         return () => undefined;
@@ -444,8 +458,139 @@ describe("RunManager", () => {
     expect(fallback).toBeDefined();
     const payload = RunErrorPayloadSchema.parse(fallback?.payload);
     expect(payload.message).toBe("Terminal event could not be delivered.");
-    expect(payload.warnings.join("\n")).toContain("Terminal event could not be delivered. code=UNKNOWN");
+    expect(payload.warnings.join("\n")).toContain(
+      "Terminal event could not be delivered. code=UNKNOWN; originalEvent=run.completed; originalStatus=passed"
+    );
     expect(payload.warnings.join("\n")).not.toContain("/private/path");
+  });
+
+  it("falls back even when the original terminal event is run.error", async () => {
+    let firstRunError = true;
+    const published: WorkbenchEventInput[] = [];
+    const bus: EventBus = {
+      publish(event: WorkbenchEventInput) {
+        published.push(event);
+        if (event.type === "run.error" && firstRunError) {
+          firstRunError = false;
+          throw Object.assign(new Error("invalid original run.error"), {
+            code: "PAYLOAD_VALIDATION_FAILED"
+          });
+        }
+        return { ...event, sequence: published.length, timestamp: new Date().toISOString() } as WorkbenchEvent;
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      snapshot() {
+        return [];
+      }
+    };
+    const runner = {
+      run() {
+        return {
+          result: Promise.resolve({
+            exitCode: 1,
+            signal: null,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            durationMs: 1,
+            stdout: "",
+            stderr: "",
+            cancelled: false,
+            timedOut: true,
+            command: { executable: "node", args: [], cwd: workdir }
+          }),
+          cancel() {}
+        };
+      }
+    };
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      reportProvider: {
+        name: "test-provider",
+        async readSummary() {
+          return undefined;
+        }
+      }
+    });
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: fakePackageManager(),
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+
+    expect(completed.status).toBe("error");
+    const runErrors = published.filter((event) => event.type === "run.error");
+    expect(runErrors).toHaveLength(2);
+    const payload = RunErrorPayloadSchema.parse(runErrors[1]?.payload);
+    expect(payload.warnings.join("\n")).toContain(
+      "Terminal event could not be delivered. code=PAYLOAD_VALIDATION_FAILED; originalEvent=run.error; originalStatus=error"
+    );
+  });
+
+  it("emits a process warning when original and fallback terminal publishes both fail", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const bus: EventBus = {
+      publish(event: WorkbenchEventInput) {
+        if (event.type === "run.completed" || event.type === "run.error") {
+          throw Object.assign(new Error("publish unavailable"), {
+            code: "PAYLOAD_VALIDATION_FAILED"
+          });
+        }
+        return { ...event, sequence: 1, timestamp: new Date().toISOString() } as WorkbenchEvent;
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      snapshot() {
+        return [];
+      }
+    };
+    const runner = {
+      run() {
+        return {
+          result: Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            durationMs: 1,
+            stdout: "",
+            stderr: "",
+            cancelled: false,
+            timedOut: false,
+            command: { executable: "node", args: [], cwd: workdir }
+          }),
+          cancel() {}
+        };
+      }
+    };
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      reportProvider: {
+        name: "test-provider",
+        async readSummary() {
+          return undefined;
+        }
+      }
+    });
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: fakePackageManager(),
+      request: { projectId: workdir, headed: false }
+    });
+    await expect(handle.finished).resolves.toEqual(expect.objectContaining({ status: "passed" }));
+
+    expect(emitWarning).toHaveBeenCalledWith("Terminal fallback event publish failed", {
+      code: "PWQA_TERMINAL_FALLBACK_PUBLISH_FAILED"
+    });
   });
 
   it("keeps websocket stdout delivery when real runner log persistence fails", async () => {

@@ -9,6 +9,7 @@ import {
   createDefaultCommandPolicy,
   type CommandPolicy
 } from "../src/commands/policy.js";
+import { PlaywrightCommandBuildError } from "../src/playwright/builder.js";
 import type { DetectedPackageManager, ProjectSummary } from "@pwqa/shared";
 
 let workdir: string;
@@ -336,6 +337,35 @@ describe("HTTP API surface", () => {
     expect(response.status).toBe(400);
     expect(body.error.code).toBe("RUN_COMMAND_REJECTED");
     expect(body.error.message).toBe("Runner rejected the command before spawn.");
+    expect(body.error.message).not.toContain(workdir);
+  });
+
+  it("maps command build startup failures to a sanitized HTTP code", async () => {
+    const packageManager = fakePackageManager({ executable: process.execPath, args: ["-e", ""] });
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      },
+      policyFactory: () => {
+        throw new PlaywrightCommandBuildError(`specPath escaped through ${workdir}`, "INVALID_SPEC_PATH");
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir, packageManager), packageManager });
+
+    const response = await app.request("/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: workdir, headed: false })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("RUN_COMMAND_BUILD_FAILED");
+    expect(body.error.message).toBe("Run command could not be built from the request.");
     expect(body.error.message).not.toContain(workdir);
   });
 
