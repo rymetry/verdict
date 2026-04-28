@@ -8,9 +8,13 @@ import { Brand } from "@/components/shell/Brand";
 afterEach(() => cleanup());
 
 describe("Brand", () => {
-  it("ブランド名を表示する", () => {
+  it("ブランド名を h1 として表示する (app-shell の heading 階層 root)", () => {
+    // ζ で Brand を h1 に昇格 (Issue #13 受け入れ条件 \"h1 (Chrome) → h2 (main) → h3 (cards)\" 準拠)。
+    // この heading は app-shell に常駐するため、各 view 内では h2 以下から始める。
     render(<Brand version="9.9.9" />);
-    expect(screen.getByText("Playwright Workbench")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Playwright Workbench" })
+    ).toBeInTheDocument();
   });
 
   it("version prop が与えられたら brand-sub に反映する", () => {

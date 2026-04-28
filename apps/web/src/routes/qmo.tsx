@@ -5,9 +5,9 @@
 // 設計判断:
 //  - `data-testid="qmo-view"` は γ で導入された router test の identifier を維持
 //    (パス segment は当面 `/qmo` のまま。`/insights` への rename は Issue #10 やること欄で別途議論)。
-//  - Section の `aria-label="Insights View"` を維持 (router test の
-//    `getByText(/Insights View/)` 文字列 assertion 互換のため visible heading は持たないが、
-//    aria-label で AT に view 名を伝える。文言を変える場合は router.test.tsx も同時更新)。
+//  - Section の `aria-label="Insights View"` で AT に view 名を伝える。router test では
+//    `toHaveAttribute("aria-label", "Insights View")` でこの contract を pin している
+//    (apps/web/test/routes/router.test.tsx の `/qmo` ケース)。文言を変える場合は同 test も同時更新。
 //  - Phase 1 placeholder fixture は `features/insights-view/placeholder-data.ts` から
 //    明示的に import して props で InsightsView に渡す。Phase 1.2 でこの import を削除して
 //    `useInsightsSummary()` 戻り値を渡せば silent fallback は構造上発生しない。

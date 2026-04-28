@@ -4,9 +4,17 @@
 //  - lg breakpoint 以上で main (1fr) + side (360px) の 2-col
 //  - lg 未満は 1 列に折り返し (mobile / narrow viewport)
 //  - main 内部は縦積み (Hero → 3-card row → AI summary)
-//  - heading 階層: TopBar h1 → main の `<h2>Insights</h2>` の代わりに Hero の h1 を main entry とする。
-//    Issue #13 受け入れ条件は "h1 (Chrome) → h2 (Insights main) → h3 (cards)"。
-//    本実装では main 内部で `<h2>` を sr-only で配置し、視覚的には Hero h1 + heading 階層を AT に伝える。
+//
+// heading 階層 (Issue #13 受け入れ条件 \"h1 (Chrome) → h2 (Insights main) → h3 (cards)\"):
+//  - h1: TopBar の Brand "Playwright Workbench" (app-shell に常駐)
+//  - h2: InsightsHero "Release Readiness" (本 view の main entry)
+//  - h3: 各 card (重大な失敗 / 既知の問題 / Top Flaky / AI / Quality Gate / Allure / Recent runs) = 7 件
+//
+// shadcn primitives 採用方針 (Issue #13 受け入れ条件):
+//  - Card / Badge / Button / Tooltip を使用。
+//  - Tabs は本 view の static layout (Hero + 3-card grid + AI + sidebar) に視覚的に必要な分岐がなく、
+//    挿入すると UX が損なわれるため意図的に省略。Phase 1.2 で「Allure サマリ / 履歴 / Trend」を切り替える
+//    ようなフィルタ UI が必要になったタイミングで Tabs primitive を導入する想定。
 //
 // Phase 1.2 で実データ接続する際:
 //  - `useInsightsSummary()` hook (TanStack Query 5 秒 polling) の戻り値を本 Component の Props に渡す
@@ -33,8 +41,6 @@ export function InsightsView({ summary }: InsightsViewProps): React.ReactElement
         className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"
       >
         <main aria-label="Insights main" className="flex flex-col gap-4">
-          {/* h2 を sr-only で置き、heading hierarchy h1 → h2 → h3 を AT に伝える */}
-          <h2 className="sr-only">Insights</h2>
           <InsightsHero readiness={summary.readiness} stats={summary.stats} />
           <MainCardsRow
             criticalFailures={summary.criticalFailures}

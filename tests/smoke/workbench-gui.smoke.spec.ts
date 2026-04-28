@@ -9,7 +9,7 @@
  *
  * δ (Issue #11) で QA View が Tailwind/shadcn 化されたため、UI 文字列の
  * 検証ポイントを新 design system に合わせて更新している:
- *  - "Playwright Workbench" は h1 ではなく Brand コンポーネント (div) に移った
+ *  - "Playwright Workbench" は ζ で Brand コンポーネント内の <h1> に再昇格 (heading hierarchy 整合)
  *  - "Open" は shadcn Button (role=button, name="Open")
  *  - "Ready" は ProjectPicker の Badge (text 検索で十分)
  *  - StatusBar に WebSocket 接続状態 ("WS · Connected" 等) が常時表示される

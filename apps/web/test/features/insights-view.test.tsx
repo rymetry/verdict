@@ -3,12 +3,13 @@
 // pin する内容:
 //  - 4 main セクション (Hero / 3-card row / AI summary / Sidebar) が DOM に存在
 //  - Phase 1.2 で接続予定 badge 数 (badge を Phase 1.2 で外し忘れた regression を検出)
-//  - heading 階層 h2 (sr-only "Insights") + h1 (Hero) + 各 card の h3
+//  - heading 階層: h2 (Hero "Release Readiness") + 各 card の h3
+//    (h1 は app-shell の TopBar Brand 内に存在し、本 view test の責務外)
 //  - "すべて表示" / "フルレポート" は disabled button + tooltip "Phase 1.2 で接続予定"
-//  - Hero の progress bar が aria-valuenow=score を持つ
-//  - data-rule-status / data-run-status / data-run-trend で test を class 文字列に couple させない
+//  - Hero の progress bar が aria-valuemin/valuemax/valuenow を持ち NaN/Infinity を 0 に丸める
+//  - data-verdict / data-rule-status / data-run-status / data-run-trend で test を class 文字列に couple させない
 //  - 各 Card Props を空配列で override しても crash しない (defensive rendering)
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -26,6 +27,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 function renderWithTooltip(ui: React.ReactElement): void {
@@ -42,22 +44,25 @@ describe("InsightsView (composer)", () => {
     expect(screen.getByTestId("insights-sidebar")).toBeInTheDocument();
   });
 
-  it("heading 階層が h1 (Hero) → h2 (sr-only Insights) → h3 (各 card) で構造化される", () => {
+  it("heading 階層が h2 (Hero) → h3 (各 card 7 件) で構造化される", () => {
+    // app-shell の TopBar Brand が h1 ("Playwright Workbench") を持つため、本 view 内の
+    // entry heading は h2 (Hero "Release Readiness") から始まる。各 card は h3 で 7 件
+    // (3 main cards: Critical / Known / Flaky + AI summary + 3 sidebar: Quality Gate / Allure / Recent runs)。
     render(<InsightsView summary={SAMPLE_INSIGHTS} />);
-    // h1: Hero "Release Readiness"
-    expect(screen.getByRole("heading", { level: 1, name: INSIGHTS_VIEW_LABELS.hero })).toBeInTheDocument();
-    // h2: sr-only "Insights" (visually hidden but in DOM as heading)
-    expect(screen.getByRole("heading", { level: 2, name: "Insights" })).toBeInTheDocument();
-    // h3: 7 件 (3 main cards + AI summary + 3 sidebar cards)
+    // h2: Hero "Release Readiness"
+    expect(
+      screen.getByRole("heading", { level: 2, name: INSIGHTS_VIEW_LABELS.hero })
+    ).toBeInTheDocument();
+    // h3: 7 件
     const h3s = screen.getAllByRole("heading", { level: 3 });
     expect(h3s).toHaveLength(7);
   });
 
-  it("Phase 1.2 で接続予定 badge が 6 つ存在する (Hero + Critical + Known + Flaky + AI + 何もなし sidebar)", () => {
-    // 内訳: Hero (1) + Critical (1) + Known (1) + Flaky (1) + AI (1) + sidebar disabled tooltip 内容 = 5
-    // sidebar の Allure / RecentRuns の "Phase 1.2 で接続予定" は Tooltip content として
-    // 開いていない時は DOM に出ない (Radix Tooltip は portal で開く)。本 assertion は visible badges のみ pin。
-    // Hero, Critical, Known, Flaky, AI = 5 個の visible Badge。
+  it("Phase 1.2 で接続予定 badge が 5 つ visible で存在する", () => {
+    // 内訳: Hero (1) + Critical (1) + Known (1) + Flaky (1) + AI (1) = 5。
+    // sidebar (Allure / RecentRuns) の "Phase 1.2 で接続予定" は Tooltip content として
+    // portal 経由で開いた時のみ DOM に現れるため、本 visible-only assertion からは外れる。
+    // 個別の sidebar tooltip 動作は SidebarPanels describe ブロックで pin する。
     render(<InsightsView summary={SAMPLE_INSIGHTS} />);
     const badges = screen.getAllByText(PHASE_1_2_PLACEHOLDER_LABEL);
     expect(badges).toHaveLength(5);
@@ -65,7 +70,7 @@ describe("InsightsView (composer)", () => {
 });
 
 describe("InsightsHero", () => {
-  it("score / verdict badge / progress bar / 5 stats を描画する", () => {
+  it("score / verdict badge / progress bar (aria-valuemin/max/now) / 5 stats を描画する", () => {
     renderWithTooltip(
       <InsightsHero
         readiness={SAMPLE_INSIGHTS.readiness}
@@ -75,19 +80,18 @@ describe("InsightsHero", () => {
     const hero = screen.getByTestId("insights-hero");
     expect(within(hero).getByText("86")).toBeInTheDocument();
     expect(within(hero).getByText("/ 100")).toBeInTheDocument();
-    // verdict badge
     expect(within(hero).getByText("Ready")).toBeInTheDocument();
-    // progress bar with aria-valuenow=86
+    // progress bar の 3 属性すべて pin
     const progressBar = within(hero).getByRole("progressbar");
-    expect(progressBar).toHaveAttribute("aria-valuenow", "86");
+    expect(progressBar).toHaveAttribute("aria-valuemin", "0");
     expect(progressBar).toHaveAttribute("aria-valuemax", "100");
-    // 5 stats
-    expect(within(hero).getByText("Total")).toBeInTheDocument();
+    expect(progressBar).toHaveAttribute("aria-valuenow", "86");
+    // 5 stats が定義順 (Total / Passed / Failed / Flaky / Skipped) で並ぶ
+    const statLabels = hero.querySelectorAll("[data-stat-label]");
+    expect(
+      Array.from(statLabels).map((el) => el.getAttribute("data-stat-label"))
+    ).toEqual(["Total", "Passed", "Failed", "Flaky", "Skipped"]);
     expect(within(hero).getByText("2,842")).toBeInTheDocument();
-    expect(within(hero).getByText("Passed")).toBeInTheDocument();
-    expect(within(hero).getByText("Failed")).toBeInTheDocument();
-    expect(within(hero).getByText("Flaky")).toBeInTheDocument();
-    expect(within(hero).getByText("Skipped")).toBeInTheDocument();
   });
 
   it("score < 0 / > 100 は 0〜100 に clamp される", () => {
@@ -119,20 +123,64 @@ describe("InsightsHero", () => {
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
   });
 
-  it("verdict は data-verdict 属性で expose され class 文字列に依存しない", () => {
+  it("score=NaN / Infinity は 0 として扱われ aria-valuenow が 'NaN' で壊れない + console.error が残る", () => {
+    // silent failure 防衛: API/AI が非 finite な数値を返した時に UI が「0 と区別不能」で
+    // silent に偽装されないよう、console.error で痕跡を残す invariant を pin。
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    renderWithTooltip(
+      <InsightsHero
+        readiness={{ score: NaN, verdict: "not-ready", versionLabel: "v1.0", description: "" }}
+        stats={SAMPLE_INSIGHTS.stats}
+      />
+    );
+    const bar1 = screen.getByRole("progressbar");
+    expect(bar1).toHaveAttribute("aria-valuenow", "0");
+    expect(bar1.getAttribute("aria-valuenow")).not.toBe("NaN");
+
+    cleanup();
+
     renderWithTooltip(
       <InsightsHero
         readiness={{
-          score: 50,
-          verdict: "conditional",
+          score: Number.POSITIVE_INFINITY,
+          verdict: "ready",
           versionLabel: "v1.0",
-          description: "test"
+          description: ""
         }}
         stats={SAMPLE_INSIGHTS.stats}
       />
     );
-    const verdictBadge = screen.getByText("Conditional");
-    expect(verdictBadge).toHaveAttribute("data-verdict", "conditional");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[InsightsHero] readiness.score is not a finite number",
+      expect.anything()
+    );
+  });
+
+  it("verdict 3 種 (ready / conditional / not-ready) すべてが data-verdict で pin される", () => {
+    const verdicts: ReadonlyArray<{ value: "ready" | "conditional" | "not-ready"; label: string }> = [
+      { value: "ready", label: "Ready" },
+      { value: "conditional", label: "Conditional" },
+      { value: "not-ready", label: "Not Ready" }
+    ];
+    for (const { value, label } of verdicts) {
+      cleanup();
+      renderWithTooltip(
+        <InsightsHero
+          readiness={{
+            score: 50,
+            verdict: value,
+            versionLabel: "v1.0",
+            description: "test"
+          }}
+          stats={SAMPLE_INSIGHTS.stats}
+        />
+      );
+      const verdictBadge = screen.getByText(label);
+      expect(verdictBadge).toHaveAttribute("data-verdict", value);
+    }
   });
 });
 
@@ -288,6 +336,27 @@ describe("SidebarPanels", () => {
     const fullReport = screen.getByTestId("insights-allure-full-report");
     expect(fullReport).toBeDisabled();
     await user.hover(fullReport);
+    expect(
+      await screen.findByText(PHASE_1_2_PLACEHOLDER_LABEL, {
+        selector: "[role='tooltip']"
+      })
+    ).toBeInTheDocument();
+  });
+
+  it("最近の Run の \"すべて表示\" button も disabled で Phase 1.2 接続予定 tooltip を持つ", async () => {
+    // Phase 1.2 で sidebar の placeholder を外し忘れた regression を pin する。
+    // Allure と同じ contract で動くことを確認。
+    const user = userEvent.setup();
+    renderWithTooltip(
+      <SidebarPanels
+        qualityGate={SAMPLE_INSIGHTS.qualityGate}
+        allureSummary={SAMPLE_INSIGHTS.allureSummary}
+        recentRuns={SAMPLE_INSIGHTS.recentRuns}
+      />
+    );
+    const showAll = screen.getByTestId("insights-recent-runs-show-all");
+    expect(showAll).toBeDisabled();
+    await user.hover(showAll);
     expect(
       await screen.findByText(PHASE_1_2_PLACEHOLDER_LABEL, {
         selector: "[role='tooltip']"

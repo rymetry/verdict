@@ -8,7 +8,7 @@
 //
 // 設計判断 (Issue #13 受け入れ条件):
 //  - Issue は \"disabled button + tooltip 'Phase 1.2 で接続予定'\" を要求 → shadcn Tooltip 経由で配線
-//  - h3 / count / disabled button の順は a11y reading order を意図 (count → action)
+//  - reading order は h3 → count → Phase 1.2 badge → disabled button (内容 → 状態通知 → action)
 import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -35,8 +35,10 @@ interface MainCardsRowProps {
  * Issue #13 で dead link 禁止が明示されているため、href を持つ <a> ではなく
  * disabled button + Tooltip でユーザに「Phase 1.2 で接続予定」と伝える。
  *
- * 注意: <button disabled> は Radix Tooltip でホバー検知できないため、wrapper <span>
- * (`tabIndex={0}` で keyboard focusable) で囲む。これは Radix の推奨パターン。
+ * 注意: <button disabled> は pointer events を発火しないため、Radix Tooltip の
+ * `asChild` Trigger に直接渡しても hover/focus を検知できない。focusable な wrapper
+ * `<span tabIndex={0}>` で囲む既知のワークアラウンドを用いる
+ * (radix-ui/primitives で議論されているコミュニティ標準対応)。
  */
 function ShowAllPlaceholder({ id }: { id: string }): React.ReactElement {
   return (

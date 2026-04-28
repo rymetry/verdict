@@ -1,6 +1,9 @@
 // app-shell (top bar) 左側のブランド表示。
 // - "P" 角丸 mark + ブランド名 + バージョン (vite define で `__APP_VERSION__` を注入)
 // - シンボル color は `--cta` を使う (light/dark 横断で同じダーク緑、ブランド一貫性)
+// - ブランド名 "Playwright Workbench" は app-shell 全体の <h1> として配置 (heading 階層
+//   h1 (Chrome) → h2 (各 view main) → h3 (各 card) のルート位置)。視覚的にも常に最上位
+//   要素なので semantic と一致する。
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
@@ -37,9 +40,9 @@ export function Brand({
         P
       </span>
       <div className="leading-tight">
-        <div className="text-sm font-semibold text-[var(--ink-0)] tracking-tight">
+        <h1 className="text-sm font-semibold text-[var(--ink-0)] tracking-tight">
           Playwright Workbench
-        </div>
+        </h1>
         <span className="mt-px block text-[10px] text-[var(--ink-3)] font-mono">
           v{version} · {environmentLabel}
         </span>

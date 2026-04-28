@@ -1,6 +1,9 @@
 // Insights View Hero: Release Readiness 表示。
 //
-// h1 を 1 つだけ持つ (Issue #13: heading 階層 h1 → h2 → h3 を担保)。
+// heading 階層 (Issue #13 受け入れ条件 \"h1 (Chrome) → h2 (Insights main) → h3 (cards)\"):
+//  - h1 は Chrome (TopBar の Brand 内 "Playwright Workbench") が持つ。
+//  - 本 Hero は main 直下の h2 (= Insights view の entry heading) として "Release Readiness" を表示。
+//  - 各 card (重大な失敗 / 既知の問題 / Top Flaky / AI / Quality Gate / Allure / Recent runs) は h3。
 // Phase 1.2 で実データに切り替える際は ReleaseReadiness を `useInsightsSummary().readiness` に置換。
 import * as React from "react";
 
@@ -35,7 +38,8 @@ const VERDICT_BADGE_VARIANT: Record<ReleaseVerdict, BadgeProps["variant"]> = {
   "not-ready": "fail"
 };
 
-// stat label ごとの色 token。色相分離は status badge と同じルール。
+// stat label ごとの色 token。色相分離 (pass=142° / fail=27° / flaky=80°) は色覚 only に
+// 依存しないアクセシビリティ原則に基づく (docs/design/concept-b-refined.html, Balanced Green tokens)。
 const STAT_NUM_CLASS: Record<RunStat["label"], string> = {
   Total: "text-[var(--ink-0)]",
   Passed: "text-[var(--pass)]",
@@ -48,16 +52,25 @@ export function InsightsHero({
   readiness,
   stats
 }: InsightsHeroProps): React.ReactElement {
-  const clampedScore = Math.max(0, Math.min(100, readiness.score));
+  // NaN / Infinity から UI を守る (silent failure 防衛: aria-valuenow="NaN" や width: NaN%
+  // で progress bar が壊れるのを防ぎ、Phase 1.2 で API/AI が finite でない値を返した場合に
+  // 0 で扱われた事実を console.error で残す)。
+  const rawScore = readiness.score;
+  if (!Number.isFinite(rawScore)) {
+    // eslint-disable-next-line no-console -- score 異常を本番でも痕跡を残す (Phase 1.2 早期検出)
+    console.error("[InsightsHero] readiness.score is not a finite number", rawScore);
+  }
+  const safeScore = Number.isFinite(rawScore) ? rawScore : 0;
+  const clampedScore = Math.max(0, Math.min(100, safeScore));
 
   return (
     <Card data-testid="insights-hero" className="overflow-hidden">
       <CardContent className="flex flex-col gap-6 p-6 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight text-[var(--ink-0)]">
+            <h2 className="text-2xl font-semibold tracking-tight text-[var(--ink-0)]">
               {INSIGHTS_VIEW_LABELS.hero}
-            </h1>
+            </h2>
             <Badge variant="info">{PHASE_1_2_PLACEHOLDER_LABEL}</Badge>
           </div>
 
@@ -75,10 +88,11 @@ export function InsightsHero({
             </Badge>
           </div>
 
-          {/* progress bar: aria-valuenow で score を pin、視覚と同等の意味を AT に伝える */}
+          {/* progress bar: aria-valuenow で score を pin、視覚と同等の意味を AT に伝える。
+              aria-label は h2 と区別するため "score" suffix を付け、AT 上で重複読み上げを避ける。 */}
           <div
             role="progressbar"
-            aria-label={INSIGHTS_VIEW_LABELS.hero}
+            aria-label={`${INSIGHTS_VIEW_LABELS.hero} score`}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={clampedScore}
