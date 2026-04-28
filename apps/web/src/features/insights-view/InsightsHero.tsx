@@ -30,8 +30,8 @@ const VERDICT_LABEL: Record<ReleaseVerdict, string> = {
   "not-ready": "Not Ready"
 };
 
-// verdict ごとに Badge variant を分岐。
-// pass/fail の色相分離 (PLAN.v2 §17, oklch トークン) を維持する。
+// verdict ごとに Badge variant を分岐。pass / flaky / fail の色相分離は
+// docs/design/concept-b-refined.html (Balanced Green tokens) の方針を踏襲。
 const VERDICT_BADGE_VARIANT: Record<ReleaseVerdict, BadgeProps["variant"]> = {
   ready: "pass",
   conditional: "flaky",
