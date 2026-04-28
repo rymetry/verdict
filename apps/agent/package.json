@@ -7,6 +7,7 @@
     "dev": "pnpm --filter @pwqa/shared build && tsc -p tsconfig.json && node dist/server.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest"

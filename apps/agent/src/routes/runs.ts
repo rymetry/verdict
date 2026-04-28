@@ -6,18 +6,66 @@ import {
   type RunListResponse,
   type RunMetadata
 } from "@pwqa/shared";
-import type { RunManager } from "../playwright/runManager.js";
+import type { RunManager, RunManagerLogger } from "../playwright/runManager.js";
 import { mergeActiveAndPersistedRuns } from "../playwright/runManager.js";
 import type { ProjectStore } from "../project/store.js";
 import { apiError } from "../lib/apiError.js";
 import { pathExists } from "../lib/pathExists.js";
+import { CommandPolicyError } from "../commands/runner.js";
+import { PlaywrightCommandBuildError } from "../playwright/builder.js";
+import { AuditPersistenceError } from "../lib/errors.js";
+
+function errorCode(error: unknown): string {
+  if (error instanceof Error && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return "UNKNOWN";
+}
+
+/**
+ * Maps startup failures to stable public codes. Raw error messages stay in
+ * structured logs because they may include cwd, realpath, or secret-adjacent data.
+ */
+function startupFailureResponse(error: unknown): {
+  code: string;
+  message: string;
+  status: 400 | 500;
+} {
+  if (error instanceof PlaywrightCommandBuildError) {
+    return {
+      code: "RUN_COMMAND_BUILD_FAILED",
+      message: "Run command could not be built from the request.",
+      status: 400
+    };
+  }
+  if (error instanceof CommandPolicyError) {
+    return {
+      code: "RUN_COMMAND_REJECTED",
+      message: "Runner rejected the command before spawn.",
+      status: 400
+    };
+  }
+  if (error instanceof AuditPersistenceError) {
+    return {
+      code: "RUN_AUDIT_PERSIST_FAILED",
+      message: "Run could not start because audit logging failed.",
+      status: 500
+    };
+  }
+  return {
+    code: "RUN_START_FAILED",
+    message: "Run failed before it could be started.",
+    status: 500
+  };
+}
 
 interface Deps {
   projectStore: ProjectStore;
   runManager: RunManager;
+  logger?: RunManagerLogger;
 }
 
-export function runsRoutes({ projectStore, runManager }: Deps): Hono {
+export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
   const router = new Hono();
 
   router.post("/runs", async (c) => {
@@ -51,12 +99,16 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
       });
       return c.json({ runId: handle.runId, metadata: handle.metadata }, 202);
     } catch (error) {
-      return apiError(
-        c,
-        "RUN_FAILED",
-        error instanceof Error ? error.message : "Failed to start run",
-        500
+      logger?.error(
+        {
+          err: error instanceof Error ? error.message : String(error),
+          code: errorCode(error),
+          projectId: current.summary.id
+        },
+        "run start failed"
       );
+      const response = startupFailureResponse(error);
+      return apiError(c, response.code, response.message, response.status);
     }
   });
 
@@ -66,19 +118,19 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
       const empty: RunListResponse = { runs: [] };
       return c.json(empty);
     }
-    const runs = await mergeActiveAndPersistedRuns(runManager, current.summary.rootPath);
+    const runs = await mergeActiveAndPersistedRuns(runManager, current.summary.rootPath, logger);
     const listed: RunListItem[] = runs.map(toListItem);
     return c.json({ runs: listed } satisfies RunListResponse);
   });
 
   router.get("/runs/:runId", async (c) => {
-    const result = await loadRun(c, runManager, projectStore);
+    const result = await loadRun(c, runManager, projectStore, logger);
     if (!("run" in result)) return result.response;
     return c.json(result.run);
   });
 
   router.get("/runs/:runId/artifacts", async (c) => {
-    const result = await loadRun(c, runManager, projectStore);
+    const result = await loadRun(c, runManager, projectStore, logger);
     if (!("run" in result)) return result.response;
     const { run } = result;
     return c.json({
@@ -92,7 +144,7 @@ export function runsRoutes({ projectStore, runManager }: Deps): Hono {
   });
 
   router.get("/runs/:runId/report-summary", async (c) => {
-    const result = await loadRun(c, runManager, projectStore);
+    const result = await loadRun(c, runManager, projectStore, logger);
     if (!("run" in result)) return result.response;
     const { run } = result;
     if (!run.summary) {
@@ -132,7 +184,8 @@ function toListItem(run: RunMetadata): RunListItem {
     completedAt: run.completedAt,
     durationMs: run.durationMs,
     exitCode: run.exitCode ?? null,
-    summary: run.summary
+    summary: run.summary,
+    warnings: run.warnings
   };
 }
 
@@ -141,14 +194,15 @@ type LoadRunResult = { run: RunMetadata } | { response: Response };
 async function loadRun(
   c: Context,
   runManager: RunManager,
-  projectStore: ProjectStore
+  projectStore: ProjectStore,
+  logger?: RunManagerLogger
 ): Promise<LoadRunResult> {
   const runId = c.req.param("runId");
   const current = projectStore.get();
   if (!current) {
     return { response: apiError(c, "NO_PROJECT", "Project is not open.", 404) };
   }
-  const runs = await mergeActiveAndPersistedRuns(runManager, current.summary.rootPath);
+  const runs = await mergeActiveAndPersistedRuns(runManager, current.summary.rootPath, logger);
   const run = runs.find((entry) => entry.runId === runId);
   if (!run) {
     return { response: apiError(c, "NOT_FOUND", `Run ${runId} not found.`, 404) };

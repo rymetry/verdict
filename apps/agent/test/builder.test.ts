@@ -79,7 +79,7 @@ describe("buildPlaywrightTestCommand", () => {
         executableName: command.executable,
         args: command.args
       })
-    ).toBeNull();
+    ).toEqual({ ok: true });
   });
 
   it("rejects specPath that escapes the project root", () => {

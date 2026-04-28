@@ -8,14 +8,17 @@
 //
 // silent failure ガード:
 //  - WS envelope の parse 失敗は events.ts 側で console.error する。
-//  - **payload 内側** (RunStdStreamPayload / RunCompletedPayload) の schema 不一致は
-//    本ファイルの applyEvent で `console.error` する (envelope の `payload: z.unknown()` ゆえ
-//    events.ts では検知できない経路を本層で塞ぐ)。
+//  - **payload 内側** (RunStdStreamPayload / RunTerminalPayload) の schema 不一致と
+//    terminal event type/status の不一致は本ファイルの applyEvent で `console.error` する
+//    (古い Agent や再接続履歴が壊れた payload を届けた場合の防御層)。
 //  - state listener 内 throw は events.ts 側で握り潰さず log する。
 import * as React from "react";
 import {
-  RunCompletedPayloadSchema,
   RunStdStreamPayloadSchema,
+  RunTerminalPayloadSchema,
+  isTerminalEventType,
+  terminalStatusMatchesEvent,
+  type RunTerminalPayload,
   type WorkbenchEvent
 } from "@pwqa/shared";
 
@@ -23,6 +26,7 @@ import type { EventStream } from "@/api/events";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { RunWarningsAlert } from "./RunWarningsAlert";
 
 interface RunConsoleProps {
   eventStream: EventStream;
@@ -34,6 +38,7 @@ export interface RunConsoleState {
   exitCode: number | null;
   stdout: string[];
   stderr: string[];
+  warnings: string[];
   durationMs?: number;
   summary?: { total: number; passed: number; failed: number; skipped: number; flaky: number };
 }
@@ -42,14 +47,76 @@ export const initialRunConsoleState: RunConsoleState = {
   status: "idle",
   exitCode: null,
   stdout: [],
-  stderr: []
+  stderr: [],
+  warnings: []
 };
 
 const MAX_LINES = 1000;
+const TERMINAL_PAYLOAD_WARNING =
+  "Run console: terminal payload could not be parsed; some terminal fields were ignored.";
 
 function trim(lines: string[], next: string): string[] {
   if (lines.length < MAX_LINES) return [...lines, next];
   return [...lines.slice(lines.length - MAX_LINES + 1), next];
+}
+
+function applyTerminalFields(
+  state: RunConsoleState,
+  payload: { exitCode: number | null; durationMs: number; warnings: string[] } | null
+): Pick<RunConsoleState, "exitCode" | "durationMs" | "warnings"> {
+  return {
+    exitCode: payload?.exitCode ?? null,
+    durationMs: payload?.durationMs ?? state.durationMs,
+    warnings: payload?.warnings ?? state.warnings
+  };
+}
+
+type TerminalPayloadParseResult =
+  | { ok: true; payload: RunTerminalPayload }
+  | { ok: false; reason: "schema-mismatch"; issues: Array<{ message: string }> }
+  | {
+      ok: false;
+      reason: "event-type-mismatch";
+      issues: Array<{ message: string }>;
+    };
+
+function parseTerminalPayload(event: WorkbenchEvent): TerminalPayloadParseResult {
+  if (!isTerminalEventType(event.type)) {
+    return {
+      ok: false,
+      reason: "event-type-mismatch",
+      issues: [{ message: `event ${event.type} is not a terminal event` }]
+    };
+  }
+  const parsed = RunTerminalPayloadSchema.safeParse(event.payload);
+  if (!parsed.success) {
+    return { ok: false, reason: "schema-mismatch", issues: parsed.error.issues };
+  }
+  if (!terminalStatusMatchesEvent(event.type, parsed.data.status)) {
+    return {
+      ok: false,
+      reason: "event-type-mismatch",
+      issues: [
+        {
+          message: `status ${parsed.data.status} does not match event type ${event.type}`
+        }
+      ]
+    };
+  }
+  return { ok: true, payload: parsed.data };
+}
+
+function logTerminalPayloadMismatch(event: WorkbenchEvent, parsed: Exclude<TerminalPayloadParseResult, { ok: true }>): void {
+  const label =
+    parsed.reason === "event-type-mismatch"
+      ? "payload event/status mismatch"
+      : "payload schema mismatch";
+  // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
+  console.error(`[RunConsole] ${event.type} ${label}`, parsed.issues);
+}
+
+function appendWarning(warnings: string[], warning: string): string[] {
+  return warnings.includes(warning) ? warnings : [...warnings, warning];
 }
 
 export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React.ReactElement {
@@ -102,6 +169,7 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React
             {state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}
           </p>
         ) : null}
+        <RunWarningsAlert warnings={state.warnings} />
         <pre
           ref={stdoutRef}
           aria-label="標準出力"
@@ -178,32 +246,24 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       }
       return { ...state, stderr: trim(state.stderr, parsed.data.chunk) };
     }
-    case "run.completed":
-    case "run.cancelled":
-    case "run.error": {
-      const parsed = RunCompletedPayloadSchema.safeParse(event.payload);
-      if (!parsed.success) {
-        // run.cancelled / run.error は payload を捨てても status の決定は可能だが、
-        // run.completed は status を payload から取るため不一致だと "error" にフォールバックされ silent。
-        // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
-        console.error(`[RunConsole] ${event.type} payload schema mismatch`, parsed.error.issues);
+    case "run.completed": {
+      // terminal event の status は event.type と payload.status の両方で確認する。
+      // payload が壊れても cancelled/error と誤認せず、この event は error fallback に留める。
+      const parsed = parseTerminalPayload(event);
+      if (!parsed.ok) {
+        logTerminalPayloadMismatch(event, parsed);
       }
-      const payload = parsed.success ? parsed.data : null;
+      const payload =
+        parsed.ok && (parsed.payload.status === "passed" || parsed.payload.status === "failed")
+          ? parsed.payload
+          : null;
       const status: RunConsoleState["status"] =
-        event.type === "run.cancelled"
-          ? "cancelled"
-          : event.type === "run.error"
-            ? "error"
-            : payload?.status === "passed"
-              ? "passed"
-              : payload?.status === "failed"
-                ? "failed"
-                : "error";
+        payload?.status === "passed" ? "passed" : payload?.status === "failed" ? "failed" : "error";
       return {
         ...state,
         status,
-        exitCode: payload?.exitCode ?? null,
-        durationMs: payload?.durationMs ?? state.durationMs,
+        ...applyTerminalFields(state, payload),
+        warnings: payload?.warnings ?? appendWarning(state.warnings, TERMINAL_PAYLOAD_WARNING),
         summary: payload?.summary
           ? {
               total: payload.summary.total,
@@ -215,6 +275,36 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
           : state.summary
       };
     }
+    case "run.cancelled": {
+      // event.type が cancelled なら UI status は cancelled で確定。payload は exit/duration/warnings
+      // を補うためだけに使い、schema 不一致はログに残して既存 state を保つ。
+      const parsed = parseTerminalPayload(event);
+      if (!parsed.ok) {
+        logTerminalPayloadMismatch(event, parsed);
+      }
+      const payload = parsed.ok ? parsed.payload : null;
+      return {
+        ...state,
+        status: "cancelled",
+        ...applyTerminalFields(state, payload),
+        warnings: payload?.warnings ?? appendWarning(state.warnings, TERMINAL_PAYLOAD_WARNING)
+      };
+    }
+    case "run.error": {
+      // event.type が error なら UI status は error で確定。message は UI に出さず、
+      // ユーザー向け詳細は sanitized warnings に限定する。
+      const parsed = parseTerminalPayload(event);
+      if (!parsed.ok) {
+        logTerminalPayloadMismatch(event, parsed);
+      }
+      const payload = parsed.ok ? parsed.payload : null;
+      return {
+        ...state,
+        status: "error",
+        ...applyTerminalFields(state, payload),
+        warnings: payload?.warnings ?? appendWarning(state.warnings, TERMINAL_PAYLOAD_WARNING)
+      };
+    }
     case "snapshot":
       // snapshot は WS reconnect 直後の Agent 側 replay 用 envelope。RunConsole は state を
       // 既に保持しているため、ここで再適用すると重複表示になる。意図的に no-op にする
@@ -223,7 +313,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
     default: {
       // exhaustiveness: WorkbenchEvent に新 type が追加された際に compile error で気付く。
       // ランタイムにここへ来たら schema 拡張漏れが本番で起きているので痕跡を残す。
-      const _exhaustive: never = event.type;
+      const _exhaustive: never = event;
       // eslint-disable-next-line no-console -- 未対応 event type を本番でも検知
       console.warn("[RunConsole] unhandled event type", _exhaustive);
       return state;

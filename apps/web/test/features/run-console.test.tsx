@@ -114,6 +114,7 @@ describe("RunConsole", () => {
           status: "passed",
           exitCode: 0,
           durationMs: 12000,
+          warnings: [],
           summary: {
             total: 3,
             passed: 3,
@@ -129,6 +130,37 @@ describe("RunConsole", () => {
     expect(screen.getByText(/3 passed · 0 failed/)).toBeInTheDocument();
   });
 
+  it("run.completed の warnings を warning alert として表示する", async () => {
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.completed",
+        runId: "r1",
+        sequence: 2,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: {
+          status: "passed",
+          exitCode: 0,
+          durationMs: 12000,
+          warnings: [
+            "stdout log write failed; websocket stream was still delivered. code=ENOSPC; failures=1"
+          ],
+          summary: {
+            total: 1,
+            passed: 1,
+            failed: 0,
+            skipped: 0,
+            flaky: 0,
+            failedTests: []
+          }
+        }
+      });
+    });
+    expect(screen.getByText("Run warnings")).toBeInTheDocument();
+    expect(screen.getByText(/stdout log write failed/)).toBeInTheDocument();
+  });
+
   it("run.cancelled は Cancelled badge を出す", async () => {
     const stream = makeFakeStream();
     render(<RunConsole eventStream={stream} activeRunId="r1" />);
@@ -138,16 +170,62 @@ describe("RunConsole", () => {
         runId: "r1",
         sequence: 3,
         timestamp: "2026-04-28T00:00:00Z",
-        // applyEvent は run.cancelled の場合 payload schema 一致しなくても "cancelled" を返す。
-        // 安全のため durationMs を nonnegative integer で渡す。
         payload: {
           status: "cancelled",
           exitCode: null,
-          durationMs: 0
+          durationMs: 0,
+          warnings: []
         }
       });
     });
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
+  });
+
+  it("run.cancelled の warnings を表示する", async () => {
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.cancelled",
+        runId: "r1",
+        sequence: 3,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: {
+          status: "cancelled",
+          exitCode: null,
+          durationMs: 0,
+          warnings: ["Run was cancelled after timeout warning. code=TIMEOUT"]
+        }
+      });
+    });
+
+    expect(screen.getByText("Run warnings")).toBeInTheDocument();
+    expect(screen.getByText(/cancelled after timeout warning/)).toBeInTheDocument();
+  });
+
+  it("run.error は Error badge と warnings を表示する", async () => {
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.error",
+        runId: "r1",
+        sequence: 3,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: {
+          message: "internal message should not render",
+          status: "error",
+          exitCode: null,
+          durationMs: 0,
+          warnings: ["Safe user-facing warning. code=UNKNOWN"]
+        }
+      });
+    });
+
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.getByText("Run warnings")).toBeInTheDocument();
+    expect(screen.getByText(/Safe user-facing warning/)).toBeInTheDocument();
+    expect(screen.queryByText(/internal message should not render/)).not.toBeInTheDocument();
   });
 
   it("stderr が出ると details が描画される", async () => {

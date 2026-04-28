@@ -9,7 +9,7 @@ import type {
 export const playwrightJsonReportProvider: ReportProvider = {
   name: "playwright-json",
   async readSummary(input: ReportProviderInput): Promise<ReadSummaryResult | undefined> {
-    const raw = await fs.readFile(input.playwrightJsonPath, "utf8").catch(() => "");
+    const raw = await fs.readFile(input.playwrightJsonPath, "utf8");
     if (!raw) return undefined;
     return summarizePlaywrightJson(input.projectRoot, raw);
   }

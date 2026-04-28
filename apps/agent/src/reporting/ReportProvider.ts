@@ -2,8 +2,8 @@ import { type TestResultSummary } from "@pwqa/shared";
 
 /**
  * PLAN.v2 §16: ReportProvider unifies how Workbench reads test result
- * artifacts. Phase 1 only ships `PlaywrightJsonReportProvider`; Phase 1.2
- * will add `AllureReportProvider` without touching the run pipeline.
+ * artifacts. Phase 1 ships `PlaywrightJsonReportProvider`; additional
+ * providers can be added without touching the run pipeline.
  */
 export interface ReportProvider {
   readonly name: string;

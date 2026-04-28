@@ -9,6 +9,8 @@ export interface AgentEnv {
   initialProjectRoot?: string;
   /** Allowed runtime root directories (realpath). Used to gate `POST /projects/open`. */
   allowedRoots: ReadonlyArray<string>;
+  /** When true, command execution fails if audit persistence fails. */
+  failClosedAudit: boolean;
 }
 
 interface BuildEnvInput {
@@ -35,7 +37,7 @@ function parseHost(raw: string | undefined, allowAnyHost: boolean): string {
   if (allowAnyHost) return value;
   if (!SAFE_HOSTS.has(value)) {
     throw new Error(
-      `Refusing to bind to non-loopback host '${value}'. Set WORKBENCH_ALLOW_REMOTE=1 to override.`
+      `Refusing to bind to non-loopback host '${value}'. Set WORKBENCH_ALLOW_REMOTE=1 or true to override.`
     );
   }
   return value;
@@ -49,6 +51,12 @@ function realpathSafe(input: string): string | undefined {
   }
 }
 
+function parseBooleanFlag(raw: string | undefined): boolean {
+  // Env flags intentionally accept only explicit truthy values; "yes"/"on" stay false.
+  const value = raw?.trim().toLowerCase();
+  return value === "1" || value === "true";
+}
+
 export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = {}): AgentEnv {
   const projectArgIndex = argv.findIndex((arg) => arg === "--project" || arg === "-p");
   const projectArg = projectArgIndex >= 0 ? argv[projectArgIndex + 1] : undefined;
@@ -56,7 +64,7 @@ export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = 
   const portArg = portArgIndex >= 0 ? argv[portArgIndex + 1] : undefined;
 
   const port = parsePort(portArg ?? env.PORT);
-  const allowAnyHost = env.WORKBENCH_ALLOW_REMOTE === "1" || env.WORKBENCH_ALLOW_REMOTE === "true";
+  const allowAnyHost = parseBooleanFlag(env.WORKBENCH_ALLOW_REMOTE);
   const host = parseHost(env.HOST, allowAnyHost);
   const logLevel = env.LOG_LEVEL ?? "info";
 
@@ -83,6 +91,7 @@ export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = 
     host,
     logLevel,
     initialProjectRoot,
-    allowedRoots
+    allowedRoots,
+    failClosedAudit: parseBooleanFlag(env.AGENT_FAIL_CLOSED_AUDIT)
   };
 }

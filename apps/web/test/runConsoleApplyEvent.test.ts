@@ -5,13 +5,13 @@ import {
 } from "../src/features/run-console/RunConsole";
 import type { WorkbenchEvent } from "@pwqa/shared";
 
-function evt(partial: Partial<WorkbenchEvent>): WorkbenchEvent {
+function evt(partial: Record<string, unknown>): WorkbenchEvent {
   return {
     type: "run.queued",
     sequence: 1,
     timestamp: new Date().toISOString(),
     runId: "run-1",
-    payload: {},
+    payload: { request: { projectId: "p1", headed: false } },
     ...partial
   } as WorkbenchEvent;
 }
@@ -57,6 +57,7 @@ describe("RunConsole applyEvent", () => {
           exitCode: 0,
           status: "passed",
           durationMs: 1234,
+          warnings: ["summary unavailable"],
           summary: { total: 1, passed: 1, failed: 0, skipped: 0, flaky: 0, failedTests: [] }
         }
       })
@@ -65,14 +66,57 @@ describe("RunConsole applyEvent", () => {
     expect(next.exitCode).toBe(0);
     expect(next.durationMs).toBe(1234);
     expect(next.summary?.passed).toBe(1);
+    expect(next.warnings).toEqual(["summary unavailable"]);
   });
 
-  it("treats run.cancelled as cancelled status regardless of payload", () => {
+  it("run.cancelled は schema-valid payload で cancelled status に遷移する", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const next = applyEvent(
       initialRunConsoleState,
-      evt({ type: "run.cancelled", payload: {} })
+      evt({
+        type: "run.cancelled",
+        payload: {
+          exitCode: null,
+          status: "cancelled",
+          durationMs: 1,
+          warnings: ["cancelled by user"]
+        }
+      })
     );
     expect(next.status).toBe("cancelled");
+    expect(next.warnings).toEqual(["cancelled by user"]);
+    expect(consoleSpy).not.toHaveBeenCalled();
+  });
+
+  it("terminal event type と payload status が矛盾したら payload を信頼しない", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const next = applyEvent(
+      initialRunConsoleState,
+      evt({
+        type: "run.cancelled",
+        payload: {
+          exitCode: 1,
+          status: "error",
+          durationMs: 123,
+          warnings: ["should not be trusted"],
+          message: "internal message should not render"
+        }
+      })
+    );
+
+    expect(next.status).toBe("cancelled");
+    expect(next.exitCode).toBeNull();
+    expect(next.warnings).toEqual([
+      "Run console: terminal payload could not be parsed; some terminal fields were ignored."
+    ]);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[RunConsole] run.cancelled payload event/status mismatch",
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining("does not match event type run.cancelled")
+        })
+      ])
+    );
   });
 
   it("MAX_LINES (1000) 到達後は先頭が drop され末尾が保たれる", () => {
@@ -101,6 +145,7 @@ describe("RunConsole applyEvent", () => {
           exitCode: 1,
           status: "failed",
           durationMs: 555,
+          warnings: ["stdout log write failed; websocket stream was still delivered. code=ENOSPC; failures=1"],
           summary: { total: 2, passed: 0, failed: 2, skipped: 0, flaky: 0, failedTests: [] }
         }
       })
@@ -108,6 +153,7 @@ describe("RunConsole applyEvent", () => {
     expect(next.status).toBe("failed");
     expect(next.exitCode).toBe(1);
     expect(next.summary?.failed).toBe(2);
+    expect(next.warnings.join("\n")).toContain("stdout log write failed");
   });
 
   it("run.error は payload に関わらず error status に遷移する", () => {
@@ -118,7 +164,9 @@ describe("RunConsole applyEvent", () => {
         payload: {
           exitCode: 137,
           status: "error",
-          durationMs: 0
+          durationMs: 0,
+          warnings: [],
+          message: "Runner failed after spawn."
         }
       })
     );
@@ -129,7 +177,13 @@ describe("RunConsole applyEvent", () => {
   it("snapshot event は no-op (state 不変) で console.warn しない", () => {
     const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const before = { ...initialRunConsoleState, stdout: ["a", "b"] };
-    const next = applyEvent(before, evt({ type: "snapshot", payload: {} }));
+    const next = applyEvent(
+      before,
+      evt({
+        type: "snapshot",
+        payload: { service: "playwright-workbench-agent", version: "0.1.0" }
+      })
+    );
     expect(next).toEqual(before);
     expect(consoleSpy).not.toHaveBeenCalled();
   });

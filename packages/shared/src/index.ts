@@ -263,19 +263,78 @@ export const RunStdStreamPayloadSchema = z.object({
 });
 export type RunStdStreamPayload = z.infer<typeof RunStdStreamPayloadSchema>;
 
-export const RunCompletedPayloadSchema = z.object({
+export const RunQueuedPayloadSchema = z.object({
+  request: RunRequestSchema
+});
+export type RunQueuedPayload = z.infer<typeof RunQueuedPayloadSchema>;
+
+export const RunStartedPayloadSchema = z.object({
+  command: CommandTemplateSchema,
+  cwd: z.string(),
+  startedAt: z.string()
+});
+export type RunStartedPayload = z.infer<typeof RunStartedPayloadSchema>;
+
+export const SnapshotPayloadSchema = z.object({
+  service: z.string(),
+  version: z.string()
+});
+export type SnapshotPayload = z.infer<typeof SnapshotPayloadSchema>;
+
+const RunTerminalPayloadBaseSchema = z.object({
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable().optional(),
-  status: RunStatusSchema,
   durationMs: z.number().int().nonnegative(),
+  warnings: z.array(z.string()).default([])
+});
+
+export const RunCompletedPayloadSchema = RunTerminalPayloadBaseSchema.extend({
+  status: z.enum(["passed", "failed"]),
   summary: TestResultSummarySchema.optional()
 });
 export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
 
-export const RunErrorPayloadSchema = z.object({
-  message: z.string()
+export const RunCancelledPayloadSchema = RunTerminalPayloadBaseSchema.extend({
+  status: z.literal("cancelled")
+});
+export type RunCancelledPayload = z.infer<typeof RunCancelledPayloadSchema>;
+
+export const RunErrorPayloadSchema = RunTerminalPayloadBaseSchema.extend({
+  status: z.literal("error"),
+  message: z.string().min(1)
 });
 export type RunErrorPayload = z.infer<typeof RunErrorPayloadSchema>;
+
+export const RunTerminalPayloadSchema = z.discriminatedUnion("status", [
+  RunCompletedPayloadSchema,
+  RunCancelledPayloadSchema,
+  RunErrorPayloadSchema
+]);
+export type RunTerminalPayload = z.infer<typeof RunTerminalPayloadSchema>;
+
+/**
+ * Single source of truth for terminal event type and terminal payload status.
+ * Producers and UI consumers both use this to reject cross-wired payloads.
+ */
+export const TerminalStatusByEvent = {
+  "run.completed": new Set<RunTerminalPayload["status"]>(["passed", "failed"]),
+  "run.cancelled": new Set<RunTerminalPayload["status"]>(["cancelled"]),
+  "run.error": new Set<RunTerminalPayload["status"]>(["error"])
+} as const;
+
+export type TerminalEventType = keyof typeof TerminalStatusByEvent;
+
+export function isTerminalEventType(type: WorkbenchEventType): type is TerminalEventType {
+  return type === "run.completed" || type === "run.cancelled" || type === "run.error";
+}
+
+/** Returns true when a terminal payload status is valid for the envelope type. */
+export function terminalStatusMatchesEvent(
+  type: TerminalEventType,
+  status: RunTerminalPayload["status"]
+): boolean {
+  return TerminalStatusByEvent[type].has(status);
+}
 
 export const WorkbenchEventTypeSchema = z.enum([
   "run.queued",
@@ -289,14 +348,52 @@ export const WorkbenchEventTypeSchema = z.enum([
 ]);
 export type WorkbenchEventType = z.infer<typeof WorkbenchEventTypeSchema>;
 
-export const WorkbenchEventSchema = z.object({
-  type: WorkbenchEventTypeSchema,
+const WorkbenchEventBaseSchema = z.object({
   sequence: z.number().int().nonnegative(),
   timestamp: z.string(),
-  runId: z.string().optional(),
-  payload: z.unknown()
+  runId: z.string().optional()
 });
+
+export const WorkbenchEventSchema = z.discriminatedUnion("type", [
+  WorkbenchEventBaseSchema.extend({
+    type: z.literal("run.queued"),
+    payload: RunQueuedPayloadSchema
+  }),
+  WorkbenchEventBaseSchema.extend({
+    type: z.literal("run.started"),
+    payload: RunStartedPayloadSchema
+  }),
+  WorkbenchEventBaseSchema.extend({
+    type: z.literal("run.stdout"),
+    payload: RunStdStreamPayloadSchema
+  }),
+  WorkbenchEventBaseSchema.extend({
+    type: z.literal("run.stderr"),
+    payload: RunStdStreamPayloadSchema
+  }),
+  WorkbenchEventBaseSchema.extend({
+    type: z.literal("run.completed"),
+    payload: RunCompletedPayloadSchema
+  }),
+  WorkbenchEventBaseSchema.extend({
+    type: z.literal("run.cancelled"),
+    payload: RunCancelledPayloadSchema
+  }),
+  WorkbenchEventBaseSchema.extend({
+    type: z.literal("run.error"),
+    payload: RunErrorPayloadSchema
+  }),
+  WorkbenchEventBaseSchema.extend({
+    type: z.literal("snapshot"),
+    payload: SnapshotPayloadSchema
+  })
+]);
 export type WorkbenchEvent = z.infer<typeof WorkbenchEventSchema>;
+export type WorkbenchEventInput = WorkbenchEvent extends infer Event
+  ? Event extends WorkbenchEvent
+    ? Omit<Event, "sequence" | "timestamp">
+    : never
+  : never;
 
 /* ----------------------------------------------------------------------- */
 /* HTTP API responses                                                      */
@@ -318,7 +415,8 @@ export const RunListItemSchema = RunMetadataSchema.pick({
   completedAt: true,
   durationMs: true,
   exitCode: true,
-  summary: true
+  summary: true,
+  warnings: true
 });
 export type RunListItem = z.infer<typeof RunListItemSchema>;
 

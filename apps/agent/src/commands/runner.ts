@@ -98,12 +98,12 @@ function checkPolicy(spec: CommandSpec, policy: CommandPolicy): void {
       }
     }
   }
-  const validatorError = policy.argValidator?.({
+  const validation = policy.argValidator({
     executableName: name,
     args: spec.args
   });
-  if (validatorError) {
-    throw new CommandPolicyError(validatorError);
+  if (!validation.ok) {
+    throw new CommandPolicyError(validation.message);
   }
   const cwdAbs = realpathOrThrow(path.resolve(spec.cwd));
   ensureWithinBoundary(cwdAbs, policy.cwdBoundary);

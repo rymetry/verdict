@@ -6,6 +6,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import { type WSContext } from "hono/ws";
 import {
   HealthResponseSchema,
+  SnapshotPayloadSchema,
   type HealthResponse,
   type WorkbenchEvent
 } from "@pwqa/shared";
@@ -16,6 +17,7 @@ import {
   type AuditEntry,
   type CommandRunner
 } from "./commands/runner.js";
+import { AuditPersistenceError } from "./lib/errors.js";
 import {
   createDefaultCommandPolicy,
   type CommandPolicy
@@ -133,19 +135,20 @@ function attachWebSocket(
             }
           });
           try {
+            const payload = SnapshotPayloadSchema.parse({
+              service: "playwright-workbench-agent",
+              version: SERVICE_VERSION
+            });
             ws.send(
               JSON.stringify({
                 type: "snapshot",
                 sequence: 0,
                 timestamp: new Date().toISOString(),
-                payload: {
-                  service: "playwright-workbench-agent",
-                  version: SERVICE_VERSION
-                }
+                payload
               } satisfies WorkbenchEvent)
             );
-          } catch {
-            // socket already closed before snapshot could be delivered
+          } catch (error) {
+            logger.debug({ err: error }, "snapshot publish failed");
           }
         },
         onClose() {
@@ -174,9 +177,11 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       policy,
       audit: (entry) => {
         logger.info({ audit: entry }, "command audit");
+        let auditPersistenceError: AuditPersistenceError | undefined;
         try {
           persistAuditEntry(projectRoot, entry);
         } catch (error) {
+          auditPersistenceError = new AuditPersistenceError(error);
           logger.error(
             {
               err: error instanceof Error ? error.message : String(error),
@@ -190,6 +195,9 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
           );
         }
         options.audit?.(entry);
+        if (auditPersistenceError && env.failClosedAudit) {
+          throw auditPersistenceError;
+        }
       }
     });
   };
@@ -204,7 +212,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     "/",
     projectsRoutes({ projectStore, runnerForProject, allowedRoots: env.allowedRoots })
   );
-  app.route("/", runsRoutes({ projectStore, runManager }));
+  app.route("/", runsRoutes({ projectStore, runManager, logger }));
   const injectWebSocket = attachWebSocket(app, bus, logger);
 
   if (env.initialProjectRoot) {

@@ -2,12 +2,16 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  type CommandArgsValidationResult,
   createDefaultCommandPolicy,
   validatePhase1PlaywrightArgs
 } from "../src/commands/policy.js";
 import { CommandPolicyError, createNodeCommandRunner } from "../src/commands/runner.js";
 
-function validate(executableName: string, args: ReadonlyArray<string>): string | null {
+function validate(
+  executableName: string,
+  args: ReadonlyArray<string>
+): CommandArgsValidationResult {
   return validatePhase1PlaywrightArgs({ executableName, args });
 }
 
@@ -36,11 +40,11 @@ describe("default Phase 1 command policy", () => {
     ["npx", ["--no-install", "playwright", "test", "--reporter=list,json,html"]],
     ["yarn", ["playwright", "test", "--list", "--reporter=json"]]
   ])("allows approved %s Playwright command shapes", (executableName, args) => {
-    expect(validate(executableName, args)).toBeNull();
+    expect(validate(executableName, args).ok).toBe(true);
   });
 
   it("allows a grep value exactly at the argument length boundary", () => {
-    expect(validate("pnpm", ["exec", "playwright", "test", "--grep", "x".repeat(4_096)])).toBeNull();
+    expect(validate("pnpm", ["exec", "playwright", "test", "--grep", "x".repeat(4_096)]).ok).toBe(true);
   });
 
   it.each([
@@ -62,7 +66,18 @@ describe("default Phase 1 command policy", () => {
     ["pnpm", ["exec", "playwright", "test", "--reporter=list,json,html,allure-playwright"]],
     ["pnpm", ["exec", "playwright", "test", "--grep", "--headed"]]
   ])("rejects unsafe command shape for %s", (executableName, args) => {
-    expect(validate(executableName, args)).toEqual(expect.any(String));
+    expect(validate(executableName, args).ok).toBe(false);
+  });
+
+  it.each([
+    [["exec", "playwright", "test", "%zz/outside.spec.ts"], "invalid-uri-encoding"],
+    [["exec", "playwright", "test", "%25252e%25252e/outside.spec.ts"], "path-traversal"],
+    [["exec", "playwright", "test", "%2fetc%2fpasswd"], "absolute-path"],
+    [["exec", "playwright", "test", "--grep", "--headed"], "missing-flag-value"],
+    [["exec", "playwright", "test", "--config", "/tmp/x"], "disallowed-flag"]
+  ])("returns stable validator code %#", (args, code) => {
+    const result = validate("pnpm", args);
+    expect(result).toEqual(expect.objectContaining({ ok: false, code }));
   });
 
   it("wires the validator into the default runner policy", () => {
