@@ -1,8 +1,23 @@
 import { type RedactionResult } from "../commands/redact.js";
-import { type ArtifactKind, errorCode } from "../lib/structuredLog.js";
+import {
+  type ArtifactKind,
+  type ArtifactOperation,
+  errorCode
+} from "../lib/structuredLog.js";
 import { type RunManagerLogger, type StreamRedactor } from "./runTypes.js";
 
 export { type StreamRedactor };
+
+/**
+ * Issue #31: stream の identity (`stdout-log` / `stderr-log`) を直接 logger
+ * 上の `artifactKind` として emit し、`op: "stream-redaction"` で operation を
+ * 軸として併記する。旧 schema の `stream: "stdout" | "stderr"` 補助 field と
+ * `artifactKind: "stream-redaction"` の 2 軸表現を、identity-only の 1 軸表現
+ * に統一する。
+ */
+function streamIdentity(stream: "stdout" | "stderr"): ArtifactKind {
+  return stream === "stdout" ? "stdout-log" : "stderr-log";
+}
 
 /**
  * Redaction failure is handled fail-closed for output chunks: the raw chunk is
@@ -45,8 +60,8 @@ export function createStreamRedactor({
       logger?.error(
         {
           runId,
-          stream,
-          artifactKind: "stream-redaction" satisfies ArtifactKind,
+          artifactKind: streamIdentity(stream),
+          op: "stream-redaction" satisfies ArtifactOperation,
           code,
           errorName: error instanceof Error ? error.name : typeof error
         },
@@ -82,8 +97,8 @@ export function createStreamRedactor({
           logger?.info?.(
             {
               runId,
-              stream,
-              artifactKind: "stream-redaction" satisfies ArtifactKind,
+              artifactKind: streamIdentity(stream),
+              op: "stream-redaction" satisfies ArtifactOperation,
               chunks: success.chunks,
               replacements: success.replacements
             },

@@ -21,25 +21,60 @@ import { createHash } from "node:crypto";
  */
 
 /**
- * Closed string union for structured-log artifact identification. Logger call
+ * Closed string union for structured-log artifact **identity**. Logger call
  * sites use `artifactKind: "..." satisfies ArtifactKind` instead of including
  * absolute filesystem paths, so log aggregators / bug reports / support
  * snippets cannot leak `/Users/<username>/...` or internal directory layout
  * (Issue #27). Run-scoped paths can always be reconstructed from `runId` via
  * `runPathsFor()`; project-scoped paths surface through the dedicated
  * `Initial project loaded` startup log.
+ *
+ * Phase 1.2 prep (Issue #31): the union is **identity-only**. Operations
+ * performed on an artifact (redaction, summary extraction, stream
+ * redaction) are now expressed via the orthogonal `ArtifactOperation`
+ * union under the `op` payload field. This keeps the union from growing
+ * `O(reporter × operation)` when Allure adds `allure-results` /
+ * `allure-report` / `allure-exports` identities in Phase 1.2.
+ *
+ * Note on `playwright-html`: added now as the canonical identity for
+ * Playwright HTML reporter output, but Phase 1.7 has zero emit sites for
+ * it. The rename `html-report` → `playwright-html` is locked in here
+ * (rather than during Phase 1.2) so that the Allure addition
+ * (`allure-report`) becomes a mechanically-additive change rather than a
+ * synchronized rename + addition in a single Phase 1.2 PR. The identity-
+ * name regularity (`<reporter>-<format>`) is the load-bearing convention.
  */
 export type ArtifactKind =
   | "playwright-json"
-  | "playwright-json-redaction"
-  | "playwright-json-summary"
+  | "playwright-html"
   | "stdout-log"
   | "stderr-log"
   | "metadata"
-  | "html-report"
-  | "stream-redaction"
   | "runs-directory"
   | "audit-log";
+
+/**
+ * Closed string union for structured-log artifact **operation**. Operations
+ * are orthogonal to identity (`ArtifactKind`): the same artifact can
+ * undergo multiple operations (e.g. `playwright-json` is read for
+ * `summary-extract` and rewritten via `redaction`). Logger payload field
+ * is `op?: ArtifactOperation` — optional because not every event is an
+ * operation on an artifact (e.g. `runs-directory` creation failure is an
+ * identity-lifecycle failure, not an operation on the directory).
+ *
+ * - `redaction`: secret-pattern replacement on a file artifact (e.g. the
+ *   raw Playwright JSON reporter output before persistence).
+ * - `summary-extract`: best-effort parse to derive a small summary from a
+ *   larger artifact (e.g. counting passed/failed from playwright-json).
+ * - `stream-redaction`: per-chunk secret redaction on a streaming artifact
+ *   (`stdout-log` / `stderr-log`). Distinct from file-level `redaction`
+ *   because streaming has different failure semantics (per-chunk
+ *   placeholder, no rollback of prior chunks).
+ */
+export type ArtifactOperation =
+  | "redaction"
+  | "summary-extract"
+  | "stream-redaction";
 
 /**
  * Extracts a string error code from an unknown thrown value. Returns
