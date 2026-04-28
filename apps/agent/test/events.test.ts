@@ -43,13 +43,20 @@ describe("EventBus", () => {
   it.each(payloadCases)("validates %s payloads before publishing", (type, validPayload, invalidPayload) => {
     const bus = createEventBus();
 
-    expect(() =>
+    let caught: unknown;
+    try {
       bus.publish({
         type,
         runId: "run-1",
         payload: invalidPayload as never
-      } as unknown as WorkbenchEventInput)
-    ).toThrow(new RegExp(`Invalid ${type} payload`));
+      } as unknown as WorkbenchEventInput);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toEqual(expect.objectContaining({
+      code: "PAYLOAD_VALIDATION_FAILED",
+      message: expect.stringMatching(new RegExp(`Invalid ${type} payload`))
+    }));
     const event = bus.publish({
       type,
       runId: "run-1",

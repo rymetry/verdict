@@ -60,6 +60,7 @@ interface RunManagerDeps {
   /** Optional injection points (defaults wired for production). */
   artifactsStore?: RunArtifactsStore;
   reportProvider?: ReportProvider;
+  redactor?: (chunk: string) => string;
   logger?: RunManagerLogger;
 }
 
@@ -232,6 +233,15 @@ function publishTerminalEventSafely({
   });
   if (result.ok) return;
   if (isFallback) {
+    logger?.error(
+      {
+        runId: event.runId,
+        originalEvent: event.type,
+        originalStatus: event.payload.status,
+        code: result.code
+      },
+      "terminal fallback publish exhausted; UI may remain running"
+    );
     process.emitWarning("Terminal fallback event publish failed", {
       code: "PWQA_TERMINAL_FALLBACK_PUBLISH_FAILED"
     });
@@ -239,7 +249,6 @@ function publishTerminalEventSafely({
   }
 
   const payload = event.payload;
-  const originalStatus = "status" in payload ? payload.status : "unknown";
   publishTerminalEventSafely({
     bus,
     logger,
@@ -248,13 +257,13 @@ function publishTerminalEventSafely({
       runId: event.runId,
       payload: {
         message: "Terminal event could not be delivered.",
-        exitCode: typeof payload.exitCode === "number" ? payload.exitCode : null,
-        signal: typeof payload.signal === "string" ? payload.signal : null,
+        exitCode: payload.exitCode,
+        signal: payload.signal ?? null,
         status: "error",
-        durationMs: typeof payload.durationMs === "number" ? payload.durationMs : 0,
+        durationMs: payload.durationMs,
         warnings: [
           ...fallbackWarnings,
-          `Terminal event could not be delivered. code=${result.code}; originalEvent=${event.type}; originalStatus=${originalStatus}`
+          `Terminal event could not be delivered. code=${result.code}; originalEvent=${event.type}; originalStatus=${payload.status}`
         ]
       }
     },
@@ -263,31 +272,78 @@ function publishTerminalEventSafely({
   });
 }
 
-function redactChunkSafely({
-  chunk,
+interface StreamRedactor {
+  redact(stream: "stdout" | "stderr", chunk: string): string;
+  flush(): string[];
+}
+
+/**
+ * Redaction failure is handled fail-closed for output chunks: the raw chunk is
+ * discarded and a placeholder is delivered instead, then the loss is surfaced
+ * through final run warnings without logging the secret-bearing input.
+ */
+function createStreamRedactor({
+  redactor,
   logger,
-  runId,
-  stream
+  runId
 }: {
-  chunk: string;
+  redactor: (chunk: string) => string;
   logger?: RunManagerLogger;
   runId: string;
-  stream: "stdout" | "stderr";
-}): string {
-  try {
-    return redact(chunk);
-  } catch (error) {
-    logger?.error(
-      {
-        runId,
-        stream,
-        code: errorCode(error),
-        err: error instanceof Error ? error.message : String(error)
-      },
-      "run stream redaction failed"
-    );
-    return "[redaction failed]\n";
+}): StreamRedactor {
+  const failures: Record<"stdout" | "stderr", { count: number; firstCode: string; codes: Set<string>; bytes: number }> = {
+    stdout: { count: 0, firstCode: "UNKNOWN", codes: new Set(), bytes: 0 },
+    stderr: { count: 0, firstCode: "UNKNOWN", codes: new Set(), bytes: 0 }
+  };
+  const loggedCodes: Record<"stdout" | "stderr", Set<string>> = {
+    stdout: new Set(),
+    stderr: new Set()
+  };
+
+  function recordFailure(stream: "stdout" | "stderr", chunk: string, error: unknown): void {
+    const code = errorCode(error);
+    const current = failures[stream];
+    failures[stream] = {
+      count: current.count + 1,
+      firstCode: current.count === 0 ? code : current.firstCode,
+      codes: new Set([...current.codes, code]),
+      bytes: current.bytes + Buffer.byteLength(chunk, "utf8")
+    };
+    if (!loggedCodes[stream].has(code)) {
+      loggedCodes[stream].add(code);
+      logger?.error(
+        {
+          runId,
+          stream,
+          artifactKind: "stream-redaction",
+          code,
+          errorName: error instanceof Error ? error.name : typeof error
+        },
+        "run stream redaction failed"
+      );
+    }
   }
+
+  return {
+    redact(stream, chunk) {
+      try {
+        return redactor(chunk);
+      } catch (error) {
+        recordFailure(stream, chunk, error);
+        return "[redaction failed]\n";
+      }
+    },
+    flush() {
+      return (["stdout", "stderr"] as const).flatMap((stream) => {
+        const failure = failures[stream];
+        if (failure.count === 0) return [];
+        const codes = Array.from(failure.codes).join(",");
+        return [
+          `${stream} redaction failed; raw output was replaced before websocket/log delivery. code=${failure.firstCode}; codes=${codes}; failures=${failure.count}; bytes=${failure.bytes}`
+        ];
+      });
+    }
+  };
 }
 
 export function createRunManager({
@@ -295,6 +351,7 @@ export function createRunManager({
   bus,
   artifactsStore = defaultArtifactsStore,
   reportProvider = playwrightJsonReportProvider,
+  redactor = redact,
   logger
 }: RunManagerDeps): RunManager {
   const active = new Map<string, ActiveRunHandle>();
@@ -347,13 +404,17 @@ export function createRunManager({
 
     const logStreams = await artifactsStore.openLogStreams(paths.stdoutLog, paths.stderrLog);
     const logWriter = createLogWriteTracker({ logStreams, logger, runId });
-    const streamPublishFailures: Record<"stdout" | "stderr", { count: number; codes: Set<string> }> = {
-      stdout: { count: 0, codes: new Set() },
-      stderr: { count: 0, codes: new Set() }
+    const streamRedactor = createStreamRedactor({ redactor, logger, runId });
+    const streamPublishFailures: Record<"stdout" | "stderr", { count: number; firstCode: string; codes: Set<string> }> = {
+      stdout: { count: 0, firstCode: "UNKNOWN", codes: new Set() },
+      stderr: { count: 0, firstCode: "UNKNOWN", codes: new Set() }
     };
     const recordStreamPublishFailure = (stream: "stdout" | "stderr", result: PublishResult): void => {
       if (result.ok) return;
+      const current = streamPublishFailures[stream];
+      const isFirstFailure = current.count === 0;
       streamPublishFailures[stream].count += 1;
+      streamPublishFailures[stream].firstCode = isFirstFailure ? result.code : current.firstCode;
       streamPublishFailures[stream].codes.add(result.code);
     };
     const flushStreamPublishWarnings = (): string[] =>
@@ -362,7 +423,7 @@ export function createRunManager({
         if (failure.count === 0) return [];
         const codes = Array.from(failure.codes).join(",");
         return [
-          `${stream} websocket delivery failed; persisted log may contain additional output. codes=${codes}; failures=${failure.count}`
+          `${stream} websocket delivery failed; persisted log may contain additional output. code=${failure.firstCode}; codes=${codes}; failures=${failure.count}`
         ];
       });
 
@@ -393,7 +454,7 @@ export function createRunManager({
         },
         {
           onStdout: (chunk) => {
-            const safe = redactChunkSafely({ chunk, logger, runId, stream: "stdout" });
+            const safe = streamRedactor.redact("stdout", chunk);
             logWriter.write("stdout", safe);
             const result = publishEventSafely({
               bus,
@@ -404,7 +465,7 @@ export function createRunManager({
             recordStreamPublishFailure("stdout", result);
           },
           onStderr: (chunk) => {
-            const safe = redactChunkSafely({ chunk, logger, runId, stream: "stderr" });
+            const safe = streamRedactor.redact("stderr", chunk);
             logWriter.write("stderr", safe);
             const result = publishEventSafely({
               bus,
@@ -476,6 +537,7 @@ export function createRunManager({
         const warnings = [
           ...runningMetadata.warnings,
           ...logWriteWarnings,
+          ...streamRedactor.flush(),
           ...flushStreamPublishWarnings(),
           ...(summary?.warnings ?? [])
         ];
@@ -555,6 +617,7 @@ export function createRunManager({
           warnings: [
             ...runningMetadata.warnings,
             ...logWriteWarnings,
+            ...streamRedactor.flush(),
             ...flushStreamPublishWarnings(),
             `Runner failed after spawn. code=${errorCode(error)}`
           ]

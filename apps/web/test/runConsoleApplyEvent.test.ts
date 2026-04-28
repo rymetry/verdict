@@ -106,7 +106,9 @@ describe("RunConsole applyEvent", () => {
 
     expect(next.status).toBe("cancelled");
     expect(next.exitCode).toBeNull();
-    expect(next.warnings).toEqual([]);
+    expect(next.warnings).toEqual([
+      "Run console: terminal payload could not be parsed; some terminal fields were ignored."
+    ]);
     expect(consoleSpy).toHaveBeenCalledWith(
       "[RunConsole] run.cancelled payload event/status mismatch",
       expect.arrayContaining([

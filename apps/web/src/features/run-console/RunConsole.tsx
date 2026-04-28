@@ -52,6 +52,8 @@ export const initialRunConsoleState: RunConsoleState = {
 };
 
 const MAX_LINES = 1000;
+const TERMINAL_PAYLOAD_WARNING =
+  "Run console: terminal payload could not be parsed; some terminal fields were ignored.";
 
 function trim(lines: string[], next: string): string[] {
   if (lines.length < MAX_LINES) return [...lines, next];
@@ -111,6 +113,10 @@ function logTerminalPayloadMismatch(event: WorkbenchEvent, parsed: Exclude<Termi
       : "payload schema mismatch";
   // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
   console.error(`[RunConsole] ${event.type} ${label}`, parsed.issues);
+}
+
+function appendWarning(warnings: string[], warning: string): string[] {
+  return warnings.includes(warning) ? warnings : [...warnings, warning];
 }
 
 export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React.ReactElement {
@@ -257,6 +263,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
         ...state,
         status,
         ...applyTerminalFields(state, payload),
+        warnings: payload?.warnings ?? appendWarning(state.warnings, TERMINAL_PAYLOAD_WARNING),
         summary: payload?.summary
           ? {
               total: payload.summary.total,
@@ -279,7 +286,8 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       return {
         ...state,
         status: "cancelled",
-        ...applyTerminalFields(state, payload)
+        ...applyTerminalFields(state, payload),
+        warnings: payload?.warnings ?? appendWarning(state.warnings, TERMINAL_PAYLOAD_WARNING)
       };
     }
     case "run.error": {
@@ -293,7 +301,8 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       return {
         ...state,
         status: "error",
-        ...applyTerminalFields(state, payload)
+        ...applyTerminalFields(state, payload),
+        warnings: payload?.warnings ?? appendWarning(state.warnings, TERMINAL_PAYLOAD_WARNING)
       };
     }
     case "snapshot":

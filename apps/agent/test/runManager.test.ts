@@ -41,6 +41,7 @@ beforeEach(() => {
   workdir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-runmgr-")));
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   fs.rmSync(workdir, { recursive: true, force: true });
 });
 
@@ -398,6 +399,96 @@ describe("RunManager", () => {
     ]));
   });
 
+  it("replaces chunks when stream redaction fails and surfaces a sanitized warning", async () => {
+    const secret = "token=ghp_abcdefghijklmnopqrstuvwxyz1234";
+    const published: WorkbenchEventInput[] = [];
+    const bus: EventBus = {
+      publish(event: WorkbenchEventInput) {
+        published.push(event);
+        return { ...event, sequence: published.length, timestamp: new Date().toISOString() } as WorkbenchEvent;
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      snapshot() {
+        return [];
+      }
+    };
+    const runner = {
+      run(_spec: unknown, handlers = {}) {
+        const streamHandlers = handlers as { onStdout?: (chunk: string) => void };
+        streamHandlers.onStdout?.(`leaky ${secret}\n`);
+        return {
+          result: Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            durationMs: 1,
+            stdout: "",
+            stderr: "",
+            cancelled: false,
+            timedOut: false,
+            command: { executable: "node", args: [], cwd: workdir }
+          }),
+          cancel() {}
+        };
+      }
+    };
+    const errors: Array<Record<string, unknown>> = [];
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      redactor: () => {
+        throw Object.assign(new Error(`redaction failed for ${secret}`), {
+          code: "REDACT_FAILED"
+        });
+      },
+      reportProvider: {
+        name: "test-provider",
+        async readSummary() {
+          return undefined;
+        }
+      },
+      logger: {
+        error(payload) {
+          errors.push(payload);
+        }
+      }
+    });
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: fakePackageManager(),
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+    const stdoutEvent = published.find((event) => event.type === "run.stdout");
+    const terminal = published.find((event) => event.type === "run.completed");
+    const payload = RunCompletedPayloadSchema.parse(terminal?.payload);
+    const stdoutLog = fs.readFileSync(
+      path.join(workdir, ".playwright-workbench", "runs", handle.runId, "stdout.log"),
+      "utf8"
+    );
+    const combined = JSON.stringify({ completed, payload, stdoutEvent, stdoutLog, errors });
+
+    expect(stdoutEvent?.payload).toEqual({ chunk: "[redaction failed]\n" });
+    expect(stdoutLog).toBe("[redaction failed]\n");
+    expect(payload.warnings.join("\n")).toContain("stdout redaction failed");
+    expect(payload.warnings.join("\n")).toContain("code=REDACT_FAILED");
+    expect(combined).not.toContain(secret);
+    expect(errors).toEqual([
+      expect.objectContaining({
+        runId: handle.runId,
+        stream: "stdout",
+        artifactKind: "stream-redaction",
+        code: "REDACT_FAILED",
+        errorName: "Error"
+      })
+    ]);
+  });
+
   it("emits a sanitized run.error fallback when terminal completion publish fails", async () => {
     const published: WorkbenchEventInput[] = [];
     const bus: EventBus = {
@@ -534,6 +625,7 @@ describe("RunManager", () => {
 
   it("emits a process warning when original and fallback terminal publishes both fail", async () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const errors: Array<{ payload: Record<string, unknown>; message: string }> = [];
     const bus: EventBus = {
       publish(event: WorkbenchEventInput) {
         if (event.type === "run.completed" || event.type === "run.error") {
@@ -577,6 +669,11 @@ describe("RunManager", () => {
         async readSummary() {
           return undefined;
         }
+      },
+      logger: {
+        error(payload, message) {
+          errors.push({ payload, message });
+        }
       }
     });
 
@@ -591,6 +688,17 @@ describe("RunManager", () => {
     expect(emitWarning).toHaveBeenCalledWith("Terminal fallback event publish failed", {
       code: "PWQA_TERMINAL_FALLBACK_PUBLISH_FAILED"
     });
+    expect(errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: "terminal fallback publish exhausted; UI may remain running",
+        payload: expect.objectContaining({
+          runId: handle.runId,
+          originalEvent: "run.error",
+          originalStatus: "error",
+          code: "PAYLOAD_VALIDATION_FAILED"
+        })
+      })
+    ]));
   });
 
   it("keeps websocket stdout delivery when real runner log persistence fails", async () => {
