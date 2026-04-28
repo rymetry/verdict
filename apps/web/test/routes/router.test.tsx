@@ -193,10 +193,15 @@ describe("各 persona route の直接アクセス", () => {
     expect(screen.getByText("Failure review")).toBeInTheDocument();
   });
 
-  it("`/dev` を直接開くと Developer View placeholder が描画される", async () => {
+  it("`/dev` を直接開くと Developer View placeholder が 3-col grid で描画される", async () => {
+    // ε (Issue #12) で `/dev` は 3-col placeholder layout を表示するようになった。
+    // section のラベル ("Developer View") + dev-view-grid + 各カードのタイトルで pin する。
     renderWithRouter({ initialPath: "/dev" });
-    expect(await screen.findByTestId("dev-view")).toBeInTheDocument();
-    expect(screen.getByText(/Developer View/)).toBeInTheDocument();
+    expect(await screen.findByTestId("dev-view")).toHaveAttribute("aria-label", "Developer View");
+    expect(screen.getByTestId("dev-view-grid")).toBeInTheDocument();
+    expect(screen.getByTestId("dev-file-tree-card")).toBeInTheDocument();
+    expect(screen.getByTestId("dev-source-tabs-card")).toBeInTheDocument();
+    expect(screen.getByTestId("dev-inspector-panel")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Developer", selected: true })).toBeInTheDocument();
   });
 
