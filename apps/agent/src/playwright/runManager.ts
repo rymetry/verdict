@@ -22,7 +22,7 @@ import {
 import { deriveOutcome } from "./runOutcome.js";
 import { playwrightJsonReportProvider } from "../reporting/PlaywrightJsonReportProvider.js";
 import type { ReportProvider } from "../reporting/ReportProvider.js";
-import { errorCode, type RunManagerLogger } from "./runTypes.js";
+import { type ArtifactKind, errorCode, errorLogFields, type RunManagerLogger } from "./runTypes.js";
 import { createStreamRedactor } from "./streamRedactor.js";
 
 export type { RunManagerLogger } from "./runTypes.js";
@@ -124,9 +124,8 @@ function createLogWriteTracker({
         {
           runId,
           stream,
-          artifactKind: "log",
-          code,
-          err: error instanceof Error ? error.message : String(error)
+          artifactKind: "log" satisfies ArtifactKind,
+          ...errorLogFields(error)
         },
         "run log write failed"
       );
@@ -618,7 +617,7 @@ async function redactPlaywrightResultsSafely({
       logger?.info?.(
         {
           runId,
-          artifactKind: "playwright-json-redaction",
+          artifactKind: "playwright-json-redaction" satisfies ArtifactKind,
           replacements: outcome.replacements
         },
         "playwright-results redaction applied"
@@ -630,9 +629,8 @@ async function redactPlaywrightResultsSafely({
     logger?.error(
       {
         runId,
-        err: error instanceof Error ? error.message : String(error),
-        code: redactionCode,
-        playwrightJsonPath
+        artifactKind: "playwright-json" satisfies ArtifactKind,
+        ...errorLogFields(error)
       },
       "playwright-results redaction failed"
     );
@@ -644,9 +642,8 @@ async function redactPlaywrightResultsSafely({
       logger?.error(
         {
           runId,
-          err: unlinkError instanceof Error ? unlinkError.message : String(unlinkError),
-          code: unlinkCode,
-          playwrightJsonPath
+          artifactKind: "playwright-json" satisfies ArtifactKind,
+          ...errorLogFields(unlinkError)
         },
         "failed to remove raw playwright-results artifact after redaction failure"
       );
@@ -669,9 +666,8 @@ async function readSummarySafely(
       {
         runId: context.runId,
         provider: provider.name,
-        artifactKind: "playwright-json-summary",
-        code,
-        err: error instanceof Error ? error.message : String(error)
+        artifactKind: "playwright-json-summary" satisfies ArtifactKind,
+        ...errorLogFields(error)
       },
       "report summary read failed"
     );
@@ -698,7 +694,7 @@ export async function loadRunsFromDisk(
     if (code !== "ENOENT") {
       logger?.warn?.(
         {
-          artifactKind: "runs-directory",
+          artifactKind: "runs-directory" satisfies ArtifactKind,
           code
         },
         "run directory could not be listed"
@@ -719,7 +715,7 @@ export async function loadRunsFromDisk(
         logger?.warn?.(
           {
             runDir: entry.name,
-            artifactKind: "metadata",
+            artifactKind: "metadata" satisfies ArtifactKind,
             reason: "stat-error",
             code
           },
@@ -732,7 +728,7 @@ export async function loadRunsFromDisk(
       logger?.warn?.(
         {
           runDir: entry.name,
-          artifactKind: "metadata",
+          artifactKind: "metadata" satisfies ArtifactKind,
           reason: "not-file"
         },
         "run metadata is not a regular file"
@@ -748,7 +744,7 @@ export async function loadRunsFromDisk(
       logger?.warn?.(
         {
           runDir: entry.name,
-          artifactKind: "metadata",
+          artifactKind: "metadata" satisfies ArtifactKind,
           reason: metadata.reason,
           code: metadata.code
         },

@@ -25,6 +25,7 @@ import {
 } from "./commands/policy.js";
 import { createEventBus, type EventBus } from "./events/bus.js";
 import { createRunManager, type RunManager } from "./playwright/runManager.js";
+import { errorLogFields } from "./playwright/runTypes.js";
 import { createProjectStore, type ProjectStore } from "./project/store.js";
 import { projectsRoutes } from "./routes/projects.js";
 import { runsRoutes } from "./routes/runs.js";
@@ -184,12 +185,8 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
           auditPersistenceError = new AuditPersistenceError(error);
           logger.error(
             {
-              err: error instanceof Error ? error.message : String(error),
-              code:
-                error instanceof Error && "code" in error
-                  ? String((error as NodeJS.ErrnoException).code)
-                  : undefined,
-              projectRoot
+              artifactKind: "audit-log",
+              ...errorLogFields(error)
             },
             "failed to persist audit log entry"
           );
@@ -199,12 +196,8 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
         } catch (error) {
           logger.error(
             {
-              err: error instanceof Error ? error.message : String(error),
               errorName: error instanceof Error ? error.name : typeof error,
-              code:
-                error instanceof Error && "code" in error
-                  ? String((error as NodeJS.ErrnoException).code)
-                  : undefined
+              ...errorLogFields(error)
             },
             "audit observer failed"
           );
@@ -242,10 +235,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
         );
       })
       .catch((error: unknown) => {
-        logger.error(
-          { err: error instanceof Error ? error.message : String(error) },
-          "Failed to load initial project"
-        );
+        logger.error(errorLogFields(error), "Failed to load initial project");
       });
   }
 

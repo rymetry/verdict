@@ -373,25 +373,30 @@ describe("RunManager", () => {
         runId: handle.runId,
         stream: "stdout",
         artifactKind: "log",
-        code: "ENOSPC",
-        err: "disk full at /private/stdout.log"
+        code: "ENOSPC"
       }),
       expect.objectContaining({
         runId: handle.runId,
         stream: "stdout",
         artifactKind: "log",
-        code: "EACCES",
-        err: "disk full at /private/stdout.log"
+        code: "EACCES"
       }),
       expect.objectContaining({
         runId: handle.runId,
         stream: "stderr",
         artifactKind: "log",
-        code: "EBADF",
-        err: "bad fd at /private/stderr.log"
+        code: "EBADF"
       })
     ]));
     expect(errors).toHaveLength(3);
+    // Issue #27: ErrnoException messages embed the failing path; structured
+    // logs must rely on `code` alone so absolute paths do not leak.
+    const errorsAsJson = JSON.stringify(errors);
+    expect(errorsAsJson).not.toContain("/private/stdout.log");
+    expect(errorsAsJson).not.toContain("/private/stderr.log");
+    for (const entry of errors) {
+      expect(entry).not.toHaveProperty("err");
+    }
   });
 
   it("does not let stream publish validation failures escape runner callbacks", async () => {
@@ -1133,7 +1138,7 @@ process.exit(1);
           runId: handle.runId,
           err: "redaction disk write failed",
           code: "UNKNOWN",
-          playwrightJsonPath: completed.paths.playwrightJson
+          artifactKind: "playwright-json"
         }),
         expect.objectContaining({
           runId: handle.runId,
@@ -1143,6 +1148,15 @@ process.exit(1);
         })
       ])
     );
+    // Issue #27: structured-log payload must not leak absolute filesystem
+    // paths. `runId` + `artifactKind` is sufficient for log correlation;
+    // run-scoped paths can be reconstructed via `runPathsFor()`.
+    const errorsAsJson = JSON.stringify(errors);
+    expect(errorsAsJson).not.toContain(completed.paths.playwrightJson);
+    expect(errorsAsJson).not.toContain(workdir);
+    for (const entry of errors) {
+      expect(entry).not.toHaveProperty("playwrightJsonPath");
+    }
   });
 
   it("does not claim raw Playwright JSON was removed when cleanup fails", async () => {
