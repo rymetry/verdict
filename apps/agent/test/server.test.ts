@@ -455,6 +455,45 @@ describe("HTTP API surface", () => {
     }
   });
 
+  it("keeps audit observer failures fail-open and separate from persistence failures", async () => {
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-observer-")));
+    const permissiveNodePolicy = (root: string): CommandPolicy => ({
+      allowedExecutables: ["node"],
+      argValidator: unsafelyAllowAnyArgsValidator,
+      cwdBoundary: root,
+      envAllowlist: ["PATH"]
+    });
+
+    try {
+      const { runnerForProject } = buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [projectRoot],
+          failClosedAudit: true
+        },
+        policyFactory: permissiveNodePolicy,
+        audit: () => {
+          throw new Error("observer failed at /private/audit-hook");
+        }
+      });
+
+      const handle = runnerForProject(projectRoot).run({
+        executable: process.execPath,
+        args: ["-e", ""],
+        cwd: projectRoot
+      });
+
+      await expect(handle.result).resolves.toEqual(
+        expect.objectContaining({ exitCode: 0, cancelled: false })
+      );
+      expect(fs.existsSync(path.join(projectRoot, ".playwright-workbench", "audit.log"))).toBe(true);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects /projects/open paths outside the allowed roots", async () => {
     const { app } = buildApp({
       env: {

@@ -3,7 +3,7 @@ import * as fsSync from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { type RunMetadata } from "@pwqa/shared";
 import { workbenchPaths } from "../storage/paths.js";
-import { redact } from "../commands/redact.js";
+import { redactWithStats } from "../commands/redact.js";
 
 /**
  * All filesystem mutations for a run live behind this interface so that
@@ -27,6 +27,7 @@ export interface RedactionOutcome {
   applied: boolean;
   /** True if redact() actually changed the contents. */
   modified: boolean;
+  replacements: number;
 }
 
 export interface RunLogStreams {
@@ -74,13 +75,13 @@ export const runArtifactsStore: RunArtifactsStore = {
     try {
       raw = await fs.readFile(playwrightJsonPath, "utf8");
     } catch {
-      return { applied: false, modified: false };
+      return { applied: false, modified: false, replacements: 0 };
     }
-    const scrubbed = redact(raw);
-    if (scrubbed === raw) {
-      return { applied: true, modified: false };
+    const scrubbed = redactWithStats(raw);
+    if (scrubbed.value === raw) {
+      return { applied: true, modified: false, replacements: 0 };
     }
-    await fs.writeFile(playwrightJsonPath, scrubbed, "utf8");
-    return { applied: true, modified: true };
+    await fs.writeFile(playwrightJsonPath, scrubbed.value, "utf8");
+    return { applied: true, modified: true, replacements: scrubbed.replacements };
   }
 };

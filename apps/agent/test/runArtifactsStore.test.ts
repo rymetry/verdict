@@ -20,6 +20,7 @@ describe("runArtifactsStore.redactPlaywrightResults", () => {
     );
     expect(result.applied).toBe(false);
     expect(result.modified).toBe(false);
+    expect(result.replacements).toBe(0);
   });
 
   it("scrubs known secrets and preserves valid JSON shape", async () => {
@@ -55,6 +56,7 @@ describe("runArtifactsStore.redactPlaywrightResults", () => {
     const outcome = await runArtifactsStore.redactPlaywrightResults(file);
     expect(outcome.applied).toBe(true);
     expect(outcome.modified).toBe(true);
+    expect(outcome.replacements).toBeGreaterThanOrEqual(2);
 
     const scrubbed = fs.readFileSync(file, "utf8");
     expect(scrubbed).not.toContain("abcdefghij1234567890");
@@ -74,5 +76,6 @@ describe("runArtifactsStore.redactPlaywrightResults", () => {
     const outcome = await runArtifactsStore.redactPlaywrightResults(file);
     expect(outcome.applied).toBe(true);
     expect(outcome.modified).toBe(false);
+    expect(outcome.replacements).toBe(0);
   });
 });

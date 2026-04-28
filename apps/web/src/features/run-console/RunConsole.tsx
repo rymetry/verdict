@@ -18,6 +18,7 @@ import {
   RunTerminalPayloadSchema,
   isTerminalEventType,
   terminalStatusMatchesEvent,
+  type RunCancellationReason,
   type RunTerminalPayload,
   type WorkbenchEvent
 } from "@pwqa/shared";
@@ -39,6 +40,7 @@ export interface RunConsoleState {
   stdout: string[];
   stderr: string[];
   warnings: string[];
+  cancelReason?: RunCancellationReason;
   durationMs?: number;
   summary?: { total: number; passed: number; failed: number; skipped: number; flaky: number };
 }
@@ -119,6 +121,15 @@ function appendWarning(warnings: string[], warning: string): string[] {
   return warnings.includes(warning) ? warnings : [...warnings, warning];
 }
 
+function cancelReasonLabel(reason: RunCancellationReason): string {
+  switch (reason) {
+    case "user-request":
+      return "Cancelled by user request";
+    case "internal":
+      return "Cancelled by workbench";
+  }
+}
+
 export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React.ReactElement {
   const [state, setState] = React.useState<RunConsoleState>(initialRunConsoleState);
   const stdoutRef = React.useRef<HTMLPreElement>(null);
@@ -133,7 +144,7 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React
   React.useEffect(() => {
     if (!activeRunId) return undefined;
     const unsubscribe = eventStream.subscribe((event: WorkbenchEvent) => {
-      if (event.runId !== activeRunId) return;
+      if (!("runId" in event) || event.runId !== activeRunId) return;
       setState((current) => applyEvent(current, event));
     });
     return () => {
@@ -161,6 +172,11 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React
       </CardHeader>
       <CardContent>
         <p className="text-sm text-[var(--ink-3)]">{statusLabel}</p>
+        {state.status === "cancelled" && state.cancelReason ? (
+          <p className="mt-2 text-sm font-medium text-[var(--ink-2)]">
+            {cancelReasonLabel(state.cancelReason)}
+          </p>
+        ) : null}
         {state.summary ? (
           <p className="mt-2 text-sm font-semibold text-[var(--ink-1)]">
             {state.summary.passed} passed · {state.summary.failed} failed ·{" "}
@@ -287,6 +303,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
         ...state,
         status: "cancelled",
         ...applyTerminalFields(state, payload),
+        cancelReason: payload?.status === "cancelled" ? payload.cancelReason : state.cancelReason,
         warnings: payload?.warnings ?? appendWarning(state.warnings, TERMINAL_PAYLOAD_WARNING)
       };
     }

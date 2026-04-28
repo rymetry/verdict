@@ -4,6 +4,7 @@ import {
   RunStdStreamPayloadSchema,
   RunTerminalPayloadSchema,
   SnapshotPayloadSchema,
+  WorkbenchEventSchema,
   terminalStatusMatchesEvent,
   type WorkbenchEvent,
   type WorkbenchEventInput
@@ -105,7 +106,8 @@ export function createEventBus(options: CreateEventBusOptions = {}): EventBus {
         sequence,
         timestamp: new Date().toISOString()
       };
-      if (event.runId) {
+      WorkbenchEventSchema.parse(event);
+      if ("runId" in event) {
         const list = history.get(event.runId) ?? [];
         list.push(event);
         if (list.length > RUN_HISTORY_LIMIT) {

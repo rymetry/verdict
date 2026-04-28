@@ -78,12 +78,14 @@ describe("RunConsole applyEvent", () => {
         payload: {
           exitCode: null,
           status: "cancelled",
+          cancelReason: "user-request",
           durationMs: 1,
           warnings: ["cancelled by user"]
         }
       })
     );
     expect(next.status).toBe("cancelled");
+    expect(next.cancelReason).toBe("user-request");
     expect(next.warnings).toEqual(["cancelled by user"]);
     expect(consoleSpy).not.toHaveBeenCalled();
   });

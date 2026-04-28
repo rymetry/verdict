@@ -22,7 +22,13 @@ const payloadCases: Array<[WorkbenchEventInput["type"], unknown, unknown]> = [
   ],
   [
     "run.cancelled",
-    { exitCode: null, status: "cancelled", durationMs: 1, warnings: [] },
+    {
+      exitCode: null,
+      status: "cancelled",
+      cancelReason: "user-request",
+      durationMs: 1,
+      warnings: []
+    },
     { exitCode: null, status: "passed", durationMs: 1, warnings: [] }
   ],
   [
@@ -47,7 +53,7 @@ describe("EventBus", () => {
     try {
       bus.publish({
         type,
-        runId: "run-1",
+        ...(type === "snapshot" ? {} : { runId: "run-1" }),
         payload: invalidPayload as never
       } as unknown as WorkbenchEventInput);
     } catch (error) {
@@ -59,11 +65,55 @@ describe("EventBus", () => {
     }));
     const event = bus.publish({
       type,
-      runId: "run-1",
+      ...(type === "snapshot" ? {} : { runId: "run-1" }),
       payload: validPayload as never
     } as unknown as WorkbenchEventInput);
 
     expect(event.sequence).toBe(1);
-    expect(bus.snapshot("run-1")).toEqual([event]);
+    if (type === "snapshot") {
+      expect(bus.snapshot("run-1")).toEqual([]);
+    } else {
+      expect(bus.snapshot("run-1")).toEqual([event]);
+    }
+  });
+
+  it("rejects run events without runId while allowing snapshot without runId", () => {
+    const bus = createEventBus();
+
+    expect(() =>
+      bus.publish({
+        type: "run.stdout",
+        payload: { chunk: "hello" }
+      } as unknown as WorkbenchEventInput)
+    ).toThrow(/runId/);
+
+    expect(() =>
+      bus.publish({
+        type: "snapshot",
+        payload: { service: "playwright-workbench-agent", version: "0.1.0" }
+      })
+    ).not.toThrow();
+  });
+
+  it("isolates listener errors and reports them through onListenerError", () => {
+    const errors: unknown[] = [];
+    const bus = createEventBus({ onListenerError: (error) => errors.push(error) });
+    const delivered: WorkbenchEventInput[] = [];
+
+    bus.subscribe(() => {
+      throw new Error("listener bug");
+    });
+    bus.subscribe((event) => {
+      delivered.push(event);
+    });
+
+    bus.publish({
+      type: "run.stdout",
+      runId: "run-1",
+      payload: { chunk: "hello" }
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(delivered).toHaveLength(1);
   });
 });

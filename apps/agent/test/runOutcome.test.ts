@@ -32,13 +32,18 @@ describe("deriveOutcome", () => {
   });
 
   it("returns cancelled when CommandResult.cancelled is true", () => {
-    const outcome = deriveOutcome(makeResult({ cancelled: true, exitCode: 143 }), new Date());
+    const outcome = deriveOutcome(
+      makeResult({ cancelled: true, cancelReason: "user-request", exitCode: 143 }),
+      new Date()
+    );
     expect(outcome.status).toBe("cancelled");
+    expect(outcome.cancelReason).toBe("user-request");
   });
 
   it("returns error with warning when timedOut", () => {
     const outcome = deriveOutcome(makeResult({ timedOut: true }), new Date());
     expect(outcome.status).toBe("error");
+    expect(outcome.cancelReason).toBeUndefined();
     expect(outcome.warning).toMatch(/timed out/i);
   });
 

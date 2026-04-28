@@ -133,12 +133,17 @@ export const RunStatusSchema = z.enum([
 ]);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
+export const RunCancellationReasonSchema = z.enum(["user-request", "internal"]);
+export type RunCancellationReason = z.infer<typeof RunCancellationReasonSchema>;
+
 /**
  * Inputs that flow to the Playwright CLI must not be allowed to act as
  * additional flags (PLAN.v2 §28 / security review). A bare leading `-`
  * is rejected; `..` and absolute paths are rejected for `specPath`.
  */
 const noFlagInjection = (value: string): boolean => !value.startsWith("-");
+const absolutePathLike = (value: string): boolean =>
+  value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
 
 export const RunRequestSchema = z.object({
   projectId: z.string(),
@@ -227,6 +232,7 @@ export const RunMetadataSchema = z.object({
   cwd: z.string(),
   exitCode: z.number().int().nullable().optional(),
   signal: z.string().nullable().optional(),
+  cancelReason: RunCancellationReasonSchema.optional(),
   durationMs: z.number().int().nonnegative().optional(),
   requested: RunRequestSchema,
   paths: RunPathsSchema,
@@ -270,8 +276,8 @@ export type RunQueuedPayload = z.infer<typeof RunQueuedPayloadSchema>;
 
 export const RunStartedPayloadSchema = z.object({
   command: CommandTemplateSchema,
-  cwd: z.string(),
-  startedAt: z.string()
+  cwd: z.string().refine(absolutePathLike, "cwd must be an absolute path"),
+  startedAt: z.string().datetime()
 });
 export type RunStartedPayload = z.infer<typeof RunStartedPayloadSchema>;
 
@@ -295,7 +301,8 @@ export const RunCompletedPayloadSchema = RunTerminalPayloadBaseSchema.extend({
 export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
 
 export const RunCancelledPayloadSchema = RunTerminalPayloadBaseSchema.extend({
-  status: z.literal("cancelled")
+  status: z.literal("cancelled"),
+  cancelReason: RunCancellationReasonSchema.optional()
 });
 export type RunCancelledPayload = z.infer<typeof RunCancelledPayloadSchema>;
 
@@ -348,52 +355,61 @@ export const WorkbenchEventTypeSchema = z.enum([
 ]);
 export type WorkbenchEventType = z.infer<typeof WorkbenchEventTypeSchema>;
 
-const WorkbenchEventBaseSchema = z.object({
+const WorkbenchRunEventBaseSchema = z.object({
   sequence: z.number().int().nonnegative(),
   timestamp: z.string(),
-  runId: z.string().optional()
+  runId: z.string()
+});
+
+const WorkbenchSnapshotEventBaseSchema = z.object({
+  sequence: z.number().int().nonnegative(),
+  timestamp: z.string()
 });
 
 export const WorkbenchEventSchema = z.discriminatedUnion("type", [
-  WorkbenchEventBaseSchema.extend({
+  WorkbenchRunEventBaseSchema.extend({
     type: z.literal("run.queued"),
     payload: RunQueuedPayloadSchema
   }),
-  WorkbenchEventBaseSchema.extend({
+  WorkbenchRunEventBaseSchema.extend({
     type: z.literal("run.started"),
     payload: RunStartedPayloadSchema
   }),
-  WorkbenchEventBaseSchema.extend({
+  WorkbenchRunEventBaseSchema.extend({
     type: z.literal("run.stdout"),
     payload: RunStdStreamPayloadSchema
   }),
-  WorkbenchEventBaseSchema.extend({
+  WorkbenchRunEventBaseSchema.extend({
     type: z.literal("run.stderr"),
     payload: RunStdStreamPayloadSchema
   }),
-  WorkbenchEventBaseSchema.extend({
+  WorkbenchRunEventBaseSchema.extend({
     type: z.literal("run.completed"),
     payload: RunCompletedPayloadSchema
   }),
-  WorkbenchEventBaseSchema.extend({
+  WorkbenchRunEventBaseSchema.extend({
     type: z.literal("run.cancelled"),
     payload: RunCancelledPayloadSchema
   }),
-  WorkbenchEventBaseSchema.extend({
+  WorkbenchRunEventBaseSchema.extend({
     type: z.literal("run.error"),
     payload: RunErrorPayloadSchema
   }),
-  WorkbenchEventBaseSchema.extend({
+  WorkbenchSnapshotEventBaseSchema.extend({
     type: z.literal("snapshot"),
     payload: SnapshotPayloadSchema
   })
 ]);
 export type WorkbenchEvent = z.infer<typeof WorkbenchEventSchema>;
-export type WorkbenchEventInput = WorkbenchEvent extends infer Event
-  ? Event extends WorkbenchEvent
-    ? Omit<Event, "sequence" | "timestamp">
-    : never
-  : never;
+export type WorkbenchEventInput =
+  | { type: "run.queued"; runId: string; payload: RunQueuedPayload }
+  | { type: "run.started"; runId: string; payload: RunStartedPayload }
+  | { type: "run.stdout"; runId: string; payload: RunStdStreamPayload }
+  | { type: "run.stderr"; runId: string; payload: RunStdStreamPayload }
+  | { type: "run.completed"; runId: string; payload: RunCompletedPayload }
+  | { type: "run.cancelled"; runId: string; payload: RunCancelledPayload }
+  | { type: "run.error"; runId: string; payload: RunErrorPayload }
+  | { type: "snapshot"; payload: SnapshotPayload };
 
 /* ----------------------------------------------------------------------- */
 /* HTTP API responses                                                      */

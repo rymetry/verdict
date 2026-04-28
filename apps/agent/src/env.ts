@@ -51,10 +51,13 @@ function realpathSafe(input: string): string | undefined {
   }
 }
 
-function parseBooleanFlag(raw: string | undefined): boolean {
-  // Env flags intentionally accept only explicit truthy values; "yes"/"on" stay false.
+function parseBooleanFlag(name: string, raw: string | undefined): boolean {
   const value = raw?.trim().toLowerCase();
-  return value === "1" || value === "true";
+  if (value === undefined || value === "") return false;
+  if (value === "1" || value === "true") return true;
+  if (value === "0" || value === "false") return false;
+  // Remote bind や audit fail-close の誤設定を避けるため、曖昧な truthy/falsy は拒否する。
+  throw new Error(`Invalid ${name} value: ${raw}. Use 1, true, 0, or false.`);
 }
 
 export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = {}): AgentEnv {
@@ -64,7 +67,7 @@ export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = 
   const portArg = portArgIndex >= 0 ? argv[portArgIndex + 1] : undefined;
 
   const port = parsePort(portArg ?? env.PORT);
-  const allowAnyHost = parseBooleanFlag(env.WORKBENCH_ALLOW_REMOTE);
+  const allowAnyHost = parseBooleanFlag("WORKBENCH_ALLOW_REMOTE", env.WORKBENCH_ALLOW_REMOTE);
   const host = parseHost(env.HOST, allowAnyHost);
   const logLevel = env.LOG_LEVEL ?? "info";
 
@@ -92,6 +95,6 @@ export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = 
     logLevel,
     initialProjectRoot,
     allowedRoots,
-    failClosedAudit: parseBooleanFlag(env.AGENT_FAIL_CLOSED_AUDIT)
+    failClosedAudit: parseBooleanFlag("AGENT_FAIL_CLOSED_AUDIT", env.AGENT_FAIL_CLOSED_AUDIT)
   };
 }

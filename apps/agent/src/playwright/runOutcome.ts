@@ -1,10 +1,11 @@
-import { type RunStatus } from "@pwqa/shared";
+import { type RunCancellationReason, type RunStatus } from "@pwqa/shared";
 import type { CommandResult } from "../commands/runner.js";
 
 export interface RunOutcome {
   status: RunStatus;
   exitCode: number | null;
   signal: string | null;
+  cancelReason?: RunCancellationReason;
   durationMs: number;
   warning?: string;
 }
@@ -19,7 +20,13 @@ export function deriveOutcome(result: CommandResult, startedAt: Date): RunOutcom
   const durationMs = completedAt.getTime() - startedAt.getTime();
 
   if (result.cancelled) {
-    return { status: "cancelled", exitCode: result.exitCode, signal: result.signal, durationMs };
+    return {
+      status: "cancelled",
+      exitCode: result.exitCode,
+      signal: result.signal,
+      cancelReason: result.cancelReason ?? "internal",
+      durationMs
+    };
   }
   if (result.timedOut) {
     return {

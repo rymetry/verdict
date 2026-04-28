@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   type DetectedPackageManager,
+  type RunCancellationReason,
   type RunMetadata,
   type RunRequest,
   type TestResultSummary,
@@ -10,7 +11,7 @@ import {
   type WorkbenchEventInput
 } from "@pwqa/shared";
 import type { CommandRunner } from "../commands/runner.js";
-import { redact } from "../commands/redact.js";
+import { redact, redactWithStats } from "../commands/redact.js";
 import type { EventBus } from "../events/bus.js";
 import { runPathsFor, workbenchPaths } from "../storage/paths.js";
 import { buildPlaywrightTestCommand } from "./builder.js";
@@ -25,6 +26,7 @@ import type { ReportProvider } from "../reporting/ReportProvider.js";
 export interface RunManagerLogger {
   error(payload: Record<string, unknown>, message: string): void;
   warn?(payload: Record<string, unknown>, message: string): void;
+  info?(payload: Record<string, unknown>, message: string): void;
 }
 
 function errorCode(error: unknown): string {
@@ -43,7 +45,7 @@ export interface RunStartParams {
 
 export interface ActiveRunHandle {
   runId: string;
-  cancel(reason?: string): void;
+  cancel(reason?: RunCancellationReason): void;
   metadata: RunMetadata;
   finished: Promise<RunMetadata>;
 }
@@ -196,7 +198,7 @@ function publishEventSafely({
     const code = errorCode(error);
     logger?.error(
       {
-        runId: event.runId,
+        runId: "runId" in event ? event.runId : undefined,
         eventType: event.type,
         code,
         err: error instanceof Error ? error.message : String(error)
@@ -299,6 +301,10 @@ function createStreamRedactor({
     stdout: new Set(),
     stderr: new Set()
   };
+  const successes: Record<"stdout" | "stderr", { chunks: number; replacements: number; logged: boolean }> = {
+    stdout: { chunks: 0, replacements: 0, logged: false },
+    stderr: { chunks: 0, replacements: 0, logged: false }
+  };
 
   function recordFailure(stream: "stdout" | "stderr", chunk: string, error: unknown): void {
     const code = errorCode(error);
@@ -327,7 +333,31 @@ function createStreamRedactor({
   return {
     redact(stream, chunk) {
       try {
-        return redactor(chunk);
+        const result =
+          redactor === redact
+            ? redactWithStats(chunk)
+            : (() => {
+                const value = redactor(chunk);
+                return { value, replacements: value === chunk ? 0 : 1 };
+              })();
+        if (result.replacements > 0) {
+          const success = successes[stream];
+          success.chunks += 1;
+          success.replacements += result.replacements;
+          if (!success.logged) {
+            success.logged = true;
+            logger?.info?.(
+              {
+                runId,
+                stream,
+                artifactKind: "stream-redaction",
+                replacements: result.replacements
+              },
+              "run stream redaction applied"
+            );
+          }
+        }
+        return result.value;
       } catch (error) {
         recordFailure(stream, chunk, error);
         return "[redaction failed]\n";
@@ -335,6 +365,19 @@ function createStreamRedactor({
     },
     flush() {
       return (["stdout", "stderr"] as const).flatMap((stream) => {
+        const success = successes[stream];
+        if (success.replacements > 0) {
+          logger?.info?.(
+            {
+              runId,
+              stream,
+              artifactKind: "stream-redaction",
+              chunks: success.chunks,
+              replacements: success.replacements
+            },
+            "run stream redaction summary"
+          );
+        }
         const failure = failures[stream];
         if (failure.count === 0) return [];
         const codes = Array.from(failure.codes).join(",");
@@ -551,6 +594,7 @@ export function createRunManager({
           status: outcome.status,
           exitCode: outcome.exitCode,
           signal: outcome.signal,
+          cancelReason: outcome.cancelReason,
           durationMs: outcome.durationMs,
           completedAt: new Date().toISOString(),
           summary: summary?.summary,
@@ -568,6 +612,7 @@ export function createRunManager({
                   exitCode: outcome.exitCode,
                   signal: outcome.signal,
                   status: "cancelled",
+                  cancelReason: outcome.cancelReason,
                   durationMs: outcome.durationMs,
                   warnings
                 }
@@ -649,7 +694,7 @@ export function createRunManager({
       runId,
       metadata: runningMetadata,
       finished,
-      cancel(reason?: string) {
+      cancel(reason?: RunCancellationReason) {
         handle.cancel(reason);
       }
     };
@@ -685,7 +730,17 @@ async function redactPlaywrightResultsSafely({
   // raw reporter output は secret を含み得る。成功なら無警告、redaction 失敗でも削除できたら
   // "removed" warning、削除も失敗したら secret 残存可能性を明示する warning に分ける。
   try {
-    await artifactsStore.redactPlaywrightResults(playwrightJsonPath);
+    const outcome = await artifactsStore.redactPlaywrightResults(playwrightJsonPath);
+    if (outcome.modified) {
+      logger?.info?.(
+        {
+          runId,
+          artifactKind: "playwright-json-redaction",
+          replacements: outcome.replacements
+        },
+        "playwright-results redaction applied"
+      );
+    }
     return undefined;
   } catch (error) {
     const redactionCode = errorCode(error);

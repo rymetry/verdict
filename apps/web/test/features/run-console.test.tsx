@@ -172,6 +172,7 @@ describe("RunConsole", () => {
         timestamp: "2026-04-28T00:00:00Z",
         payload: {
           status: "cancelled",
+          cancelReason: "user-request",
           exitCode: null,
           durationMs: 0,
           warnings: []
@@ -179,6 +180,7 @@ describe("RunConsole", () => {
       });
     });
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled by user request")).toBeInTheDocument();
   });
 
   it("run.cancelled の warnings を表示する", async () => {
