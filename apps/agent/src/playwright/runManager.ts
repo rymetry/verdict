@@ -100,9 +100,9 @@ function createLogWriteTracker({
   logger?: RunManagerLogger;
   runId: string;
 }): LogWriteTracker {
-  const failures: Record<"stdout" | "stderr", { count: number; firstCode: string }> = {
-    stdout: { count: 0, firstCode: "UNKNOWN" },
-    stderr: { count: 0, firstCode: "UNKNOWN" }
+  const failures: Record<"stdout" | "stderr", { count: number; firstCode: string; codes: Set<string> }> = {
+    stdout: { count: 0, firstCode: "UNKNOWN", codes: new Set() },
+    stderr: { count: 0, firstCode: "UNKNOWN", codes: new Set() }
   };
   const logged = { stdout: false, stderr: false };
   const queues: Record<"stdout" | "stderr", Promise<void>> = {
@@ -115,11 +115,12 @@ function createLogWriteTracker({
     const current = failures[stream];
     failures[stream] = {
       count: current.count + 1,
-      firstCode: current.count === 0 ? code : current.firstCode
+      firstCode: current.count === 0 ? code : current.firstCode,
+      codes: new Set([...current.codes, code])
     };
     if (!logged[stream]) {
       logged[stream] = true;
-      // 後続失敗は count で集約し、構造化ログは stream ごとの最初の原因に揃える。
+      // 構造化ログは stream ごとの最初の原因に揃え、後続の code 差分は warning の codes に集約する。
       logger?.error(
         {
           runId,
@@ -150,8 +151,9 @@ function createLogWriteTracker({
       return (["stdout", "stderr"] as const).flatMap((stream) => {
         const failure = failures[stream];
         if (failure.count === 0) return [];
+        const codes = Array.from(failure.codes).join(",");
         return [
-          `${stream} log write failed; websocket stream was still delivered. code=${failure.firstCode}; failures=${failure.count}`
+          `${stream} log write failed; websocket stream was still delivered. code=${failure.firstCode}; codes=${codes}; failures=${failure.count}`
         ];
       });
     }
@@ -280,7 +282,13 @@ export function createRunManager({
         const logWriteWarnings = await logWriter.flush();
         await logStreams.closeAll();
 
-        // redaction で raw JSON を削除する可能性があるため、summary は先に読み取る。
+        const redactionWarning = await redactPlaywrightResultsSafely({
+          artifactsStore,
+          logger,
+          runId,
+          playwrightJsonPath: paths.playwrightJson
+        });
+        // summary は metadata と WS に流れるため、必ず scrubbed JSON から読む。
         const summary = await readSummarySafely(
           reportProvider,
           {
@@ -290,12 +298,6 @@ export function createRunManager({
           },
           { logger, runId }
         );
-        const redactionWarning = await redactPlaywrightResultsSafely({
-          artifactsStore,
-          logger,
-          runId,
-          playwrightJsonPath: paths.playwrightJson
-        });
         const warnings = [
           ...runningMetadata.warnings,
           ...logWriteWarnings,
@@ -345,17 +347,25 @@ export function createRunManager({
                   summary: summary?.summary,
                   warnings
                 };
-        bus.publish({
-          type:
-            outcome.status === "cancelled"
-              ? "run.cancelled"
-              : outcome.status === "error"
-                ? "run.error"
-                : "run.completed",
-          runId,
-          payload: terminalPayload
-        });
-        active.delete(runId);
+        try {
+          bus.publish({
+            type:
+              outcome.status === "cancelled"
+                ? "run.cancelled"
+                : outcome.status === "error"
+                  ? "run.error"
+                  : "run.completed",
+            runId,
+            payload: terminalPayload
+          });
+        } catch (error) {
+          logger?.error(
+            { runId, err: error instanceof Error ? error.message : String(error) },
+            "terminal event publish failed"
+          );
+        } finally {
+          active.delete(runId);
+        }
         return completed;
       } catch (error) {
         const logWriteWarnings = await logWriter.flush();
@@ -373,19 +383,27 @@ export function createRunManager({
           ]
         };
         await artifactsStore.writeMetadata(paths.metadataJson, completed);
-        bus.publish({
-          type: "run.error",
-          runId,
-          payload: {
-            message: "Runner failed after spawn.",
-            exitCode: null,
-            signal: null,
-            status: "error",
-            durationMs: completed.durationMs ?? 0,
-            warnings: completed.warnings
-          }
-        });
-        active.delete(runId);
+        try {
+          bus.publish({
+            type: "run.error",
+            runId,
+            payload: {
+              message: "Runner failed after spawn.",
+              exitCode: null,
+              signal: null,
+              status: "error",
+              durationMs: completed.durationMs ?? 0,
+              warnings: completed.warnings
+            }
+          });
+        } catch (publishError) {
+          logger?.error(
+            { runId, err: publishError instanceof Error ? publishError.message : String(publishError) },
+            "terminal event publish failed"
+          );
+        } finally {
+          active.delete(runId);
+        }
         return completed;
       }
     })();

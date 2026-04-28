@@ -263,6 +263,24 @@ export const RunStdStreamPayloadSchema = z.object({
 });
 export type RunStdStreamPayload = z.infer<typeof RunStdStreamPayloadSchema>;
 
+export const RunQueuedPayloadSchema = z.object({
+  request: RunRequestSchema
+});
+export type RunQueuedPayload = z.infer<typeof RunQueuedPayloadSchema>;
+
+export const RunStartedPayloadSchema = z.object({
+  command: CommandTemplateSchema,
+  cwd: z.string(),
+  startedAt: z.string()
+});
+export type RunStartedPayload = z.infer<typeof RunStartedPayloadSchema>;
+
+export const SnapshotPayloadSchema = z.object({
+  service: z.string(),
+  version: z.string()
+});
+export type SnapshotPayload = z.infer<typeof SnapshotPayloadSchema>;
+
 const RunTerminalPayloadBaseSchema = z.object({
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable().optional(),
@@ -283,7 +301,7 @@ export type RunCancelledPayload = z.infer<typeof RunCancelledPayloadSchema>;
 
 export const RunErrorPayloadSchema = RunTerminalPayloadBaseSchema.extend({
   status: z.literal("error"),
-  message: z.string()
+  message: z.string().min(1)
 });
 export type RunErrorPayload = z.infer<typeof RunErrorPayloadSchema>;
 

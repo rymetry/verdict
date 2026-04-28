@@ -39,7 +39,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     const response = await app.request("/health");
@@ -56,7 +56,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     const open = await app.request("/projects/open", {
@@ -84,7 +84,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [fixtureRealpath],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     const open = await app.request("/projects/open", {
@@ -116,7 +116,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       },
       policyFactory: (projectRoot) => {
         requestedRoots.push(projectRoot);
@@ -143,7 +143,7 @@ describe("HTTP API surface", () => {
           host: "127.0.0.1",
           logLevel: "silent",
           allowedRoots: [workdir, otherRoot],
-        failClosedAudit: false
+          failClosedAudit: false
         },
         policyFactory: (projectRoot): CommandPolicy => ({
           allowedExecutables: ["node"],
@@ -183,7 +183,7 @@ describe("HTTP API surface", () => {
           host: "127.0.0.1",
           logLevel: "silent",
           allowedRoots: [projectRoot],
-        failClosedAudit: false
+          failClosedAudit: false
         },
         policyFactory: permissiveNodePolicy
       });
@@ -250,7 +250,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       },
       policyFactory: (): CommandPolicy => {
         throw new Error(`policy failed at ${workdir}`);
@@ -327,7 +327,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [path.join(os.tmpdir(), "definitely-not-here")],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     const open = await app.request("/projects/open", {
@@ -347,7 +347,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     const response = await app.request("/runs/non-existent");
@@ -390,7 +390,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     await app.request("/projects/open", {
@@ -421,7 +421,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     const response = await app.request("/projects/open", {
@@ -441,7 +441,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     await app.request("/projects/open", {
@@ -467,7 +467,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     await app.request("/projects/open", {
@@ -493,7 +493,7 @@ describe("HTTP API surface", () => {
         host: "127.0.0.1",
         logLevel: "silent",
         allowedRoots: [workdir],
-      failClosedAudit: false
+        failClosedAudit: false
       }
     });
     const allowed = await app.request("/health", {

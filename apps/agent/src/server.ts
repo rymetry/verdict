@@ -16,6 +16,7 @@ import {
   type AuditEntry,
   type CommandRunner
 } from "./commands/runner.js";
+import { AuditPersistenceError } from "./commands/audit.js";
 import {
   createDefaultCommandPolicy,
   type CommandPolicy
@@ -51,15 +52,6 @@ export interface BuildAppResult {
   runnerForProject: (projectRoot: string) => CommandRunner;
   runManager: RunManager;
   projectStore: ProjectStore;
-}
-
-class AuditPersistenceError extends Error {
-  readonly code = "AUDIT_PERSIST_FAILED";
-
-  constructor(cause: unknown) {
-    super("Audit persistence failed", { cause });
-    this.name = "AuditPersistenceError";
-  }
 }
 
 function persistAuditEntry(rootDir: string, entry: AuditEntry): void {

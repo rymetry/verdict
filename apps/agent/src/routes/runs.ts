@@ -13,6 +13,7 @@ import { apiError } from "../lib/apiError.js";
 import { pathExists } from "../lib/pathExists.js";
 import { CommandPolicyError } from "../commands/runner.js";
 import { PlaywrightCommandBuildError } from "../playwright/builder.js";
+import { AuditPersistenceError } from "../commands/audit.js";
 
 function errorCode(error: unknown): string {
   if (error instanceof Error && "code" in error && typeof error.code === "string") {
@@ -21,6 +22,10 @@ function errorCode(error: unknown): string {
   return "UNKNOWN";
 }
 
+/**
+ * Maps startup failures to stable public codes. Raw error messages stay in
+ * structured logs because they may include cwd, realpath, or secret-adjacent data.
+ */
 function startupFailureResponse(error: unknown): {
   code: string;
   message: string;
@@ -28,7 +33,7 @@ function startupFailureResponse(error: unknown): {
 } {
   if (error instanceof PlaywrightCommandBuildError) {
     return {
-      code: `RUN_COMMAND_BUILD_${error.code}`,
+      code: "RUN_COMMAND_BUILD_FAILED",
       message: "Run command could not be built from the request.",
       status: 400
     };
@@ -40,7 +45,7 @@ function startupFailureResponse(error: unknown): {
       status: 400
     };
   }
-  if (errorCode(error) === "AUDIT_PERSIST_FAILED") {
+  if (error instanceof AuditPersistenceError) {
     return {
       code: "RUN_AUDIT_PERSIST_FAILED",
       message: "Run could not start because audit logging failed.",

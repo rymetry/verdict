@@ -14,10 +14,8 @@
 //  - state listener 内 throw は events.ts 側で握り潰さず log する。
 import * as React from "react";
 import {
-  RunCancelledPayloadSchema,
-  RunCompletedPayloadSchema,
-  RunErrorPayloadSchema,
   RunStdStreamPayloadSchema,
+  RunTerminalPayloadSchema,
   type WorkbenchEvent
 } from "@pwqa/shared";
 
@@ -66,6 +64,29 @@ function applyTerminalFields(
     durationMs: payload?.durationMs ?? state.durationMs,
     warnings: payload?.warnings ?? state.warnings
   };
+}
+
+const TERMINAL_STATUS_BY_EVENT = {
+  "run.completed": new Set(["passed", "failed"]),
+  "run.cancelled": new Set(["cancelled"]),
+  "run.error": new Set(["error"])
+} as const;
+
+function parseTerminalPayload(event: WorkbenchEvent): ReturnType<typeof RunTerminalPayloadSchema.safeParse> {
+  const parsed = RunTerminalPayloadSchema.safeParse(event.payload);
+  if (!parsed.success) return parsed;
+  if (
+    (event.type === "run.completed" ||
+      event.type === "run.cancelled" ||
+      event.type === "run.error") &&
+    !TERMINAL_STATUS_BY_EVENT[event.type].has(parsed.data.status as never)
+  ) {
+    return RunTerminalPayloadSchema.safeParse({
+      ...parsed.data,
+      status: "__event_type_mismatch__"
+    });
+  }
+  return parsed;
 }
 
 export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React.ReactElement {
@@ -196,12 +217,17 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       return { ...state, stderr: trim(state.stderr, parsed.data.chunk) };
     }
     case "run.completed": {
-      const parsed = RunCompletedPayloadSchema.safeParse(event.payload);
+      // terminal event の status は event.type と payload.status の両方で確認する。
+      // payload が壊れても cancelled/error と誤認せず、この event は error fallback に留める。
+      const parsed = parseTerminalPayload(event);
       if (!parsed.success) {
         // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
         console.error("[RunConsole] run.completed payload schema mismatch", parsed.error.issues);
       }
-      const payload = parsed.success ? parsed.data : null;
+      const payload =
+        parsed.success && (parsed.data.status === "passed" || parsed.data.status === "failed")
+          ? parsed.data
+          : null;
       const status: RunConsoleState["status"] =
         payload?.status === "passed" ? "passed" : payload?.status === "failed" ? "failed" : "error";
       return {
@@ -220,7 +246,9 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       };
     }
     case "run.cancelled": {
-      const parsed = RunCancelledPayloadSchema.safeParse(event.payload);
+      // event.type が cancelled なら UI status は cancelled で確定。payload は exit/duration/warnings
+      // を補うためだけに使い、schema 不一致はログに残して既存 state を保つ。
+      const parsed = parseTerminalPayload(event);
       if (!parsed.success) {
         // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
         console.error("[RunConsole] run.cancelled payload schema mismatch", parsed.error.issues);
@@ -233,7 +261,9 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       };
     }
     case "run.error": {
-      const parsed = RunErrorPayloadSchema.safeParse(event.payload);
+      // event.type が error なら UI status は error で確定。message は UI に出さず、
+      // ユーザー向け詳細は sanitized warnings に限定する。
+      const parsed = parseTerminalPayload(event);
       if (!parsed.success) {
         // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
         console.error("[RunConsole] run.error payload schema mismatch", parsed.error.issues);

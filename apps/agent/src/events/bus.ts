@@ -1,8 +1,9 @@
 import {
-  RunCancelledPayloadSchema,
-  RunCompletedPayloadSchema,
-  RunErrorPayloadSchema,
+  RunQueuedPayloadSchema,
+  RunStartedPayloadSchema,
   RunStdStreamPayloadSchema,
+  RunTerminalPayloadSchema,
+  SnapshotPayloadSchema,
   type WorkbenchEvent
 } from "@pwqa/shared";
 
@@ -22,19 +23,43 @@ export interface CreateEventBusOptions {
   onListenerError?: (error: unknown) => void;
 }
 
+const TERMINAL_STATUS_BY_EVENT = {
+  "run.completed": new Set(["passed", "failed"]),
+  "run.cancelled": new Set(["cancelled"]),
+  "run.error": new Set(["error"])
+} as const;
+
+/**
+ * Producer-side contract check for WS payloads. Envelope validation alone keeps
+ * `payload` unknown, so publish validates the event-specific body before it can
+ * enter history or reach subscribers.
+ */
 function assertValidPayload(input: Omit<WorkbenchEvent, "sequence" | "timestamp">): void {
-  const result =
-    input.type === "run.stdout" || input.type === "run.stderr"
-      ? RunStdStreamPayloadSchema.safeParse(input.payload)
-      : input.type === "run.completed"
-        ? RunCompletedPayloadSchema.safeParse(input.payload)
-        : input.type === "run.cancelled"
-          ? RunCancelledPayloadSchema.safeParse(input.payload)
-          : input.type === "run.error"
-            ? RunErrorPayloadSchema.safeParse(input.payload)
-            : null;
+  const result = (() => {
+    if (input.type === "run.queued") return RunQueuedPayloadSchema.safeParse(input.payload);
+    if (input.type === "run.started") return RunStartedPayloadSchema.safeParse(input.payload);
+    if (input.type === "run.stdout" || input.type === "run.stderr") {
+      return RunStdStreamPayloadSchema.safeParse(input.payload);
+    }
+    if (
+      input.type === "run.completed" ||
+      input.type === "run.cancelled" ||
+      input.type === "run.error"
+    ) {
+      const parsed = RunTerminalPayloadSchema.safeParse(input.payload);
+      if (!parsed.success) return parsed;
+      if (!TERMINAL_STATUS_BY_EVENT[input.type].has(parsed.data.status as never)) {
+        throw new Error(`Invalid ${input.type} payload: status ${parsed.data.status} does not match event type`);
+      }
+      return parsed;
+    }
+    if (input.type === "snapshot") return SnapshotPayloadSchema.safeParse(input.payload);
+    return null;
+  })();
   if (result && !result.success) {
-    throw new Error(`Invalid ${input.type} payload: ${result.error.issues.map((i) => i.message).join("; ")}`);
+    throw new Error(
+      `Invalid ${input.type} payload: ${result.error.issues.map((i) => i.message).join("; ")}`
+    );
   }
 }
 

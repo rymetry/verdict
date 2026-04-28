@@ -181,6 +181,28 @@ describe("RunConsole", () => {
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
   });
 
+  it("run.cancelled の warnings を表示する", async () => {
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.cancelled",
+        runId: "r1",
+        sequence: 3,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: {
+          status: "cancelled",
+          exitCode: null,
+          durationMs: 0,
+          warnings: ["Run was cancelled after timeout warning. code=TIMEOUT"]
+        }
+      });
+    });
+
+    expect(screen.getByText("Run warnings")).toBeInTheDocument();
+    expect(screen.getByText(/cancelled after timeout warning/)).toBeInTheDocument();
+  });
+
   it("run.error は Error badge と warnings を表示する", async () => {
     const stream = makeFakeStream();
     render(<RunConsole eventStream={stream} activeRunId="r1" />);
@@ -191,18 +213,19 @@ describe("RunConsole", () => {
         sequence: 3,
         timestamp: "2026-04-28T00:00:00Z",
         payload: {
-          message: "Runner failed after spawn.",
+          message: "internal message should not render",
           status: "error",
           exitCode: null,
           durationMs: 0,
-          warnings: ["Runner failed after spawn. code=UNKNOWN"]
+          warnings: ["Safe user-facing warning. code=UNKNOWN"]
         }
       });
     });
 
     expect(screen.getByText("Error")).toBeInTheDocument();
     expect(screen.getByText("Run warnings")).toBeInTheDocument();
-    expect(screen.getByText(/Runner failed after spawn/)).toBeInTheDocument();
+    expect(screen.getByText(/Safe user-facing warning/)).toBeInTheDocument();
+    expect(screen.queryByText(/internal message should not render/)).not.toBeInTheDocument();
   });
 
   it("stderr が出ると details が描画される", async () => {

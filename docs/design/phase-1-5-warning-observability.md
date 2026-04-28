@@ -19,7 +19,7 @@ UI/API 向け warning は、ユーザーが判断できる安定した文言と 
 
 Run 起動前の HTTP error code は原因分類できる粒度に分ける。command build failure、policy rejection、audit persistence failure、unknown startup failure は別 code にし、message は固定の安全な文言に限定する。
 
-Log write failure が同一 stream で複数回起きた場合、UI warning は最初の code と failure count を表示する。後続 code を全部 UI に出すと長くなりすぎるため、詳細調査は構造化ログ側の最初の failure と count を入口にする。
+Log write failure が同一 stream で複数回起きた場合、UI warning は最初の code、distinct code list、failure count を表示する。構造化ログは stream ごとの最初の failure を詳細付きで残し、後続 code の存在は warning の `codes=` で追跡する。
 
 ## Audit mode
 

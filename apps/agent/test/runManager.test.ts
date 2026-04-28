@@ -279,10 +279,10 @@ describe("RunManager", () => {
     const warningText = completed.warnings.join("\n");
     expect(warningText).toContain("stdout log write failed");
     expect(warningText).toContain("code=ENOSPC");
+    expect(warningText).toContain("codes=ENOSPC,EACCES");
     expect(warningText).toContain("failures=2");
     expect(warningText).toContain("stderr log write failed");
     expect(warningText).toContain("code=EBADF");
-    expect(warningText).not.toContain("code=EACCES");
     expect(warningText).not.toContain("/private/stdout.log");
     expect(warningText).not.toContain("/private/stderr.log");
     expect(errors).toEqual([
@@ -425,6 +425,83 @@ describe("RunManager", () => {
     expect(requestedRoots).toEqual([workdir]);
   });
 
+  it("summarises only redacted Playwright JSON so secrets never reach metadata or WS", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        argValidator: unsafelyAllowAnyArgsValidator,
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
+    const events: WorkbenchEvent[] = [];
+    bus.subscribe((event) => events.push(event));
+
+    const stubPath = writeStub(
+      "secret-json.js",
+      `
+const fs = require('node:fs');
+const path = require('node:path');
+const report = process.env.PLAYWRIGHT_JSON_OUTPUT_NAME;
+fs.mkdirSync(path.dirname(report), { recursive: true });
+fs.writeFileSync(report, JSON.stringify({
+  stats: { expected: 0, unexpected: 1, flaky: 0, skipped: 0, duration: 1 },
+  suites: [{
+    title: 'suite',
+    file: 'tests/secret.spec.ts',
+    specs: [{
+      title: 'leaks token',
+      file: 'tests/secret.spec.ts',
+      line: 7,
+      tests: [{
+        id: 'secret-test',
+        status: 'failed',
+        results: [{
+          status: 'failed',
+          duration: 1,
+          error: {
+            message: 'token=ghp_abcdefghijklmnopqrstuvwxyz1234',
+            stack: 'Authorization: Bearer abcdefghijklmnop123456'
+          }
+        }]
+      }]
+    }]
+  }]
+}));
+process.exit(1);
+`
+    );
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+    const terminal = events.find((event) => event.type === "run.completed");
+    const payload = RunCompletedPayloadSchema.parse(terminal?.payload);
+    const metadataFailure = completed.summary?.failedTests[0];
+    const wsFailure = payload.summary?.failedTests[0];
+
+    expect(metadataFailure?.message).toContain("<REDACTED>");
+    expect(metadataFailure?.stack).toContain("<REDACTED>");
+    expect(wsFailure?.message).toBe(metadataFailure?.message);
+    expect(wsFailure?.stack).toBe(metadataFailure?.stack);
+    expect(JSON.stringify(completed.summary)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234");
+    expect(JSON.stringify(payload.summary)).not.toContain("abcdefghijklmnop123456");
+  });
+
   it("removes raw Playwright JSON and records a warning when redaction fails", async () => {
     const bus = createEventBus();
     const runner = createNodeCommandRunner({
@@ -478,14 +555,22 @@ describe("RunManager", () => {
     );
     expect(completed.warnings.join("\n")).not.toContain("redaction disk write failed");
     expect(completed.warnings.join("\n")).not.toContain(workdir);
-    expect(errors).toEqual([
-      expect.objectContaining({
-        runId: handle.runId,
-        err: "redaction disk write failed",
-        code: "UNKNOWN",
-        playwrightJsonPath: completed.paths.playwrightJson
-      })
-    ]);
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId: handle.runId,
+          err: "redaction disk write failed",
+          code: "UNKNOWN",
+          playwrightJsonPath: completed.paths.playwrightJson
+        }),
+        expect.objectContaining({
+          runId: handle.runId,
+          provider: "playwright-json",
+          artifactKind: "playwright-json-summary",
+          code: "ENOENT"
+        })
+      ])
+    );
   });
 
   it("does not claim raw Playwright JSON was removed when cleanup fails", async () => {
