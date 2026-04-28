@@ -475,14 +475,24 @@ describe("RunManager", () => {
       expect.objectContaining({
         runId: handle.runId,
         eventType: "run.stdout",
-        code: "PAYLOAD_VALIDATION_FAILED"
+        code: "PAYLOAD_VALIDATION_FAILED",
+        // Bus errors are Zod-validated, path-free; publishEventSafely opts in
+        // to keepMessage:true so the validation diagnostic is preserved.
+        err: "invalid run.stdout payload"
       }),
       expect.objectContaining({
         runId: handle.runId,
         eventType: "run.stderr",
-        code: "PAYLOAD_VALIDATION_FAILED"
+        code: "PAYLOAD_VALIDATION_FAILED",
+        err: "invalid run.stderr payload"
       })
     ]));
+    // Issue #27: even on the keepMessage opt-in path, no absolute filesystem
+    // path should appear (defense-in-depth: confirm the opt-in is restricted
+    // to truly path-free message sources).
+    const errorsAsJson = JSON.stringify(errors);
+    expect(errorsAsJson).not.toContain(workdir);
+    expect(errorsAsJson).not.toMatch(/\/Users\/[A-Za-z0-9_-]+\//);
   });
 
   it("replaces chunks when stream redaction fails and surfaces a sanitized warning", async () => {

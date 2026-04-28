@@ -74,16 +74,23 @@ export function errorCode(error: unknown): string {
 export function errorLogFields(
   error: unknown,
   opts: { keepMessage?: boolean } = {}
-): { code: string; errorName: string; err?: string } {
+): { code: string; errorName: string; err?: string; causeCode?: string } {
   const code = errorCode(error);
   const errorName = error instanceof Error ? error.name : typeof error;
+  // Wrapped errors (e.g. `AuditPersistenceError(cause: ENOENT)`) are common
+  // for domain-level rethrow patterns. Surfacing `causeCode` keeps the inner
+  // error class identifiable for triage even though the wrapper hides the
+  // path-bearing message.
+  const cause = error instanceof Error ? (error as Error & { cause?: unknown }).cause : undefined;
+  const causeCode = cause instanceof Error ? errorCode(cause) : undefined;
+  const causeFields = causeCode && causeCode !== "UNKNOWN" ? { causeCode } : {};
   if (!opts.keepMessage) {
-    return { code, errorName };
+    return { code, errorName, ...causeFields };
   }
   if (error instanceof Error) {
-    return { code, errorName, err: error.message };
+    return { code, errorName, err: error.message, ...causeFields };
   }
-  return { code, errorName, err: String(error) };
+  return { code, errorName, err: String(error), ...causeFields };
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errorCode, errorLogFields } from "../src/lib/structuredLog.js";
+import { errorCode, errorLogFields, projectIdHash } from "../src/lib/structuredLog.js";
 import { AuditPersistenceError } from "../src/lib/errors.js";
 
 describe("errorCode", () => {
@@ -52,15 +52,18 @@ describe("errorLogFields", () => {
       expect(result).not.toHaveProperty("err");
     });
 
-    it("drops message from domain errors carrying static error codes", () => {
+    it("drops message from domain errors carrying static error codes (and surfaces cause code)", () => {
       const cause = Object.assign(new Error("EACCES: permission denied, open '/x'"), {
         code: "EACCES"
       });
       const wrapped = new AuditPersistenceError(cause);
       const result = errorLogFields(wrapped);
+      // causeCode surfacing is exercised here; full coverage in the dedicated
+      // `error.cause surfacing (causeCode)` describe block below.
       expect(result).toEqual({
         code: "AUDIT_PERSIST_FAILED",
-        errorName: "AuditPersistenceError"
+        errorName: "AuditPersistenceError",
+        causeCode: "EACCES"
       });
       expect(result).not.toHaveProperty("err");
     });
@@ -145,5 +148,75 @@ describe("errorLogFields", () => {
         errorName: "Error"
       });
     });
+  });
+
+  describe("error.cause surfacing (causeCode)", () => {
+    it("surfaces inner cause code when wrapped error has Error cause with .code", () => {
+      const cause = Object.assign(new Error("EACCES: open '/secret'"), { code: "EACCES" });
+      const wrapper = new AuditPersistenceError(cause);
+      const result = errorLogFields(wrapper);
+      expect(result).toEqual({
+        code: "AUDIT_PERSIST_FAILED",
+        errorName: "AuditPersistenceError",
+        causeCode: "EACCES"
+      });
+      expect(result).not.toHaveProperty("err");
+      expect(JSON.stringify(result)).not.toContain("/secret");
+    });
+
+    it("omits causeCode when cause has no recognizable code", () => {
+      const cause = new Error("plain inner");
+      const wrapper = new AuditPersistenceError(cause);
+      const result = errorLogFields(wrapper);
+      expect(result).not.toHaveProperty("causeCode");
+    });
+
+    it("omits causeCode for non-Error cause values", () => {
+      const wrapper = new Error("outer");
+      // Force non-Error cause shape that the helper should not surface.
+      Object.assign(wrapper, { cause: "literal cause" });
+      const result = errorLogFields(wrapper);
+      expect(result).not.toHaveProperty("causeCode");
+    });
+
+    it("preserves cause surfacing alongside keepMessage: true", () => {
+      const cause = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      const wrapper = new AuditPersistenceError(cause);
+      const result = errorLogFields(wrapper, { keepMessage: true });
+      expect(result).toEqual({
+        code: "AUDIT_PERSIST_FAILED",
+        errorName: "AuditPersistenceError",
+        err: "Audit persistence failed",
+        causeCode: "ENOENT"
+      });
+    });
+  });
+});
+
+describe("projectIdHash", () => {
+  it("returns a deterministic 8-character hex token", () => {
+    const projectId = "/Users/rym/Dev/foo";
+    const hash = projectIdHash(projectId);
+    expect(hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(projectIdHash(projectId)).toBe(hash);
+  });
+
+  it("produces different outputs for different inputs", () => {
+    expect(projectIdHash("/Users/a/x")).not.toBe(projectIdHash("/Users/b/x"));
+    expect(projectIdHash("")).not.toBe(projectIdHash("a"));
+  });
+
+  it("does not leak any character of the input path", () => {
+    const projectId = "/Users/rym/Dev/secret-project";
+    const hash = projectIdHash(projectId);
+    expect(hash).not.toContain("/");
+    expect(hash).not.toContain("Users");
+    expect(hash).not.toContain("rym");
+    expect(hash).not.toContain("secret");
+  });
+
+  it("handles empty string without throwing", () => {
+    expect(() => projectIdHash("")).not.toThrow();
+    expect(projectIdHash("")).toMatch(/^[0-9a-f]{8}$/);
   });
 });

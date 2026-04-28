@@ -191,12 +191,17 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     return createNodeCommandRunner({
       policy,
       audit: (entry) => {
-        // Audit entries are the persistent audit-trail of record (`audit.log`)
-        // and the structured-log echo carries the same identity (`cwd`,
-        // executable, args). Identity parity between the two is intentional;
-        // path redaction applies to *error contexts*, not to audit identity.
-        // PLAN.v2 §28 expects auditable command provenance.
-        logger.info?.({ audit: entry }, "command audit");
+        // The persistent audit-trail of record is `.playwright-workbench/audit.log`
+        // (with full `cwd`/executable/args). The pino info-log echo here is
+        // duplicative observability: hash `entry.cwd` so structured logs do
+        // not leak `/Users/<name>/...` while operators can still correlate
+        // by `cwdHash` (Issue #27 follow-up). The persisted audit.log keeps
+        // the raw `cwd` for forensic identity.
+        const { cwd, ...auditWithoutCwd } = entry;
+        logger.info?.(
+          { audit: { ...auditWithoutCwd, cwdHash: projectIdHash(cwd) } },
+          "command audit"
+        );
         let auditPersistenceError: AuditPersistenceError | undefined;
         try {
           persistAuditEntry(projectRoot, entry);

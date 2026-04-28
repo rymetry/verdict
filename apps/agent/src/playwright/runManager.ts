@@ -187,11 +187,16 @@ function publishEventSafely({
     return { ok: true };
   } catch (error) {
     const code = errorCode(error);
+    // Bus publish failures originate from the Zod validation gate in
+    // `events/bus.ts` (`PayloadValidationError`). Their messages are
+    // deterministic Zod issue lists ("Invalid run.completed payload: ...") with
+    // no filesystem path content, so opt in to `keepMessage: true` to preserve
+    // diagnostic detail without violating the path-redaction policy.
     logger?.error(
       {
         runId: "runId" in event ? event.runId : undefined,
         eventType: event.type,
-        ...errorLogFields(error)
+        ...errorLogFields(error, { keepMessage: true })
       },
       message
     );

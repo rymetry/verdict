@@ -464,12 +464,15 @@ describe("HTTP API surface", () => {
       envAllowlist: ["PATH"]
     });
     const errors: Array<Record<string, unknown>> = [];
+    const infos: Array<Record<string, unknown>> = [];
     const captureLogger = {
       error(payload: Record<string, unknown>) {
         errors.push(payload);
       },
       warn() {},
-      info() {},
+      info(payload: Record<string, unknown>) {
+        infos.push(payload);
+      },
       debug() {}
     };
 
@@ -506,6 +509,19 @@ describe("HTTP API surface", () => {
       expect(observerEntry).toBeDefined();
       expect(observerEntry).not.toHaveProperty("err");
       expect(JSON.stringify(errors)).not.toContain("/private/audit-hook");
+
+      // The `command audit` info echo must not leak `cwd` (= projectRoot) in
+      // structured logs; it should appear as `cwdHash` instead.
+      const auditInfoEntry = infos.find(
+        (entry) => entry.audit !== undefined
+      );
+      expect(auditInfoEntry).toBeDefined();
+      const auditPayload = auditInfoEntry!.audit as Record<string, unknown>;
+      expect(auditPayload).not.toHaveProperty("cwd");
+      expect(auditPayload).toHaveProperty("cwdHash");
+      expect(typeof auditPayload.cwdHash).toBe("string");
+      expect(auditPayload.cwdHash as string).toMatch(/^[0-9a-f]{8}$/);
+      expect(JSON.stringify(infos)).not.toContain(projectRoot);
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -754,5 +770,51 @@ describe("HTTP API surface", () => {
       headers: { Origin: "http://attacker.example" }
     });
     expect(denied.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("does not leak path in structured logs when initialProjectRoot fails to scan", async () => {
+    // Issue #27 regression test: the `Failed to load initial project` catch
+    // path was previously logging `err: error.message`, which can carry
+    // ENOENT path strings. The fail-closed `errorLogFields` helper must
+    // produce a payload free of any absolute path.
+    const allowedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-init-leak-")));
+    const missingProject = path.join(allowedRoot, "nonexistent-subdir");
+    const errors: Array<Record<string, unknown>> = [];
+    const infos: Array<Record<string, unknown>> = [];
+    const captureLogger = {
+      error(payload: Record<string, unknown>) {
+        errors.push(payload);
+      },
+      warn() {},
+      info(payload: Record<string, unknown>) {
+        infos.push(payload);
+      },
+      debug() {}
+    };
+
+    try {
+      buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [allowedRoot],
+          failClosedAudit: false,
+          initialProjectRoot: missingProject
+        },
+        logger: captureLogger
+      });
+      // The scan promise resolves on the next microtask tick; await it.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const initEntry = errors.find((e) => typeof e.errorName === "string");
+      expect(initEntry).toBeDefined();
+      expect(initEntry).not.toHaveProperty("err");
+      const errorsAsJson = JSON.stringify(errors);
+      expect(errorsAsJson).not.toContain(missingProject);
+      expect(errorsAsJson).not.toContain(allowedRoot);
+    } finally {
+      fs.rmSync(allowedRoot, { recursive: true, force: true });
+    }
   });
 });
