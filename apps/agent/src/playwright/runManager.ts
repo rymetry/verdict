@@ -69,6 +69,7 @@ type JsonReadResult<T> =
   | { ok: true; value: T }
   | { ok: false; reason: "missing" | "invalid-json" | "read-error"; code: string };
 
+// 欠落と破損を分けることで、通常の skip と調査対象の failure をログで区別する。
 async function readJsonFile<T>(filePath: string): Promise<JsonReadResult<T>> {
   let raw: string;
   try {
@@ -89,6 +90,7 @@ interface LogWriteTracker {
   flush(): Promise<string[]>;
 }
 
+// stream ごとに queue を分け、stdout の遅延や失敗が stderr の配送順を歪めないようにする。
 function createLogWriteTracker({
   logStreams,
   logger,
@@ -98,16 +100,23 @@ function createLogWriteTracker({
   logger?: RunManagerLogger;
   runId: string;
 }): LogWriteTracker {
-  const failures: Record<"stdout" | "stderr", { count: number; code: string }> = {
-    stdout: { count: 0, code: "UNKNOWN" },
-    stderr: { count: 0, code: "UNKNOWN" }
+  const failures: Record<"stdout" | "stderr", { count: number; firstCode: string }> = {
+    stdout: { count: 0, firstCode: "UNKNOWN" },
+    stderr: { count: 0, firstCode: "UNKNOWN" }
   };
   const logged = { stdout: false, stderr: false };
-  let queue = Promise.resolve();
+  const queues: Record<"stdout" | "stderr", Promise<void>> = {
+    stdout: Promise.resolve(),
+    stderr: Promise.resolve()
+  };
 
   function recordFailure(stream: "stdout" | "stderr", error: unknown): void {
     const code = errorCode(error);
-    failures[stream] = { count: failures[stream].count + 1, code };
+    const current = failures[stream];
+    failures[stream] = {
+      count: current.count + 1,
+      firstCode: current.count === 0 ? code : current.firstCode
+    };
     if (!logged[stream]) {
       logged[stream] = true;
       logger?.error(
@@ -126,7 +135,7 @@ function createLogWriteTracker({
   return {
     write(stream, chunk) {
       const target = stream === "stdout" ? logStreams.stdout : logStreams.stderr;
-      queue = queue
+      queues[stream] = queues[stream]
         .then(() => target.write(chunk))
         .then(
           () => undefined,
@@ -136,12 +145,12 @@ function createLogWriteTracker({
         );
     },
     async flush() {
-      await queue;
+      await Promise.all([queues.stdout, queues.stderr]);
       return (["stdout", "stderr"] as const).flatMap((stream) => {
         const failure = failures[stream];
         if (failure.count === 0) return [];
         return [
-          `${stream} log write failed; websocket stream was still delivered. code=${failure.code}; failures=${failure.count}`
+          `${stream} log write failed; websocket stream was still delivered. code=${failure.firstCode}; failures=${failure.count}`
         ];
       });
     }
@@ -277,13 +286,15 @@ export function createRunManager({
           playwrightJsonPath: paths.playwrightJson
         });
 
-        const summary = await readSummarySafely(reportProvider, {
-          logger,
-          runId,
-          projectRoot: params.projectRoot,
-          runDir: paths.runDir,
-          playwrightJsonPath: paths.playwrightJson
-        });
+        const summary = await readSummarySafely(
+          reportProvider,
+          {
+            projectRoot: params.projectRoot,
+            runDir: paths.runDir,
+            playwrightJsonPath: paths.playwrightJson
+          },
+          { logger, runId }
+        );
         const warnings = [
           ...runningMetadata.warnings,
           ...logWriteWarnings,
@@ -306,6 +317,32 @@ export function createRunManager({
         };
         await artifactsStore.writeMetadata(paths.metadataJson, completed);
 
+        const terminalPayload =
+          outcome.status === "cancelled"
+            ? {
+                exitCode: outcome.exitCode,
+                signal: outcome.signal,
+                status: "cancelled" as const,
+                durationMs: outcome.durationMs,
+                warnings
+              }
+            : outcome.status === "error"
+              ? {
+                  message: "Run completed with error status.",
+                  exitCode: outcome.exitCode,
+                  signal: outcome.signal,
+                  status: "error" as const,
+                  durationMs: outcome.durationMs,
+                  warnings
+                }
+              : {
+                  exitCode: outcome.exitCode,
+                  signal: outcome.signal,
+                  status: outcome.status,
+                  durationMs: outcome.durationMs,
+                  summary: summary?.summary,
+                  warnings
+                };
         bus.publish({
           type:
             outcome.status === "cancelled"
@@ -314,15 +351,7 @@ export function createRunManager({
                 ? "run.error"
                 : "run.completed",
           runId,
-          payload: {
-            ...(outcome.status === "error" ? { message: "Run completed with error status." } : {}),
-            exitCode: outcome.exitCode,
-            signal: outcome.signal,
-            status: outcome.status,
-            durationMs: outcome.durationMs,
-            summary: summary?.summary,
-            warnings
-          }
+          payload: terminalPayload
         });
         active.delete(runId);
         return completed;
@@ -396,6 +425,7 @@ async function redactPlaywrightResultsSafely({
   runId: string;
   playwrightJsonPath: string;
 }): Promise<string | undefined> {
+  // raw reporter output は secret を含み得るため、redaction 失敗時は削除を優先する。
   try {
     await artifactsStore.redactPlaywrightResults(playwrightJsonPath);
     return undefined;
@@ -431,22 +461,17 @@ async function redactPlaywrightResultsSafely({
 
 async function readSummarySafely(
   provider: ReportProvider,
-  input: {
-    logger?: RunManagerLogger;
-    runId: string;
-    projectRoot: string;
-    runDir: string;
-    playwrightJsonPath: string;
-  }
+  input: { projectRoot: string; runDir: string; playwrightJsonPath: string },
+  context: { logger?: RunManagerLogger; runId: string }
 ): Promise<{ summary?: TestResultSummary; warnings: string[] } | undefined> {
   try {
     const result = await provider.readSummary(input);
     return result;
   } catch (error) {
     const code = errorCode(error);
-    input.logger?.error(
+    context.logger?.error(
       {
-        runId: input.runId,
+        runId: context.runId,
         provider: provider.name,
         artifactKind: "playwright-json-summary",
         code,
@@ -472,15 +497,42 @@ export async function loadRunsFromDisk(
   let entries: import("node:fs").Dirent[] = [];
   try {
     entries = await fs.readdir(wb.runsDir, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    const code = errorCode(error);
+    if (code !== "ENOENT") {
+      logger?.warn?.(
+        {
+          artifactKind: "runs-directory",
+          code
+        },
+        "run directory could not be listed"
+      );
+    }
     return [];
   }
   const runs: RunMetadata[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const metadataPath = path.join(wb.runsDir, entry.name, "metadata.json");
-    const stat = await fs.lstat(metadataPath).catch(() => null);
-    if (!stat || !stat.isFile()) continue;
+    let stat;
+    try {
+      stat = await fs.lstat(metadataPath);
+    } catch (error) {
+      const code = errorCode(error);
+      if (code !== "ENOENT") {
+        logger?.warn?.(
+          {
+            runDir: entry.name,
+            artifactKind: "metadata",
+            reason: "stat-error",
+            code
+          },
+          "run metadata could not be inspected"
+        );
+      }
+      continue;
+    }
+    if (!stat.isFile()) continue;
     const metadata = await readJsonFile<RunMetadata>(metadataPath);
     if (metadata.ok) {
       runs.push(metadata.value);

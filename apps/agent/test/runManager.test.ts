@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { allowAnyArgsValidator } from "../src/commands/policy.js";
+import { unsafelyAllowAnyArgsValidator } from "../src/commands/policy.js";
 import { createNodeCommandRunner } from "../src/commands/runner.js";
 import { createEventBus } from "../src/events/bus.js";
 import { createRunManager } from "../src/playwright/runManager.js";
@@ -73,7 +73,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
-        argValidator: allowAnyArgsValidator,
+        argValidator: unsafelyAllowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: [
           "PATH",
@@ -123,7 +123,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
-        argValidator: allowAnyArgsValidator,
+        argValidator: unsafelyAllowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: ["PATH", "HOME"]
       }
@@ -150,7 +150,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
-        argValidator: allowAnyArgsValidator,
+        argValidator: unsafelyAllowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: ["PATH", "HOME"]
       }
@@ -190,22 +190,34 @@ describe("RunManager", () => {
     expect(payload.warnings.join("\n")).not.toContain("/private/result.json");
   });
 
-  it("records log write failures as run warnings while still publishing websocket chunks", async () => {
+  it("records stdout and stderr log write failures independently", async () => {
     const bus = createEventBus();
-    const runner = createNodeCommandRunner({
-      policy: {
-        allowedExecutables: ["node"],
-        argValidator: allowAnyArgsValidator,
-        cwdBoundary: workdir,
-        envAllowlist: [
-          "PATH",
-          "HOME",
-          "PLAYWRIGHT_JSON_OUTPUT_NAME",
-          "PLAYWRIGHT_HTML_REPORT",
-          "PLAYWRIGHT_HTML_OPEN"
-        ]
+    const runner = {
+      run(_spec: unknown, handlers = {}) {
+        const streamHandlers = handlers as {
+          onStdout?: (chunk: string) => void;
+          onStderr?: (chunk: string) => void;
+        };
+        streamHandlers.onStdout?.("hello ");
+        streamHandlers.onStdout?.("world");
+        streamHandlers.onStderr?.("warn");
+        return {
+          result: Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            durationMs: 1,
+            stdout: "hello world",
+            stderr: "warn",
+            cancelled: false,
+            timedOut: false,
+            command: { executable: "node", args: [], cwd: workdir }
+          }),
+          cancel() {}
+        };
       }
-    });
+    };
     const errors: Array<Record<string, unknown>> = [];
     const manager = createRunManager({
       runnerForProject: () => runner,
@@ -214,13 +226,23 @@ describe("RunManager", () => {
         ...runArtifactsStore,
         async openLogStreams(stdoutPath, stderrPath) {
           const streams = await runArtifactsStore.openLogStreams(stdoutPath, stderrPath);
+          let stdoutWrites = 0;
           return {
             ...streams,
             stdout: {
               ...streams.stdout,
               write: async () => {
+                stdoutWrites += 1;
                 throw Object.assign(new Error("disk full at /private/stdout.log"), {
-                  code: "ENOSPC"
+                  code: stdoutWrites === 1 ? "ENOSPC" : "EACCES"
+                });
+              }
+            } as never,
+            stderr: {
+              ...streams.stderr,
+              write: async () => {
+                throw Object.assign(new Error("bad fd at /private/stderr.log"), {
+                  code: "EBADF"
                 });
               }
             } as never
@@ -236,9 +258,7 @@ describe("RunManager", () => {
     const events: WorkbenchEvent[] = [];
     bus.subscribe((event) => events.push(event));
 
-    const stubPath = writeStub("stdout-write-fails.js", STUB_SUCCESS_SCRIPT);
     const pm = fakePackageManager();
-    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
 
     const handle = await manager.startRun({
       projectId: workdir,
@@ -249,10 +269,16 @@ describe("RunManager", () => {
     const completed = await handle.finished;
 
     expect(events.some((event) => event.type === "run.stdout")).toBe(true);
+    expect(events.some((event) => event.type === "run.stderr")).toBe(true);
     const warningText = completed.warnings.join("\n");
     expect(warningText).toContain("stdout log write failed");
     expect(warningText).toContain("code=ENOSPC");
+    expect(warningText).toContain("failures=2");
+    expect(warningText).toContain("stderr log write failed");
+    expect(warningText).toContain("code=EBADF");
+    expect(warningText).not.toContain("code=EACCES");
     expect(warningText).not.toContain("/private/stdout.log");
+    expect(warningText).not.toContain("/private/stderr.log");
     expect(errors).toEqual([
       expect.objectContaining({
         runId: handle.runId,
@@ -260,6 +286,13 @@ describe("RunManager", () => {
         artifactKind: "log",
         code: "ENOSPC",
         err: "disk full at /private/stdout.log"
+      }),
+      expect.objectContaining({
+        runId: handle.runId,
+        stream: "stderr",
+        artifactKind: "log",
+        code: "EBADF",
+        err: "bad fd at /private/stderr.log"
       })
     ]);
   });
@@ -269,7 +302,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
-        argValidator: allowAnyArgsValidator,
+        argValidator: unsafelyAllowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: ["PATH"]
       }
@@ -294,7 +327,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
-        argValidator: allowAnyArgsValidator,
+        argValidator: unsafelyAllowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: [
           "PATH",
@@ -334,7 +367,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
-        argValidator: allowAnyArgsValidator,
+        argValidator: unsafelyAllowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: [
           "PATH",
@@ -397,7 +430,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
-        argValidator: allowAnyArgsValidator,
+        argValidator: unsafelyAllowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: [
           "PATH",
@@ -499,5 +532,45 @@ describe("RunManager", () => {
         code: "INVALID_JSON"
       })
     ]);
+  });
+
+  it("logs runs directory list failures except for missing runs directory", async () => {
+    const { loadRunsFromDisk } = await import("../src/playwright/runManager.js");
+    const warnings: Array<Record<string, unknown>> = [];
+
+    await expect(
+      loadRunsFromDisk(path.join(workdir, "missing-project"), {
+        error() {},
+        warn(payload) {
+          warnings.push(payload);
+        }
+      })
+    ).resolves.toEqual([]);
+
+    expect(warnings).toEqual([]);
+
+    const brokenRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-runmgr-broken-runs-")));
+    try {
+      fs.mkdirSync(path.join(brokenRoot, ".playwright-workbench"), { recursive: true });
+      fs.writeFileSync(path.join(brokenRoot, ".playwright-workbench", "runs"), "not a dir");
+
+      await expect(
+        loadRunsFromDisk(brokenRoot, {
+          error() {},
+          warn(payload) {
+            warnings.push(payload);
+          }
+        })
+      ).resolves.toEqual([]);
+
+      expect(warnings).toEqual([
+        expect.objectContaining({
+          artifactKind: "runs-directory",
+          code: "ENOTDIR"
+        })
+      ]);
+    } finally {
+      fs.rmSync(brokenRoot, { recursive: true, force: true });
+    }
   });
 });

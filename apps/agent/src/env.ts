@@ -51,6 +51,11 @@ function realpathSafe(input: string): string | undefined {
   }
 }
 
+function parseBooleanFlag(raw: string | undefined): boolean {
+  const value = raw?.trim().toLowerCase();
+  return value === "1" || value === "true";
+}
+
 export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = {}): AgentEnv {
   const projectArgIndex = argv.findIndex((arg) => arg === "--project" || arg === "-p");
   const projectArg = projectArgIndex >= 0 ? argv[projectArgIndex + 1] : undefined;
@@ -58,7 +63,7 @@ export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = 
   const portArg = portArgIndex >= 0 ? argv[portArgIndex + 1] : undefined;
 
   const port = parsePort(portArg ?? env.PORT);
-  const allowAnyHost = env.WORKBENCH_ALLOW_REMOTE === "1" || env.WORKBENCH_ALLOW_REMOTE === "true";
+  const allowAnyHost = parseBooleanFlag(env.WORKBENCH_ALLOW_REMOTE);
   const host = parseHost(env.HOST, allowAnyHost);
   const logLevel = env.LOG_LEVEL ?? "info";
 
@@ -86,7 +91,6 @@ export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = 
     logLevel,
     initialProjectRoot,
     allowedRoots,
-    failClosedAudit:
-      env.AGENT_FAIL_CLOSED_AUDIT === "1" || env.AGENT_FAIL_CLOSED_AUDIT === "true"
+    failClosedAudit: parseBooleanFlag(env.AGENT_FAIL_CLOSED_AUDIT)
   };
 }

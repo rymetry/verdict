@@ -12,6 +12,13 @@ import type { ProjectStore } from "../project/store.js";
 import { apiError } from "../lib/apiError.js";
 import { pathExists } from "../lib/pathExists.js";
 
+function errorCode(error: unknown): string {
+  if (error instanceof Error && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return "UNKNOWN";
+}
+
 interface Deps {
   projectStore: ProjectStore;
   runManager: RunManager;
@@ -52,12 +59,15 @@ export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
       });
       return c.json({ runId: handle.runId, metadata: handle.metadata }, 202);
     } catch (error) {
-      return apiError(
-        c,
-        "RUN_FAILED",
-        error instanceof Error ? error.message : "Failed to start run",
-        500
+      logger?.error(
+        {
+          err: error instanceof Error ? error.message : String(error),
+          code: errorCode(error),
+          projectId: current.summary.id
+        },
+        "run start failed"
       );
+      return apiError(c, "RUN_FAILED", "Run failed before it could be started.", 500);
     }
   });
 

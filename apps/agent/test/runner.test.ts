@@ -7,7 +7,7 @@ import {
   createNodeCommandRunner,
   type CommandPolicy
 } from "../src/commands/runner.js";
-import { allowAnyArgsValidator } from "../src/commands/policy.js";
+import { unsafelyAllowAnyArgsValidator } from "../src/commands/policy.js";
 import { redact } from "../src/commands/redact.js";
 
 let workdir: string;
@@ -22,7 +22,7 @@ afterAll(() => {
 function basePolicy(): CommandPolicy {
   return {
     allowedExecutables: ["node"],
-    argValidator: allowAnyArgsValidator,
+    argValidator: unsafelyAllowAnyArgsValidator,
     cwdBoundary: workdir,
     envAllowlist: ["PATH", "HOME"]
   };

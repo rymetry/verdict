@@ -14,7 +14,9 @@
 //  - state listener 内 throw は events.ts 側で握り潰さず log する。
 import * as React from "react";
 import {
+  RunCancelledPayloadSchema,
   RunCompletedPayloadSchema,
+  RunErrorPayloadSchema,
   RunStdStreamPayloadSchema,
   type WorkbenchEvent
 } from "@pwqa/shared";
@@ -182,27 +184,15 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       }
       return { ...state, stderr: trim(state.stderr, parsed.data.chunk) };
     }
-    case "run.completed":
-    case "run.cancelled":
-    case "run.error": {
+    case "run.completed": {
       const parsed = RunCompletedPayloadSchema.safeParse(event.payload);
       if (!parsed.success) {
-        // run.cancelled / run.error は payload を捨てても status の決定は可能だが、
-        // run.completed は status を payload から取るため不一致だと "error" にフォールバックされ silent。
         // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
-        console.error(`[RunConsole] ${event.type} payload schema mismatch`, parsed.error.issues);
+        console.error("[RunConsole] run.completed payload schema mismatch", parsed.error.issues);
       }
       const payload = parsed.success ? parsed.data : null;
       const status: RunConsoleState["status"] =
-        event.type === "run.cancelled"
-          ? "cancelled"
-          : event.type === "run.error"
-            ? "error"
-            : payload?.status === "passed"
-              ? "passed"
-              : payload?.status === "failed"
-                ? "failed"
-                : "error";
+        payload?.status === "passed" ? "passed" : payload?.status === "failed" ? "failed" : "error";
       return {
         ...state,
         status,
@@ -218,6 +208,36 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
               flaky: payload.summary.flaky
             }
           : state.summary
+      };
+    }
+    case "run.cancelled": {
+      const parsed = RunCancelledPayloadSchema.safeParse(event.payload);
+      if (!parsed.success) {
+        // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
+        console.error("[RunConsole] run.cancelled payload schema mismatch", parsed.error.issues);
+      }
+      const payload = parsed.success ? parsed.data : null;
+      return {
+        ...state,
+        status: "cancelled",
+        exitCode: payload?.exitCode ?? null,
+        durationMs: payload?.durationMs ?? state.durationMs,
+        warnings: payload?.warnings ?? state.warnings
+      };
+    }
+    case "run.error": {
+      const parsed = RunErrorPayloadSchema.safeParse(event.payload);
+      if (!parsed.success) {
+        // eslint-disable-next-line no-console -- payload 不一致を本番でも検知
+        console.error("[RunConsole] run.error payload schema mismatch", parsed.error.issues);
+      }
+      const payload = parsed.success ? parsed.data : null;
+      return {
+        ...state,
+        status: "error",
+        exitCode: payload?.exitCode ?? null,
+        durationMs: payload?.durationMs ?? state.durationMs,
+        warnings: payload?.warnings ?? state.warnings
       };
     }
     case "snapshot":

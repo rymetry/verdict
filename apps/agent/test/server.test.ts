@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/server.js";
 import {
-  allowAnyArgsValidator,
+  unsafelyAllowAnyArgsValidator,
   createDefaultCommandPolicy,
   type CommandPolicy
 } from "../src/commands/policy.js";
@@ -142,7 +142,7 @@ describe("HTTP API surface", () => {
         },
         policyFactory: (projectRoot): CommandPolicy => ({
           allowedExecutables: ["node"],
-          argValidator: allowAnyArgsValidator,
+          argValidator: unsafelyAllowAnyArgsValidator,
           cwdBoundary: projectRoot,
           envAllowlist: ["PATH"]
         })
@@ -166,7 +166,7 @@ describe("HTTP API surface", () => {
     fs.symlinkSync(outside, path.join(projectRoot, ".playwright-workbench"));
     const permissiveNodePolicy = (root: string): CommandPolicy => ({
       allowedExecutables: ["node"],
-      argValidator: allowAnyArgsValidator,
+      argValidator: unsafelyAllowAnyArgsValidator,
       cwdBoundary: root,
       envAllowlist: ["PATH"]
     });
@@ -195,13 +195,76 @@ describe("HTTP API surface", () => {
     }
   });
 
+  it("runs normally when failClosedAudit is enabled and audit persistence succeeds", async () => {
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-ok-")));
+    const permissiveNodePolicy = (root: string): CommandPolicy => ({
+      allowedExecutables: ["node"],
+      argValidator: unsafelyAllowAnyArgsValidator,
+      cwdBoundary: root,
+      envAllowlist: ["PATH"]
+    });
+
+    try {
+      const { runnerForProject } = buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [projectRoot],
+          failClosedAudit: true
+        },
+        policyFactory: permissiveNodePolicy
+      });
+      const handle = runnerForProject(projectRoot).run({
+        executable: process.execPath,
+        args: ["-e", ""],
+        cwd: projectRoot
+      });
+
+      await expect(handle.result).resolves.toEqual(expect.objectContaining({ exitCode: 0 }));
+      expect(fs.existsSync(path.join(projectRoot, ".playwright-workbench", "audit.log"))).toBe(true);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("sanitizes POST /runs startup failures in HTTP responses", async () => {
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir]
+      },
+      policyFactory: (): CommandPolicy => {
+        throw new Error(`policy failed at ${workdir}`);
+      }
+    });
+    await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: workdir })
+    });
+
+    const response = await app.request("/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: workdir, headed: false })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error.message).toBe("Run failed before it could be started.");
+    expect(body.error.message).not.toContain(workdir);
+  });
+
   it("fails closed on audit persistence errors when AGENT_FAIL_CLOSED_AUDIT is enabled", async () => {
     const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-outside-")));
     const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-project-")));
     fs.symlinkSync(outside, path.join(projectRoot, ".playwright-workbench"));
     const permissiveNodePolicy = (root: string): CommandPolicy => ({
       allowedExecutables: ["node"],
-      argValidator: allowAnyArgsValidator,
+      argValidator: unsafelyAllowAnyArgsValidator,
       cwdBoundary: root,
       envAllowlist: ["PATH"]
     });

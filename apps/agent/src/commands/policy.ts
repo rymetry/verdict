@@ -40,18 +40,14 @@ export interface CommandPolicy {
    * must opt in through adapter-specific policies when those phases land.
    */
   allowedExecutables: ReadonlyArray<string>;
-  /**
-   * Optional positional-arg allowlists per executable. When omitted,
-   * any args are accepted. PoC §14: `npm run <script>` is forbidden by
-   * not allowing `npm` here.
-   */
+  /** Optional positional-arg allowlists per executable. */
   argAllowlists?: Readonly<Record<string, ReadonlyArray<RegExp>>>;
   /**
    * Validator that can inspect the whole argv sequence. Playwright
    * flags such as `--grep <value>` need pair-aware validation so Japanese
    * text, spaces, and regex syntax are not accidentally rejected.
    * Custom policies that intentionally allow arbitrary args must opt in via
-   * `allowAnyArgsValidator()` instead of omitting validation.
+   * `unsafelyAllowAnyArgsValidator()` instead of omitting validation.
    */
   argValidator: CommandArgsValidator;
   /**
@@ -106,8 +102,8 @@ const SINGLE_FLAGS = new Set([
   "--list",
   "--headed",
   "--reporter=json",
-  // Allure reporter is intentionally excluded from the Phase 1 default policy.
-  // Phase 1.2 should add it through a dedicated adapter/policy, not by widening this default.
+  // Additional reporters should be allowed through dedicated adapter policies,
+  // not by widening the default Playwright execution policy.
   "--reporter=list,json,html"
 ]);
 
@@ -255,9 +251,11 @@ export function validatePhase1PlaywrightArgs({
   return argsValid;
 }
 
-export function allowAnyArgsValidator(): CommandArgsValidationResult {
+export function unsafelyAllowAnyArgsValidator(): CommandArgsValidationResult {
   return argsValid;
 }
+
+export { unsafelyAllowAnyArgsValidator as allowAnyArgsValidator };
 
 export function createDefaultCommandPolicy(cwdBoundary: string): CommandPolicy {
   return {

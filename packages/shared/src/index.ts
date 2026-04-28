@@ -266,15 +266,29 @@ export type RunStdStreamPayload = z.infer<typeof RunStdStreamPayloadSchema>;
 export const RunCompletedPayloadSchema = z.object({
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable().optional(),
-  status: RunStatusSchema,
+  status: z.enum(["passed", "failed"]),
   durationMs: z.number().int().nonnegative(),
   summary: TestResultSummarySchema.optional(),
   warnings: z.array(z.string()).default([])
 });
 export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
 
-export const RunErrorPayloadSchema = RunCompletedPayloadSchema.extend({
-  message: z.string()
+export const RunCancelledPayloadSchema = z.object({
+  exitCode: z.number().int().nullable(),
+  signal: z.string().nullable().optional(),
+  status: z.literal("cancelled"),
+  durationMs: z.number().int().nonnegative(),
+  warnings: z.array(z.string()).default([])
+});
+export type RunCancelledPayload = z.infer<typeof RunCancelledPayloadSchema>;
+
+export const RunErrorPayloadSchema = z.object({
+  message: z.string().optional(),
+  exitCode: z.number().int().nullable(),
+  signal: z.string().nullable().optional(),
+  status: z.literal("error"),
+  durationMs: z.number().int().nonnegative(),
+  warnings: z.array(z.string()).default([])
 });
 export type RunErrorPayload = z.infer<typeof RunErrorPayloadSchema>;
 
