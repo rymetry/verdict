@@ -79,7 +79,7 @@ describe("RunManager", () => {
         ]
       }
     });
-    const manager = createRunManager({ runner, bus });
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
 
     const events: WorkbenchEvent[] = [];
     bus.subscribe((event) => events.push(event));
@@ -119,7 +119,7 @@ describe("RunManager", () => {
         envAllowlist: ["PATH", "HOME"]
       }
     });
-    const manager = createRunManager({ runner, bus });
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
 
     const stubPath = writeStub("fail.js", STUB_FAILURE_SCRIPT);
     const pm = fakePackageManager();
@@ -145,7 +145,7 @@ describe("RunManager", () => {
         envAllowlist: ["PATH"]
       }
     });
-    const manager = createRunManager({ runner, bus });
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
 
     const pm = fakePackageManager();
     pm.blockingExecution = true;
@@ -158,5 +158,44 @@ describe("RunManager", () => {
         request: { projectId: workdir, headed: false }
       })
     ).rejects.toThrow(/test block/);
+  });
+
+  it("creates a project-scoped runner for the run's projectRoot", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const requestedRoots: string[] = [];
+    const manager = createRunManager({
+      runnerForProject: (projectRoot) => {
+        requestedRoots.push(projectRoot);
+        return runner;
+      },
+      bus
+    });
+
+    const stubPath = writeStub("stub.js", STUB_SUCCESS_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    await handle.finished;
+
+    expect(requestedRoots).toEqual([workdir]);
   });
 });

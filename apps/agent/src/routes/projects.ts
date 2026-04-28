@@ -8,11 +8,11 @@ import { apiError } from "../lib/apiError.js";
 
 interface Deps {
   projectStore: ProjectStore;
-  runner: CommandRunner;
+  runnerForProject: (projectRoot: string) => CommandRunner;
   allowedRoots: ReadonlyArray<string>;
 }
 
-export function projectsRoutes({ projectStore, runner, allowedRoots }: Deps): Hono {
+export function projectsRoutes({ projectStore, runnerForProject, allowedRoots }: Deps): Hono {
   const router = new Hono();
 
   router.post("/projects/open", async (c) => {
@@ -66,7 +66,7 @@ export function projectsRoutes({ projectStore, runner, allowedRoots }: Deps): Ho
       projectId: current.summary.id,
       projectRoot: current.summary.rootPath,
       packageManager: current.packageManager,
-      runner
+      runner: runnerForProject(current.summary.rootPath)
     });
     return c.json(inventory);
   });

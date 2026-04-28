@@ -17,8 +17,7 @@ import {
   type CommandRunner
 } from "./commands/runner.js";
 import {
-  DEFAULT_ALLOWED_EXECUTABLES,
-  DEFAULT_ENV_ALLOWLIST,
+  createDefaultCommandPolicy,
   type CommandPolicy
 } from "./commands/policy.js";
 import { createEventBus, type EventBus } from "./events/bus.js";
@@ -49,25 +48,12 @@ export interface BuildAppResult {
   app: Hono;
   injectWebSocket: (server: ServerType) => void;
   bus: EventBus;
-  runner: CommandRunner;
+  runnerForProject: (projectRoot: string) => CommandRunner;
   runManager: RunManager;
   projectStore: ProjectStore;
 }
 
-function defaultPolicy(env: AgentEnv): CommandPolicy {
-  // PoC: cwd boundary defaults to the configured project root if known,
-  // otherwise the current working directory. Routes that scan additional
-  // projects construct fresh runners with project-scoped policies.
-  const cwdBoundary = env.initialProjectRoot ?? process.cwd();
-  return {
-    allowedExecutables: DEFAULT_ALLOWED_EXECUTABLES,
-    cwdBoundary,
-    envAllowlist: DEFAULT_ENV_ALLOWLIST
-  };
-}
-
-function persistAuditEntry(rootDir: string | undefined, entry: AuditEntry): void {
-  if (!rootDir) return;
+function persistAuditEntry(rootDir: string, entry: AuditEntry): void {
   const wb = workbenchPaths(rootDir);
   fsSync.mkdirSync(wb.workbenchDir, { recursive: true });
   fsSync.appendFileSync(path.join(wb.workbenchDir, "audit.log"), `${JSON.stringify(entry)}\n`, "utf8");
@@ -155,37 +141,39 @@ function attachWebSocket(
 export function buildApp(options: BuildAppOptions): BuildAppResult {
   const { env } = options;
   const logger = createLogger(env.logLevel);
-  const policy = options.policy ?? defaultPolicy(env);
 
   const bus = createEventBus({
     onListenerError: (error) => logger.debug({ err: error }, "ws listener error")
   });
 
-  const runner = createNodeCommandRunner({
-    policy,
-    audit: (entry) => {
-      logger.info({ audit: entry }, "command audit");
-      try {
-        persistAuditEntry(env.initialProjectRoot, entry);
-      } catch (error) {
-        logger.warn(
-          { err: error instanceof Error ? error.message : String(error) },
-          "failed to persist audit log entry"
-        );
+  const runnerForProject = (projectRoot: string): CommandRunner => {
+    const policy = options.policy ?? createDefaultCommandPolicy(projectRoot);
+    return createNodeCommandRunner({
+      policy,
+      audit: (entry) => {
+        logger.info({ audit: entry }, "command audit");
+        try {
+          persistAuditEntry(projectRoot, entry);
+        } catch (error) {
+          logger.warn(
+            { err: error instanceof Error ? error.message : String(error) },
+            "failed to persist audit log entry"
+          );
+        }
+        options.audit?.(entry);
       }
-      options.audit?.(entry);
-    }
-  });
+    });
+  };
 
   const projectStore = createProjectStore();
-  const runManager = createRunManager({ runner, bus });
+  const runManager = createRunManager({ runnerForProject, bus });
 
   const app = new Hono();
   attachCors(app);
   attachHealth(app);
   app.route(
     "/",
-    projectsRoutes({ projectStore, runner, allowedRoots: env.allowedRoots })
+    projectsRoutes({ projectStore, runnerForProject, allowedRoots: env.allowedRoots })
   );
   app.route("/", runsRoutes({ projectStore, runManager }));
   const injectWebSocket = attachWebSocket(app, bus, logger);
@@ -210,7 +198,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       });
   }
 
-  return { app, injectWebSocket, bus, runner, runManager, projectStore };
+  return { app, injectWebSocket, bus, runnerForProject, runManager, projectStore };
 }
 
 async function main(): Promise<void> {

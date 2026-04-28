@@ -46,6 +46,13 @@ if (typeof window !== "undefined") {
     configurable: true,
     value: new InMemoryStorage()
   });
+
+  // jsdom の scrollTo は環境によって関数が存在しても未実装 warning を出す。
+  // RunConsole 等の自動スクロールは挙動テストの主眼ではないため no-op に固定する。
+  Object.defineProperty(window, "scrollTo", {
+    configurable: true,
+    value: vi.fn()
+  });
 }
 
 // jsdom は matchMedia を実装しないため、最低限のスタブを提供する。

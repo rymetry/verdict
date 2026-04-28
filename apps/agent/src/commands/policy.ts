@@ -1,13 +1,16 @@
 import * as path from "node:path";
 
+export type CommandArgsValidator = (input: {
+  executableName: string;
+  args: ReadonlyArray<string>;
+}) => string | null;
+
 export interface CommandPolicy {
   /**
    * Allowed executable names. Each is matched on the command's basename
-   * after path resolution. Phase 1 PoC permits the package managers we
-   * actually invoke (npx/pnpm/yarn) plus utility binaries (`node`, `git`,
-   * `allure`, `playwright`). Bun-related binaries are intentionally NOT
-   * allowed by default — the Bun feasibility spike (PLAN.v2 Phase 1.5)
-   * must opt them in explicitly via a custom policy.
+   * after path resolution. Phase 1 default permits only package managers
+   * used to invoke the user's local Playwright binary. Git / Allure / Bun
+   * must opt in through adapter-specific policies when those phases land.
    */
   allowedExecutables: ReadonlyArray<string>;
   /**
@@ -16,6 +19,12 @@ export interface CommandPolicy {
    * not allowing `npm` here.
    */
   argAllowlists?: Readonly<Record<string, ReadonlyArray<RegExp>>>;
+  /**
+   * Optional validator that can inspect the whole argv sequence. Playwright
+   * flags such as `--grep <value>` need pair-aware validation so Japanese
+   * text, spaces, and regex syntax are not accidentally rejected.
+   */
+  argValidator?: CommandArgsValidator;
   /**
    * Realpath of the project root. The command's `cwd` must be inside
    * this directory.
@@ -28,31 +37,7 @@ export interface CommandPolicy {
 export const DEFAULT_ALLOWED_EXECUTABLES: ReadonlyArray<string> = [
   "npx",
   "pnpm",
-  "yarn",
-  "playwright",
-  "node",
-  "git",
-  "allure"
-];
-
-/**
- * Default arg allowlist for `npx`: forces a `--no-install` flag plus the
- * `playwright` package as the first positional. This blocks the
- * `npx <arbitrary-package>` escape route (PLAN.v2 §14).
- */
-export const DEFAULT_NPX_ARG_PATTERNS: ReadonlyArray<RegExp> = [
-  /^--no-install$/,
-  /^playwright$/,
-  /^test$/,
-  /^--list$/,
-  /^--reporter=list,json,html$/,
-  /^--reporter=json$/,
-  /^--reporter=list,json,html(,allure-playwright)?$/,
-  /^--headed$/,
-  /^--grep$/,
-  /^--project$/,
-  // Spec / project-name / grep value: relative path or simple identifier.
-  /^[A-Za-z0-9._\-/@]+$/
+  "yarn"
 ];
 
 /**
@@ -82,6 +67,19 @@ export const DEFAULT_ENV_ALLOWLIST: ReadonlyArray<string> = [
   "TERM"
 ];
 
+const PLAYWRIGHT_PREFIXES: Readonly<Record<string, ReadonlyArray<string>>> = {
+  npx: ["--no-install", "playwright", "test"],
+  pnpm: ["exec", "playwright", "test"],
+  yarn: ["playwright", "test"]
+};
+
+const SINGLE_FLAGS = new Set([
+  "--list",
+  "--headed",
+  "--reporter=json",
+  "--reporter=list,json,html"
+]);
+
 export function resolveExecutableName(executable: string): string {
   return path.basename(executable);
 }
@@ -98,4 +96,70 @@ export function envAllowlistFilter(
     }
   }
   return filtered;
+}
+
+function hasPrefix(args: ReadonlyArray<string>, prefix: ReadonlyArray<string>): boolean {
+  return prefix.every((value, index) => args[index] === value);
+}
+
+function isFlagValue(value: string): boolean {
+  return value.length === 0 || value.startsWith("-");
+}
+
+function isProjectRelativeOperand(value: string): boolean {
+  if (isFlagValue(value)) return false;
+  if (path.isAbsolute(value)) return false;
+  const parts = value.split(/[\\/]+/);
+  return !parts.includes("..");
+}
+
+export function validatePhase1PlaywrightArgs({
+  executableName,
+  args
+}: {
+  executableName: string;
+  args: ReadonlyArray<string>;
+}): string | null {
+  const prefix = PLAYWRIGHT_PREFIXES[executableName];
+  if (!prefix) {
+    return `Executable '${executableName}' is not supported by the default Phase 1 Playwright policy.`;
+  }
+  if (!hasPrefix(args, prefix)) {
+    return `'${executableName}' must invoke the local Playwright test command with the approved prefix: ${prefix.join(" ")}`;
+  }
+
+  let index = prefix.length;
+  while (index < args.length) {
+    const arg = args[index]!;
+    if (SINGLE_FLAGS.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (arg === "--grep" || arg === "--project") {
+      const value = args[index + 1];
+      if (value === undefined || isFlagValue(value)) {
+        return `${arg} must be followed by a non-flag value.`;
+      }
+      index += 2;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      return `Flag '${arg}' is not allowed for the default Phase 1 Playwright policy.`;
+    }
+    if (!isProjectRelativeOperand(arg)) {
+      return `Spec operand '${arg}' must be a project-relative path inside the project root.`;
+    }
+    index += 1;
+  }
+
+  return null;
+}
+
+export function createDefaultCommandPolicy(cwdBoundary: string): CommandPolicy {
+  return {
+    allowedExecutables: DEFAULT_ALLOWED_EXECUTABLES,
+    argValidator: validatePhase1PlaywrightArgs,
+    cwdBoundary,
+    envAllowlist: DEFAULT_ENV_ALLOWLIST
+  };
 }

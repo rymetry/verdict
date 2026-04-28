@@ -41,7 +41,7 @@ export interface RunManager {
 }
 
 interface RunManagerDeps {
-  runner: CommandRunner;
+  runnerForProject: (projectRoot: string) => CommandRunner;
   bus: EventBus;
   /** Optional injection points (defaults wired for production). */
   artifactsStore?: RunArtifactsStore;
@@ -62,7 +62,7 @@ async function safeReadJson<T>(filePath: string): Promise<T | undefined> {
 }
 
 export function createRunManager({
-  runner,
+  runnerForProject,
   bus,
   artifactsStore = defaultArtifactsStore,
   reportProvider = playwrightJsonReportProvider
@@ -123,6 +123,7 @@ export function createRunManager({
         payload: { command, cwd: params.projectRoot, startedAt: runningMetadata.startedAt }
       });
 
+      const runner = runnerForProject(params.projectRoot);
       handle = runner.run(
         {
           executable: command.executable,

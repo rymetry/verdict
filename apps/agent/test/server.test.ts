@@ -2,9 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/server.js";
 
 let workdir: string;
+const here = path.dirname(fileURLToPath(import.meta.url));
+const fixtureRoot = path.resolve(here, "../../../tests/fixtures/sample-pw-project");
 
 beforeAll(() => {
   workdir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-server-")));
@@ -65,6 +68,37 @@ describe("HTTP API surface", () => {
     const currentBody = await current.json();
     expect(currentBody.rootPath).toBe(workdir);
   });
+
+  it("builds inventory for an opened project outside apps/agent cwd", async () => {
+    const fixtureRealpath = fs.realpathSync(fixtureRoot);
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [fixtureRealpath]
+      }
+    });
+    const open = await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: fixtureRealpath })
+    });
+    expect(open.status).toBe(200);
+
+    const inventory = await app.request(
+      `/projects/${encodeURIComponent(fixtureRealpath)}/inventory`
+    );
+    expect(inventory.status).toBe(200);
+    const body = await inventory.json();
+    expect(body.source).toBe("playwright-list-json");
+    expect(body.error).toBeUndefined();
+    expect(body.totals.tests).toBeGreaterThanOrEqual(2);
+    const titles = body.specs.flatMap((spec: { tests: Array<{ title: string }> }) =>
+      spec.tests.map((test) => test.title)
+    );
+    expect(titles).toContain("trivial passing assertion");
+  }, 90_000);
 
   it("rejects /projects/open paths outside the allowed roots", async () => {
     const { app } = buildApp({

@@ -47,6 +47,29 @@ describe("RunConsole", () => {
     expect(screen.getByText("Idle")).toBeInTheDocument();
   });
 
+  it("stdout/stderr パネルはデザイントークン由来の配色を使う", async () => {
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    const stdout = screen.getByLabelText("標準出力");
+    expect(stdout.className).toContain("bg-[var(--bg-0)]");
+    expect(stdout.className).toContain("text-[var(--ink-1)]");
+    expect(stdout.className).not.toMatch(/#(?:[0-9a-fA-F]{3,8})/);
+
+    await act(async () => {
+      stream.emit({
+        type: "run.stderr",
+        runId: "r1",
+        sequence: 1,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: { chunk: "warn:something\n" }
+      });
+    });
+    const stderr = screen.getByLabelText("標準エラー");
+    expect(stderr.className).toContain("bg-[var(--fail-soft)]");
+    expect(stderr.className).toContain("text-[var(--fail)]");
+    expect(stderr.className).not.toMatch(/#(?:[0-9a-fA-F]{3,8})/);
+  });
+
   it("activeRunId が設定されると subscribe が呼ばれ、stdout が反映される", async () => {
     const stream = makeFakeStream();
     render(<RunConsole eventStream={stream} activeRunId="r1" />);
