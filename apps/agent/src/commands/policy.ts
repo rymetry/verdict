@@ -84,6 +84,9 @@ const SINGLE_FLAGS = new Set([
 ]);
 
 const MAX_ARG_LENGTH = 4_096;
+// Deep enough for nested URL-encoding seen in traversal probes, bounded so
+// malformed or adversarial input cannot spend unbounded CPU in validation.
+const MAX_DECODE_DEPTH = 8;
 
 export function resolveExecutableName(executable: string): string {
   return path.basename(executable);
@@ -118,16 +121,12 @@ function isProjectRelativeOperand(value: string): boolean {
   if (decoded === null) return false;
   if (path.isAbsolute(decoded)) return false;
   const parts = decoded.split(/[\\/]+/);
-  try {
-    return !parts.includes("..");
-  } catch {
-    return false;
-  }
+  return !parts.includes("..");
 }
 
 function decodeRepeatedly(value: string): string | null {
   let current = value;
-  for (let depth = 0; depth < 8; depth += 1) {
+  for (let depth = 0; depth < MAX_DECODE_DEPTH; depth += 1) {
     let next: string;
     try {
       next = decodeURIComponent(current);

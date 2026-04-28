@@ -50,6 +50,8 @@ describe("default Phase 1 command policy", () => {
     ["node", ["-e", "console.log(1)"]],
     ["pnpm", ["exec", "playwright", "test", "--config", "/tmp/x"]],
     ["pnpm", ["exec", "playwright", "test", "/tmp/example.spec.ts"]],
+    ["pnpm", ["exec", "playwright", "test", "%2fetc%2fpasswd"]],
+    ["pnpm", ["exec", "playwright", "test", "%252fetc%252fpasswd"]],
     ["pnpm", ["exec", "playwright", "test", "../outside.spec.ts"]],
     ["pnpm", ["exec", "playwright", "test", "%2e%2e/outside.spec.ts"]],
     ["pnpm", ["exec", "playwright", "test", "%252e%252e/outside.spec.ts"]],
