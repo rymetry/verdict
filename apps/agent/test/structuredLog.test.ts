@@ -3,29 +3,36 @@ import {
   errorCode,
   errorLogFields,
   projectIdHash,
-  type ArtifactKind
+  type ArtifactKind,
+  type ArtifactOperation
 } from "../src/lib/structuredLog.js";
 import { AuditPersistenceError } from "../src/lib/errors.js";
 
-// Issue #30 項目 A: 型レベル regression。closed string union が意図せず
-// widening (例: string への退化、新規メンバー追加時の凍結漏れ) を起こさない
-// よう、メンバー集合を凍結する。Phase 1.2 で `allure-results` 等を追加する
-// 際は本 assertion を意図的に更新する作業が必要となり、その時点で関連する
-// logger 呼び出し(runManager.ts / streamRedactor.ts)の `satisfies` チェック
-// がコンパイルエラーで顕在化する。
-describe("ArtifactKind type-level regression (Issue #30-A)", () => {
-  it("freezes the closed-union member set", () => {
+// Issue #30 項目 A / Issue #31: 型レベル regression。closed string union が
+// 意図せず widening (例: string への退化、新規メンバー追加時の凍結漏れ)
+// を起こさないよう、identity と operation の各メンバー集合を凍結する。
+// Phase 1.2 で `allure-results` 等を追加する際は本 assertion を意図的に
+// 更新する作業が必要となり、その時点で関連する logger 呼び出し
+// (runManager.ts / streamRedactor.ts) の `satisfies` チェックが
+// コンパイルエラーで顕在化する。
+describe("ArtifactKind type-level regression (Issue #30-A / Issue #31)", () => {
+  it("freezes the identity union member set", () => {
     expectTypeOf<ArtifactKind>().toEqualTypeOf<
       | "playwright-json"
-      | "playwright-json-redaction"
-      | "playwright-json-summary"
+      | "playwright-html"
       | "stdout-log"
       | "stderr-log"
       | "metadata"
-      | "html-report"
-      | "stream-redaction"
       | "runs-directory"
       | "audit-log"
+    >();
+  });
+
+  it("freezes the operation union member set", () => {
+    expectTypeOf<ArtifactOperation>().toEqualTypeOf<
+      | "redaction"
+      | "summary-extract"
+      | "stream-redaction"
     >();
   });
 });

@@ -570,15 +570,22 @@ describe("RunManager", () => {
     expect(payload.warnings.join("\n")).toContain("stdout redaction failed");
     expect(payload.warnings.join("\n")).toContain("code=REDACT_FAILED");
     expect(combined).not.toContain(secret);
+    // Issue #31: stream redaction events now use stream identity
+    // (`stdout-log` / `stderr-log`) + `op: "stream-redaction"` instead of
+    // the merged `artifactKind: "stream-redaction"` + `stream: "stdout"` shape.
     expect(errors).toEqual([
       expect.objectContaining({
         runId: handle.runId,
-        stream: "stdout",
-        artifactKind: "stream-redaction",
+        artifactKind: "stdout-log",
+        op: "stream-redaction",
         code: "REDACT_FAILED",
         errorName: "Error"
       })
     ]);
+    // The auxiliary `stream` field has been retired (identity now carries
+    // the same information). Surfacing it again would re-introduce the
+    // 2-axis representation Issue #31 explicitly removed.
+    expect(errors[0]).not.toHaveProperty("stream");
   });
 
   it("logs structured metadata when stream redaction succeeds", async () => {
@@ -635,15 +642,15 @@ describe("RunManager", () => {
       expect.arrayContaining([
         expect.objectContaining({
           runId: handle.runId,
-          stream: "stdout",
-          artifactKind: "stream-redaction",
+          artifactKind: "stdout-log",
+          op: "stream-redaction",
           replacements: expect.any(Number)
         })
       ])
     );
     expect(JSON.stringify(infos)).not.toContain(secret);
     const redactionEntry = infos.find(
-      (i) => i.artifactKind === "stream-redaction" && i.stream === "stdout"
+      (i) => i.artifactKind === "stdout-log" && i.op === "stream-redaction"
     );
     expect(redactionEntry).toBeDefined();
     expect(redactionEntry!.replacements).toBeGreaterThanOrEqual(1);
@@ -1068,18 +1075,24 @@ process.exit(1);
     expect(wsFailure?.stack).toBe(metadataFailure?.stack);
     expect(JSON.stringify(completed.summary)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234");
     expect(JSON.stringify(payload.summary)).not.toContain("abcdefghijklmnop123456");
+    // Issue #31: file-level redaction is now identity (`playwright-json`) +
+    // operation (`op: "redaction"`) instead of the merged
+    // `playwright-json-redaction`. Phase 1.2 で Allure を追加すると同じ
+    // operation が `allure-results` identity でも emit されるため、operation
+    // 軸を分離しておく。
     expect(infos).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           runId: handle.runId,
-          artifactKind: "playwright-json-redaction",
+          artifactKind: "playwright-json",
+          op: "redaction",
           replacements: expect.any(Number)
         })
       ])
     );
     expect(JSON.stringify(infos)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234");
     const jsonRedactionEntry = infos.find(
-      (i) => i.artifactKind === "playwright-json-redaction"
+      (i) => i.artifactKind === "playwright-json" && i.op === "redaction"
     );
     expect(jsonRedactionEntry).toBeDefined();
     expect(jsonRedactionEntry!.replacements).toBeGreaterThanOrEqual(1);
@@ -1138,18 +1151,25 @@ process.exit(1);
     );
     expect(completed.warnings.join("\n")).not.toContain("redaction disk write failed");
     expect(completed.warnings.join("\n")).not.toContain(workdir);
+    // Issue #31: redaction failure (file-level) and summary-extract failure
+    // both target the `playwright-json` identity but differ on the `op`
+    // axis. The first error is the redaction operation throwing; the
+    // second is the summary-extract operation hitting ENOENT after the
+    // raw artifact was removed.
     expect(errors).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           runId: handle.runId,
           code: "UNKNOWN",
           errorName: "Error",
-          artifactKind: "playwright-json"
+          artifactKind: "playwright-json",
+          op: "redaction"
         }),
         expect.objectContaining({
           runId: handle.runId,
           provider: "playwright-json",
-          artifactKind: "playwright-json-summary",
+          artifactKind: "playwright-json",
+          op: "summary-extract",
           code: "ENOENT",
           errorName: "Error"
         })

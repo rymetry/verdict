@@ -22,7 +22,12 @@ import {
 import { deriveOutcome } from "./runOutcome.js";
 import { playwrightJsonReportProvider } from "../reporting/PlaywrightJsonReportProvider.js";
 import type { ReportProvider } from "../reporting/ReportProvider.js";
-import { type ArtifactKind, errorCode, errorLogFields } from "../lib/structuredLog.js";
+import {
+  type ArtifactKind,
+  type ArtifactOperation,
+  errorCode,
+  errorLogFields
+} from "../lib/structuredLog.js";
 import type { RunManagerLogger } from "./runTypes.js";
 import { createStreamRedactor } from "./streamRedactor.js";
 
@@ -623,7 +628,8 @@ async function redactPlaywrightResultsSafely({
       logger?.info?.(
         {
           runId,
-          artifactKind: "playwright-json-redaction" satisfies ArtifactKind,
+          artifactKind: "playwright-json" satisfies ArtifactKind,
+          op: "redaction" satisfies ArtifactOperation,
           replacements: outcome.replacements
         },
         "playwright-results redaction applied"
@@ -636,6 +642,7 @@ async function redactPlaywrightResultsSafely({
       {
         runId,
         artifactKind: "playwright-json" satisfies ArtifactKind,
+        op: "redaction" satisfies ArtifactOperation,
         ...errorLogFields(error)
       },
       "playwright-results redaction failed"
@@ -645,10 +652,13 @@ async function redactPlaywrightResultsSafely({
       return `Playwright JSON redaction failed; removed raw result artifact. redactionCode=${redactionCode}`;
     } catch (unlinkError) {
       const unlinkCode = errorCode(unlinkError);
+      // 削除失敗も "redaction" operation のクリーンアップ失敗 (raw artifact が
+      // 残るリスク) として扱う。identity は同じ playwright-json。
       logger?.error(
         {
           runId,
           artifactKind: "playwright-json" satisfies ArtifactKind,
+          op: "redaction" satisfies ArtifactOperation,
           ...errorLogFields(unlinkError)
         },
         "failed to remove raw playwright-results artifact after redaction failure"
@@ -672,7 +682,8 @@ async function readSummarySafely(
       {
         runId: context.runId,
         provider: provider.name,
-        artifactKind: "playwright-json-summary" satisfies ArtifactKind,
+        artifactKind: "playwright-json" satisfies ArtifactKind,
+        op: "summary-extract" satisfies ArtifactOperation,
         ...errorLogFields(error)
       },
       "report summary read failed"
