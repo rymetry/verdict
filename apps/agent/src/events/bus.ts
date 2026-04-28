@@ -39,11 +39,17 @@ class PayloadValidationError extends Error {
 }
 
 /**
- * Producer-side contract check for WS payloads. Envelope validation alone keeps
- * `payload` unknown, so publish validates the event-specific body before it can
- * enter history or reach subscribers.
+ * Sole producer-side validation gate for the publish path. Validates run-scoping
+ * (run.* events require runId; snapshot events do not) and the event-specific
+ * payload shape. `sequence` and `timestamp` are stamped by the bus after this
+ * gate, so they are not validated here.
  */
 function assertValidPayload(input: WorkbenchEventInput): void {
+  const inputType = input.type;
+  // Snapshot events are not run-scoped; all other event types require a runId.
+  if (inputType !== "snapshot" && !("runId" in input)) {
+    throw new PayloadValidationError(`${inputType} event requires a runId`);
+  }
   switch (input.type) {
     case "run.queued": {
       const result = RunQueuedPayloadSchema.safeParse(input.payload);
@@ -105,7 +111,7 @@ export function createEventBus(options: CreateEventBusOptions = {}): EventBus {
         sequence,
         timestamp: new Date().toISOString()
       };
-      if (event.runId) {
+      if ("runId" in event) {
         const list = history.get(event.runId) ?? [];
         list.push(event);
         if (list.length > RUN_HISTORY_LIMIT) {

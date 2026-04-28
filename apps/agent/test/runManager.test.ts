@@ -8,6 +8,7 @@ import { createEventBus, type EventBus } from "../src/events/bus.js";
 import { createRunManager } from "../src/playwright/runManager.js";
 import { runArtifactsStore } from "../src/playwright/runArtifactsStore.js";
 import {
+  RunCancelledPayloadSchema,
   RunCompletedPayloadSchema,
   RunErrorPayloadSchema,
   type DetectedPackageManager,
@@ -145,6 +146,86 @@ describe("RunManager", () => {
     const completed = await handle.finished;
     expect(completed.status).toBe("failed");
     expect(completed.exitCode).toBe(1);
+  });
+
+  it("persists and emits a structured user cancellation reason", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        argValidator: unsafelyAllowAnyArgsValidator,
+        cwdBoundary: workdir,
+        envAllowlist: ["PATH", "HOME"]
+      }
+    });
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
+    const events: WorkbenchEvent[] = [];
+    bus.subscribe((event) => events.push(event));
+
+    const stubPath = writeStub("long.js", "setInterval(() => {}, 1000);");
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    expect(manager.cancelRun(handle.runId)).toBe(true);
+
+    const completed = await handle.finished;
+    const terminal = events.find((event) => event.type === "run.cancelled");
+    const payload = RunCancelledPayloadSchema.parse(terminal?.payload);
+
+    expect(completed.status).toBe("cancelled");
+    expect(completed.cancelReason).toBe("user-request");
+    expect(payload.cancelReason).toBe("user-request");
+  });
+
+  it("surfaces timeout warning when cancellation races with timeout", async () => {
+    // Race window: when timer expiry and cancel() fire concurrently the runner
+    // can return both flags true. The terminal event must report the cancellation
+    // status while preserving timeout evidence in warnings.
+    const bus = createEventBus();
+    const runner = {
+      run() {
+        return {
+          result: Promise.resolve({
+            exitCode: null,
+            signal: "SIGTERM" as NodeJS.Signals,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            durationMs: 1,
+            stdout: "",
+            stderr: "",
+            cancelled: true,
+            cancelReason: "user-request" as const,
+            timedOut: true,
+            command: { executable: "node", args: [], cwd: workdir }
+          }),
+          cancel() {}
+        };
+      }
+    };
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
+    const events: WorkbenchEvent[] = [];
+    bus.subscribe((event) => events.push(event));
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: fakePackageManager(),
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+    const terminal = events.find((event) => event.type === "run.cancelled");
+    const payload = RunCancelledPayloadSchema.parse(terminal?.payload);
+
+    expect(completed.status).toBe("cancelled");
+    expect(completed.cancelReason).toBe("user-request");
+    expect(completed.warnings.join("\n")).toMatch(/timed out before cancellation/i);
+    expect(payload.warnings.join("\n")).toMatch(/timed out before cancellation/i);
   });
 
   it("publishes final warnings in terminal events", async () => {
@@ -487,6 +568,74 @@ describe("RunManager", () => {
         errorName: "Error"
       })
     ]);
+  });
+
+  it("logs structured metadata when stream redaction succeeds", async () => {
+    const secret = "Authorization: Bearer abcdefghijklmnop123456";
+    const bus = createEventBus();
+    const runner = {
+      run(_spec: unknown, handlers = {}) {
+        const streamHandlers = handlers as { onStdout?: (chunk: string) => void };
+        streamHandlers.onStdout?.(`${secret}\n`);
+        return {
+          result: Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            durationMs: 1,
+            stdout: "",
+            stderr: "",
+            cancelled: false,
+            timedOut: false,
+            command: { executable: "node", args: [], cwd: workdir }
+          }),
+          cancel() {}
+        };
+      }
+    };
+    const infos: Array<Record<string, unknown>> = [];
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      reportProvider: {
+        name: "test-provider",
+        async readSummary() {
+          return undefined;
+        }
+      },
+      logger: {
+        error() {},
+        info(payload) {
+          infos.push(payload);
+        }
+      }
+    });
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: fakePackageManager(),
+      request: { projectId: workdir, headed: false }
+    });
+    await handle.finished;
+
+    expect(infos).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId: handle.runId,
+          stream: "stdout",
+          artifactKind: "stream-redaction",
+          replacements: expect.any(Number)
+        })
+      ])
+    );
+    expect(JSON.stringify(infos)).not.toContain(secret);
+    const redactionEntry = infos.find(
+      (i) => i.artifactKind === "stream-redaction" && i.stream === "stdout"
+    );
+    expect(redactionEntry).toBeDefined();
+    expect(redactionEntry!.replacements).toBeGreaterThanOrEqual(1);
   });
 
   it("emits a sanitized run.error fallback when terminal completion publish fails", async () => {
@@ -839,7 +988,17 @@ describe("RunManager", () => {
         ]
       }
     });
-    const manager = createRunManager({ runnerForProject: () => runner, bus });
+    const infos: Array<Record<string, unknown>> = [];
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      logger: {
+        error() {},
+        info(payload) {
+          infos.push(payload);
+        }
+      }
+    });
     const events: WorkbenchEvent[] = [];
     bus.subscribe((event) => events.push(event));
 
@@ -898,6 +1057,21 @@ process.exit(1);
     expect(wsFailure?.stack).toBe(metadataFailure?.stack);
     expect(JSON.stringify(completed.summary)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234");
     expect(JSON.stringify(payload.summary)).not.toContain("abcdefghijklmnop123456");
+    expect(infos).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId: handle.runId,
+          artifactKind: "playwright-json-redaction",
+          replacements: expect.any(Number)
+        })
+      ])
+    );
+    expect(JSON.stringify(infos)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234");
+    const jsonRedactionEntry = infos.find(
+      (i) => i.artifactKind === "playwright-json-redaction"
+    );
+    expect(jsonRedactionEntry).toBeDefined();
+    expect(jsonRedactionEntry!.replacements).toBeGreaterThanOrEqual(1);
   });
 
   it("removes raw Playwright JSON and records a warning when redaction fails", async () => {

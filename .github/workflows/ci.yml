@@ -19,16 +19,8 @@ env:
 
 jobs:
   verify:
-    name: verify (node ${{ matrix.node }})
+    name: verify (node 24)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # 24 = current Active LTS (Krypton), 25 = Current/stable.
-        # Node 22 (Jod) is dropped: enters Maintenance Oct 2026 and dragging
-        # along an older runtime widens the supply-chain attack surface
-        # without buying us anything for a green-field PoC.
-        node: ["24", "25"]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -39,10 +31,16 @@ jobs:
           version: 10.8.0
           run_install: false
 
-      - name: Setup Node ${{ matrix.node }}
+      # Node 24 = current Active LTS (Krypton). Older runtimes (22 / Jod) are
+      # dropped because dragging along an older runtime widens the supply-chain
+      # attack surface without buying us anything for a green-field PoC. The
+      # Current line (25) is also skipped: it EOLs 2026-10 and production users
+      # are expected to run the LTS, so the extra matrix arm was costing CI
+      # time without protecting any real consumer.
+      - name: Setup Node 24
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: "24"
           cache: pnpm
 
       - name: pnpm install

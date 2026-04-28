@@ -159,6 +159,48 @@ describe("shared run warning schemas", () => {
     });
   });
 
+  it("validates run.started cwd and timestamp strictly", () => {
+    expect(() =>
+      RunStartedPayloadSchema.parse({
+        command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+        cwd: "relative/project",
+        startedAt: "2026-04-28T00:00:00.000Z"
+      })
+    ).toThrow(/absolute path/);
+
+    expect(() =>
+      RunStartedPayloadSchema.parse({
+        command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+        cwd: "/tmp/project",
+        startedAt: "not-a-date"
+      })
+    ).toThrow();
+  });
+
+  it("accepts only structured cancellation reasons", () => {
+    expect(
+      RunCancelledPayloadSchema.parse({
+        exitCode: null,
+        signal: "SIGTERM",
+        status: "cancelled",
+        cancelReason: "user-request",
+        durationMs: 123,
+        warnings: []
+      }).cancelReason
+    ).toBe("user-request");
+
+    expect(() =>
+      RunCancelledPayloadSchema.parse({
+        exitCode: null,
+        signal: "SIGTERM",
+        status: "cancelled",
+        cancelReason: "/private/raw reason",
+        durationMs: 123,
+        warnings: []
+      })
+    ).toThrow();
+  });
+
   it("keeps terminal event and status mapping in shared code", () => {
     expect(terminalStatusMatchesEvent("run.completed", "passed")).toBe(true);
     expect(terminalStatusMatchesEvent("run.completed", "failed")).toBe(true);
@@ -182,6 +224,43 @@ describe("shared run warning schemas", () => {
           durationMs: 1,
           warnings: []
         }
+      })
+    ).toThrow();
+  });
+
+  it("requires runId for run events but not for snapshot events", () => {
+    expect(() =>
+      WorkbenchEventSchema.parse({
+        type: "run.stdout",
+        sequence: 1,
+        timestamp: "2026-04-28T00:00:00.000Z",
+        payload: { chunk: "hello" }
+      })
+    ).toThrow(/runId/);
+
+    expect(
+      WorkbenchEventSchema.parse({
+        type: "snapshot",
+        sequence: 0,
+        timestamp: "2026-04-28T00:00:00.000Z",
+        payload: { service: "playwright-workbench-agent", version: "0.1.0" }
+      })
+    ).toEqual({
+      type: "snapshot",
+      sequence: 0,
+      timestamp: "2026-04-28T00:00:00.000Z",
+      payload: { service: "playwright-workbench-agent", version: "0.1.0" }
+    });
+  });
+
+  it("rejects non-ISO timestamp in event envelope", () => {
+    expect(() =>
+      WorkbenchEventSchema.parse({
+        type: "run.stdout",
+        runId: "run-1",
+        sequence: 1,
+        timestamp: "not-a-date",
+        payload: { chunk: "hello" }
       })
     ).toThrow();
   });

@@ -9,6 +9,7 @@ import {
   type CommandPolicy
 } from "./policy.js";
 import { redact } from "./redact.js";
+import type { RunCancellationReason } from "@pwqa/shared";
 
 export interface CommandSpec {
   executable: string;
@@ -37,6 +38,8 @@ export interface CommandResult {
   stderr: string;
   /** True when the command was cancelled before completion. */
   cancelled: boolean;
+  /** Closed reason used by metadata/events; raw user text must not flow here. */
+  cancelReason?: RunCancellationReason;
   /** True when the command was terminated for exceeding `timeoutMs`. */
   timedOut: boolean;
   command: { executable: string; args: ReadonlyArray<string>; cwd: string };
@@ -44,7 +47,7 @@ export interface CommandResult {
 
 export interface CommandHandle {
   result: Promise<CommandResult>;
-  cancel(reason?: string): void;
+  cancel(reason?: RunCancellationReason): void;
   pid?: number;
 }
 
@@ -171,6 +174,7 @@ export function createNodeCommandRunner({
       });
 
       let cancelled = false;
+      let cancelReason: RunCancellationReason | undefined;
       let timedOut = false;
       let timeoutHandle: NodeJS.Timeout | undefined;
       let killEscalation: NodeJS.Timeout | undefined;
@@ -223,6 +227,7 @@ export function createNodeCommandRunner({
             stdout: stdoutChunks.join(""),
             stderr: stderrChunks.join(""),
             cancelled,
+            cancelReason,
             timedOut,
             command: { executable: spec.executable, args: [...spec.args], cwd: spec.cwd }
           });
@@ -232,9 +237,10 @@ export function createNodeCommandRunner({
       return {
         result,
         pid: child.pid,
-        cancel(reason?: string) {
+        cancel(reason: RunCancellationReason = "internal") {
           if (cancelled) return;
           cancelled = true;
+          cancelReason = reason;
           if (handlers.onStderr && reason) {
             handlers.onStderr(`\n[workbench] cancelled: ${reason}\n`);
           }

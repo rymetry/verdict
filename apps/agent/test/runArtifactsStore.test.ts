@@ -20,6 +20,7 @@ describe("runArtifactsStore.redactPlaywrightResults", () => {
     );
     expect(result.applied).toBe(false);
     expect(result.modified).toBe(false);
+    expect(result.replacements).toBe(0);
   });
 
   it("scrubs known secrets and preserves valid JSON shape", async () => {
@@ -55,6 +56,7 @@ describe("runArtifactsStore.redactPlaywrightResults", () => {
     const outcome = await runArtifactsStore.redactPlaywrightResults(file);
     expect(outcome.applied).toBe(true);
     expect(outcome.modified).toBe(true);
+    expect(outcome.replacements).toBeGreaterThanOrEqual(2);
 
     const scrubbed = fs.readFileSync(file, "utf8");
     expect(scrubbed).not.toContain("abcdefghij1234567890");
@@ -74,5 +76,17 @@ describe("runArtifactsStore.redactPlaywrightResults", () => {
     const outcome = await runArtifactsStore.redactPlaywrightResults(file);
     expect(outcome.applied).toBe(true);
     expect(outcome.modified).toBe(false);
+    expect(outcome.replacements).toBe(0);
+  });
+
+  it("re-throws non-ENOENT filesystem errors", async () => {
+    // Reading a directory as if it were a file produces EISDIR. This deterministically
+    // exercises the non-ENOENT re-throw path on every platform without relying on
+    // permission semantics (which differ for root in CI containers).
+    const dirAsFile = path.join(workdir, "results.json");
+    fs.mkdirSync(dirAsFile);
+    await expect(
+      runArtifactsStore.redactPlaywrightResults(dirAsFile)
+    ).rejects.toMatchObject({ code: "EISDIR" });
   });
 });

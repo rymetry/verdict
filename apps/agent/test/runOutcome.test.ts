@@ -22,7 +22,6 @@ describe("deriveOutcome", () => {
   it("returns passed for exit code 0", () => {
     const outcome = deriveOutcome(makeResult({ exitCode: 0 }), new Date());
     expect(outcome.status).toBe("passed");
-    expect(outcome.warning).toBeUndefined();
   });
 
   it("returns failed for non-zero exit code", () => {
@@ -32,18 +31,44 @@ describe("deriveOutcome", () => {
   });
 
   it("returns cancelled when CommandResult.cancelled is true", () => {
-    const outcome = deriveOutcome(makeResult({ cancelled: true, exitCode: 143 }), new Date());
+    const outcome = deriveOutcome(
+      makeResult({ cancelled: true, cancelReason: "user-request", exitCode: 143 }),
+      new Date()
+    );
     expect(outcome.status).toBe("cancelled");
+    if (outcome.status !== "cancelled") throw new Error("expected cancelled");
+    expect(outcome.cancelReason).toBe("user-request");
+  });
+
+  it("defaults cancelReason to 'internal' when not provided", () => {
+    const outcome = deriveOutcome(makeResult({ cancelled: true }), new Date());
+    expect(outcome.status).toBe("cancelled");
+    if (outcome.status !== "cancelled") throw new Error("expected cancelled");
+    expect(outcome.cancelReason).toBe("internal");
   });
 
   it("returns error with warning when timedOut", () => {
     const outcome = deriveOutcome(makeResult({ timedOut: true }), new Date());
     expect(outcome.status).toBe("error");
+    if (outcome.status !== "error") throw new Error("expected error");
     expect(outcome.warning).toMatch(/timed out/i);
   });
 
   it("returns error when exitCode is null and not cancelled/timedOut", () => {
     const outcome = deriveOutcome(makeResult({ exitCode: null }), new Date());
     expect(outcome.status).toBe("error");
+  });
+
+  it("prefers cancellation status when both cancelled and timedOut are true", () => {
+    // Race window: timeout fires concurrently with user cancellation. The
+    // cancellation status takes precedence; runManager surfaces the timeout
+    // via a warning string so the diagnostic trail is preserved.
+    const outcome = deriveOutcome(
+      makeResult({ cancelled: true, timedOut: true, cancelReason: "user-request" }),
+      new Date()
+    );
+    expect(outcome.status).toBe("cancelled");
+    if (outcome.status !== "cancelled") throw new Error("expected cancelled");
+    expect(outcome.cancelReason).toBe("user-request");
   });
 });

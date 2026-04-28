@@ -115,6 +115,7 @@ describe("NodeCommandRunner", () => {
     setTimeout(() => handle.cancel("user-request"), 50);
     const result = await handle.result;
     expect(result.cancelled).toBe(true);
+    expect(result.cancelReason).toBe("user-request");
   });
 
   it("filters env to the allowlist", async () => {

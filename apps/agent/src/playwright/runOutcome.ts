@@ -1,13 +1,25 @@
-import { type RunStatus } from "@pwqa/shared";
+import { type RunCancellationReason } from "@pwqa/shared";
 import type { CommandResult } from "../commands/runner.js";
 
-export interface RunOutcome {
-  status: RunStatus;
+interface RunOutcomeBase {
   exitCode: number | null;
   signal: string | null;
   durationMs: number;
-  warning?: string;
 }
+
+/**
+ * Discriminated union by `status`: `cancelReason` is statically required for
+ * cancelled outcomes (eliminating the runtime invariant "cancelled implies
+ * cancelReason exists" via the type system). `warning` carries the
+ * human-readable cause on error outcomes — currently only the timeout
+ * message ("Run timed out and was terminated."). Other failure modes
+ * propagate detail through structured logs and metadata warnings rather
+ * than this field.
+ */
+export type RunOutcome =
+  | (RunOutcomeBase & { status: "passed" | "failed" })
+  | (RunOutcomeBase & { status: "cancelled"; cancelReason: RunCancellationReason })
+  | (RunOutcomeBase & { status: "error"; warning?: string });
 
 /**
  * Pure function that maps a CommandResult into a Workbench RunStatus.
@@ -19,7 +31,13 @@ export function deriveOutcome(result: CommandResult, startedAt: Date): RunOutcom
   const durationMs = completedAt.getTime() - startedAt.getTime();
 
   if (result.cancelled) {
-    return { status: "cancelled", exitCode: result.exitCode, signal: result.signal, durationMs };
+    return {
+      status: "cancelled",
+      exitCode: result.exitCode,
+      signal: result.signal,
+      cancelReason: result.cancelReason ?? "internal",
+      durationMs
+    };
   }
   if (result.timedOut) {
     return {

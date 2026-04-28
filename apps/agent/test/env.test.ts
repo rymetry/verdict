@@ -31,7 +31,7 @@ describe("buildAgentEnv", () => {
     expect(env.host).toBe(expectedHost);
   });
 
-  it.each(["", "0", "false", "yes", "on", undefined])(
+  it.each(["", "0", "false", undefined])(
     "rejects non-loopback host when WORKBENCH_ALLOW_REMOTE=%s",
     (raw) => {
       expect(() =>
@@ -44,4 +44,12 @@ describe("buildAgentEnv", () => {
       ).toThrow(/WORKBENCH_ALLOW_REMOTE=1 or true/);
     }
   );
+
+  it.each(["yes", "on"])("rejects ambiguous boolean flag value %s", (raw) => {
+    expect(() =>
+      buildAgentEnv({
+        env: { WORKBENCH_ALLOW_REMOTE: raw }
+      })
+    ).toThrow(/Invalid WORKBENCH_ALLOW_REMOTE value/);
+  });
 });

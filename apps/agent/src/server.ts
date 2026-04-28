@@ -7,6 +7,7 @@ import { type WSContext } from "hono/ws";
 import {
   HealthResponseSchema,
   SnapshotPayloadSchema,
+  WorkbenchEventSchema,
   type HealthResponse,
   type WorkbenchEvent
 } from "@pwqa/shared";
@@ -139,14 +140,13 @@ function attachWebSocket(
               service: "playwright-workbench-agent",
               version: SERVICE_VERSION
             });
-            ws.send(
-              JSON.stringify({
+            const snapshot = WorkbenchEventSchema.parse({
                 type: "snapshot",
                 sequence: 0,
                 timestamp: new Date().toISOString(),
                 payload
-              } satisfies WorkbenchEvent)
-            );
+              } satisfies WorkbenchEvent);
+            ws.send(JSON.stringify(snapshot));
           } catch (error) {
             logger.debug({ err: error }, "snapshot publish failed");
           }
@@ -168,7 +168,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
   const logger = createLogger(env.logLevel);
 
   const bus = createEventBus({
-    onListenerError: (error) => logger.debug({ err: error }, "ws listener error")
+    onListenerError: (error) => logger.warn({ err: error }, "ws listener error")
   });
 
   const runnerForProject = (projectRoot: string): CommandRunner => {
@@ -194,7 +194,21 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
             "failed to persist audit log entry"
           );
         }
-        options.audit?.(entry);
+        try {
+          options.audit?.(entry);
+        } catch (error) {
+          logger.error(
+            {
+              err: error instanceof Error ? error.message : String(error),
+              errorName: error instanceof Error ? error.name : typeof error,
+              code:
+                error instanceof Error && "code" in error
+                  ? String((error as NodeJS.ErrnoException).code)
+                  : undefined
+            },
+            "audit observer failed"
+          );
+        }
         if (auditPersistenceError && env.failClosedAudit) {
           throw auditPersistenceError;
         }
