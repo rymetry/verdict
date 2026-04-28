@@ -1,11 +1,13 @@
 // Developer View で使う型 + Phase 1.2 移行用 label 定数。
 //
 // なぜ sample data から分離したか (R1 silent-failure-hunter I-1):
-//  - sample-data は test fixture であり、`apps/web/test/_fixtures/` に置くのが project の慣習。
 //  - production bundle に sample data が同梱されたまま残ると、Phase 1.2 で
 //    `data ?? SAMPLE_*` のような silent fallback が誤って書かれた時に、本物の API 障害が
 //    架空データで隠蔽される silent failure リスクがある。
-//  - 型 + label 定数のみ production code 側に残し、SAMPLE_* は test fixture 側に隔離する。
+//  - 型 + label 定数のみ production code 側 (本ファイル) に置き、SAMPLE_* は
+//    Phase 1.2 で削除されること前提の `placeholder-data.ts` に隔離する。
+//    各 Card Props は required (default = SAMPLE_* 撤廃) のため、Phase 1.2 で
+//    fixture import を消せば silent fallback は構造上発生しない。
 //
 // Phase 1.2 で実データに接続する際の置換ポイント:
 //  - FileTree: GET /projects/:projectId/inventory + run context から関連 spec / Page Object / Fixture を導出
