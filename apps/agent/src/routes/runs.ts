@@ -8,6 +8,7 @@ import {
 } from "@pwqa/shared";
 import type { RunManager, RunManagerLogger } from "../playwright/runManager.js";
 import { mergeActiveAndPersistedRuns } from "../playwright/runManager.js";
+import { errorLogFields, projectIdHash } from "../lib/structuredLog.js";
 import type { ProjectStore } from "../project/store.js";
 import { apiError } from "../lib/apiError.js";
 import { pathExists } from "../lib/pathExists.js";
@@ -15,16 +16,10 @@ import { CommandPolicyError } from "../commands/runner.js";
 import { PlaywrightCommandBuildError } from "../playwright/builder.js";
 import { AuditPersistenceError } from "../lib/errors.js";
 
-function errorCode(error: unknown): string {
-  if (error instanceof Error && "code" in error && typeof error.code === "string") {
-    return error.code;
-  }
-  return "UNKNOWN";
-}
-
 /**
- * Maps startup failures to stable public codes. Raw error messages stay in
- * structured logs because they may include cwd, realpath, or secret-adjacent data.
+ * Maps startup failures to stable public codes. Structured logs use the
+ * fail-closed `errorLogFields(error)` helper so raw error messages — which
+ * can carry cwd, realpath, or secret-adjacent text — never reach pino.
  */
 function startupFailureResponse(error: unknown): {
   code: string;
@@ -101,9 +96,10 @@ export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
     } catch (error) {
       logger?.error(
         {
-          err: error instanceof Error ? error.message : String(error),
-          code: errorCode(error),
-          projectId: current.summary.id
+          // `current.summary.id` is the project realpath (scanner.ts:174);
+          // hash it so structured logs don't leak `/Users/<name>/...`.
+          projectIdHash: projectIdHash(current.summary.id),
+          ...errorLogFields(error)
         },
         "run start failed"
       );

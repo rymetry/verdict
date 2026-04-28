@@ -24,8 +24,12 @@ import {
   type CommandPolicy
 } from "./commands/policy.js";
 import { createEventBus, type EventBus } from "./events/bus.js";
-import { createRunManager, type RunManager } from "./playwright/runManager.js";
-import { errorLogFields } from "./playwright/runTypes.js";
+import { errorLogFields, projectIdHash } from "./lib/structuredLog.js";
+import {
+  createRunManager,
+  type RunManager,
+  type RunManagerLogger
+} from "./playwright/runManager.js";
 import { createProjectStore, type ProjectStore } from "./project/store.js";
 import { projectsRoutes } from "./routes/projects.js";
 import { runsRoutes } from "./routes/runs.js";
@@ -46,6 +50,11 @@ export interface BuildAppOptions {
   policyFactory?: (projectRoot: string) => CommandPolicy;
   /** Optional override for the audit sink (used by tests). */
   audit?: (entry: AuditEntry) => void;
+  /**
+   * Optional override for the structured logger (used by tests to capture
+   * payloads and assert no absolute paths leak into structured logs).
+   */
+  logger?: RunManagerLogger;
 }
 
 export interface BuildAppResult {
@@ -116,7 +125,7 @@ function attachHealth(app: Hono): void {
 function attachWebSocket(
   app: Hono,
   bus: EventBus,
-  logger: ReturnType<typeof createLogger>
+  logger: RunManagerLogger
 ): (server: ServerType) => void {
   // PLAN.v2 §7 / §33: factory pattern leaves the door open for a raw `ws`
   // fallback if @hono/node-ws becomes unstable.
@@ -133,7 +142,7 @@ function attachWebSocket(
             try {
               ws.send(JSON.stringify(event));
             } catch (error) {
-              logger.debug({ err: error }, "ws send failed");
+              logger.debug?.({ ...errorLogFields(error) }, "ws send failed");
             }
           });
           try {
@@ -149,7 +158,7 @@ function attachWebSocket(
               } satisfies WorkbenchEvent);
             ws.send(JSON.stringify(snapshot));
           } catch (error) {
-            logger.debug({ err: error }, "snapshot publish failed");
+            logger.debug?.({ ...errorLogFields(error) }, "snapshot publish failed");
           }
         },
         onClose() {
@@ -166,10 +175,15 @@ function attachWebSocket(
 
 export function buildApp(options: BuildAppOptions): BuildAppResult {
   const { env } = options;
-  const logger = createLogger(env.logLevel);
+  // Tests inject a capture spy via `options.logger`; production wires up pino.
+  // The `RunManagerLogger` contract enforces fail-closed payload conventions
+  // (no absolute paths, code/artifactKind correlation), so spy implementations
+  // get the same shape as production logs.
+  const logger: RunManagerLogger = options.logger ?? createLogger(env.logLevel);
 
   const bus = createEventBus({
-    onListenerError: (error) => logger.warn({ err: error }, "ws listener error")
+    onListenerError: (error) =>
+      logger.warn?.({ ...errorLogFields(error) }, "ws listener error")
   });
 
   const runnerForProject = (projectRoot: string): CommandRunner => {
@@ -177,7 +191,12 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     return createNodeCommandRunner({
       policy,
       audit: (entry) => {
-        logger.info({ audit: entry }, "command audit");
+        // Audit entries are the persistent audit-trail of record (`audit.log`)
+        // and the structured-log echo carries the same identity (`cwd`,
+        // executable, args). Identity parity between the two is intentional;
+        // path redaction applies to *error contexts*, not to audit identity.
+        // PLAN.v2 §28 expects auditable command provenance.
+        logger.info?.({ audit: entry }, "command audit");
         let auditPersistenceError: AuditPersistenceError | undefined;
         try {
           persistAuditEntry(projectRoot, entry);
@@ -196,7 +215,6 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
         } catch (error) {
           logger.error(
             {
-              errorName: error instanceof Error ? error.name : typeof error,
               ...errorLogFields(error)
             },
             "audit observer failed"
@@ -229,8 +247,13 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     })
       .then((result) => {
         projectStore.set(result);
-        logger.info(
-          { projectId: result.summary.id, packageManager: result.packageManager.name },
+        logger.info?.(
+          {
+            // Hash the realpath-based projectId to keep correlation without
+            // exposing `/Users/<name>/...` in structured logs (Issue #27).
+            projectIdHash: projectIdHash(result.summary.id),
+            packageManager: result.packageManager.name
+          },
           "Initial project loaded"
         );
       })

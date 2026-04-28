@@ -372,19 +372,19 @@ describe("RunManager", () => {
       expect.objectContaining({
         runId: handle.runId,
         stream: "stdout",
-        artifactKind: "log",
+        artifactKind: "stdout-log",
         code: "ENOSPC"
       }),
       expect.objectContaining({
         runId: handle.runId,
         stream: "stdout",
-        artifactKind: "log",
+        artifactKind: "stdout-log",
         code: "EACCES"
       }),
       expect.objectContaining({
         runId: handle.runId,
         stream: "stderr",
-        artifactKind: "log",
+        artifactKind: "stderr-log",
         code: "EBADF"
       })
     ]));
@@ -1136,26 +1136,29 @@ process.exit(1);
       expect.arrayContaining([
         expect.objectContaining({
           runId: handle.runId,
-          err: "redaction disk write failed",
           code: "UNKNOWN",
+          errorName: "Error",
           artifactKind: "playwright-json"
         }),
         expect.objectContaining({
           runId: handle.runId,
           provider: "playwright-json",
           artifactKind: "playwright-json-summary",
-          code: "ENOENT"
+          code: "ENOENT",
+          errorName: "Error"
         })
       ])
     );
     // Issue #27: structured-log payload must not leak absolute filesystem
     // paths. `runId` + `artifactKind` is sufficient for log correlation;
-    // run-scoped paths can be reconstructed via `runPathsFor()`.
+    // run-scoped paths can be reconstructed via `runPathsFor()`. `err`
+    // (the message) is dropped by fail-closed default in `errorLogFields`.
     const errorsAsJson = JSON.stringify(errors);
     expect(errorsAsJson).not.toContain(completed.paths.playwrightJson);
     expect(errorsAsJson).not.toContain(workdir);
     for (const entry of errors) {
       expect(entry).not.toHaveProperty("playwrightJsonPath");
+      expect(entry).not.toHaveProperty("err");
     }
   });
 

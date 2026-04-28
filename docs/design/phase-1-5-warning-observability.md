@@ -21,6 +21,8 @@ Run 起動前の HTTP error code は原因分類できる粒度に分ける。co
 
 Log write failure が同一 stream で複数回起きた場合、UI warning は最初の code、distinct code list、failure count を表示する。構造化ログは stream ごとの最初の failure を詳細付きで残し、後続 code の存在は warning の `codes=` で追跡する。
 
+Phase 1.7 (Issue #27 / PR #28) で構造化ログの payload schema が変わった。`playwrightJsonPath` / `projectRoot` / `err: error.message` フィールドは廃止し、`artifactKind` (closed `ArtifactKind` union) + `errorName` + `code` の組で識別する形に固定。ログ集約系で旧フィールドを参照していた query は `artifactKind` ベースに置換が必要。`errorLogFields(error)` helper が fail-closed で `error.message` を drop するため、絶対パスがメッセージ経由で漏れる経路を構造的に塞ぐ。
+
 ## Audit mode
 
 Audit log 永続化は既定では fail-open とする。ローカル開発環境で `.playwright-workbench/audit.log` の権限問題が発生しても、Playwright run 自体を止めないため。

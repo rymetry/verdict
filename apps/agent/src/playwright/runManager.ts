@@ -120,11 +120,12 @@ function createLogWriteTracker({
     if (!loggedCodes[stream].has(code)) {
       loggedCodes[stream].add(code);
       // 同一 code の連続失敗は集約し、異なる code は構造化ログにも残して調査可能にする。
+      const artifactKind: ArtifactKind = stream === "stdout" ? "stdout-log" : "stderr-log";
       logger?.error(
         {
           runId,
           stream,
-          artifactKind: "log" satisfies ArtifactKind,
+          artifactKind,
           ...errorLogFields(error)
         },
         "run log write failed"
@@ -190,8 +191,7 @@ function publishEventSafely({
       {
         runId: "runId" in event ? event.runId : undefined,
         eventType: event.type,
-        code,
-        err: error instanceof Error ? error.message : String(error)
+        ...errorLogFields(error)
       },
       message
     );

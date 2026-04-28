@@ -463,6 +463,15 @@ describe("HTTP API surface", () => {
       cwdBoundary: root,
       envAllowlist: ["PATH"]
     });
+    const errors: Array<Record<string, unknown>> = [];
+    const captureLogger = {
+      error(payload: Record<string, unknown>) {
+        errors.push(payload);
+      },
+      warn() {},
+      info() {},
+      debug() {}
+    };
 
     try {
       const { runnerForProject } = buildApp({
@@ -476,7 +485,8 @@ describe("HTTP API surface", () => {
         policyFactory: permissiveNodePolicy,
         audit: () => {
           throw new Error("observer failed at /private/audit-hook");
-        }
+        },
+        logger: captureLogger
       });
 
       const handle = runnerForProject(projectRoot).run({
@@ -489,8 +499,74 @@ describe("HTTP API surface", () => {
         expect.objectContaining({ exitCode: 0, cancelled: false })
       );
       expect(fs.existsSync(path.join(projectRoot, ".playwright-workbench", "audit.log"))).toBe(true);
+
+      // Issue #27: structured-log payload for audit observer failure must not
+      // leak the path-bearing error message ("/private/audit-hook").
+      const observerEntry = errors.find((entry) => entry.errorName === "Error");
+      expect(observerEntry).toBeDefined();
+      expect(observerEntry).not.toHaveProperty("err");
+      expect(JSON.stringify(errors)).not.toContain("/private/audit-hook");
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not leak projectRoot or directory paths in audit-persist failure logs", async () => {
+    // Issue #27 项目 3 regression test: the symlink-based audit-dir failure
+    // path throws a plain Error whose message embeds projectRoot. The
+    // fail-closed `errorLogFields` helper must drop that message and only
+    // keep `code` + `errorName` + `artifactKind: "audit-log"`.
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-leak-outside-")));
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-leak-project-")));
+    fs.symlinkSync(outside, path.join(projectRoot, ".playwright-workbench"));
+    const errors: Array<Record<string, unknown>> = [];
+    const captureLogger = {
+      error(payload: Record<string, unknown>) {
+        errors.push(payload);
+      },
+      warn() {},
+      info() {},
+      debug() {}
+    };
+    try {
+      const { app, projectStore } = buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [projectRoot],
+          failClosedAudit: true
+        },
+        policyFactory: (root): CommandPolicy => ({
+          allowedExecutables: ["node"],
+          argValidator: unsafelyAllowAnyArgsValidator,
+          cwdBoundary: root,
+          envAllowlist: ["PATH"]
+        }),
+        logger: captureLogger
+      });
+      projectStore.set({
+        summary: fakeProjectSummary(projectRoot, fakePackageManager()),
+        packageManager: fakePackageManager()
+      });
+
+      const response = await app.request("/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: projectRoot, headed: false })
+      });
+      expect(response.status).toBe(500);
+
+      const auditLogEntry = errors.find((e) => e.artifactKind === "audit-log");
+      expect(auditLogEntry).toBeDefined();
+      expect(auditLogEntry).not.toHaveProperty("err");
+      expect(auditLogEntry).not.toHaveProperty("projectRoot");
+      const errorsAsJson = JSON.stringify(errors);
+      expect(errorsAsJson).not.toContain(projectRoot);
+      expect(errorsAsJson).not.toContain(outside);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
     }
   });
 
