@@ -59,6 +59,10 @@ apps/web
 
 色相分離 (pass=142° / fail=27° / flaky=75° / accent=156°) により色覚多様性下でもバッジ識別が可能。
 
+Feature component で `#fff` / `rgb(...)` / 数値 `oklch(...)` のような直書き色は使わない。配色は
+`docs/design/concept-b-refined.html` を source-of-truth とし、必要な色は `src/styles/globals.css`
+の CSS variables / Tailwind token を経由する。例外が必要な場合は、先に design token とテストを追加する。
+
 ## 利用例
 
 ```tsx

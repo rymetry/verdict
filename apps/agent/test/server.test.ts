@@ -2,9 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/server.js";
+import { createDefaultCommandPolicy, type CommandPolicy } from "../src/commands/policy.js";
 
 let workdir: string;
+const here = path.dirname(fileURLToPath(import.meta.url));
+const fixtureRoot = path.resolve(here, "../../../tests/fixtures/sample-pw-project");
 
 beforeAll(() => {
   workdir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-server-")));
@@ -64,6 +68,125 @@ describe("HTTP API surface", () => {
     expect(current.status).toBe(200);
     const currentBody = await current.json();
     expect(currentBody.rootPath).toBe(workdir);
+  });
+
+  it("builds inventory for an opened project outside apps/agent cwd", async () => {
+    const fixtureRealpath = fs.realpathSync(fixtureRoot);
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [fixtureRealpath]
+      }
+    });
+    const open = await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: fixtureRealpath })
+    });
+    expect(open.status).toBe(200);
+
+    const inventory = await app.request(
+      `/projects/${encodeURIComponent(fixtureRealpath)}/inventory`
+    );
+    expect(inventory.status).toBe(200);
+    const body = await inventory.json();
+    expect(body.source).toBe("playwright-list-json");
+    expect(body.error).toBeUndefined();
+    expect(body.totals.tests).toBeGreaterThanOrEqual(2);
+    const titles = body.specs.flatMap((spec: { tests: Array<{ title: string }> }) =>
+      spec.tests.map((test) => test.title)
+    );
+    expect(titles).toContain("trivial passing assertion");
+  }, 90_000);
+
+  it("passes each project root to the injected policy factory", async () => {
+    const requestedRoots: string[] = [];
+    const { runnerForProject } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir]
+      },
+      policyFactory: (projectRoot) => {
+        requestedRoots.push(projectRoot);
+        return createDefaultCommandPolicy(projectRoot);
+      }
+    });
+
+    expect(() =>
+      runnerForProject(workdir).run({
+        executable: "git",
+        args: ["push"],
+        cwd: workdir
+      })
+    ).toThrow(/not in the allowed list/);
+    expect(requestedRoots).toEqual([workdir]);
+  });
+
+  it("keeps project-scoped runners isolated across project roots", () => {
+    const otherRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-server-other-")));
+    try {
+      const { runnerForProject } = buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [workdir, otherRoot]
+        },
+        policyFactory: (projectRoot): CommandPolicy => ({
+          allowedExecutables: ["node"],
+          cwdBoundary: projectRoot,
+          envAllowlist: ["PATH"]
+        })
+      });
+
+      expect(() =>
+        runnerForProject(workdir).run({
+          executable: process.execPath,
+          args: ["-e", ""],
+          cwd: otherRoot
+        })
+      ).toThrow(/escapes the project boundary/);
+    } finally {
+      fs.rmSync(otherRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not follow symlinks when writing project audit logs", async () => {
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-outside-")));
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-project-")));
+    fs.symlinkSync(outside, path.join(projectRoot, ".playwright-workbench"));
+    const permissiveNodePolicy = (root: string): CommandPolicy => ({
+      allowedExecutables: ["node"],
+      cwdBoundary: root,
+      envAllowlist: ["PATH"]
+    });
+
+    try {
+      const { runnerForProject } = buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [projectRoot]
+        },
+        policyFactory: permissiveNodePolicy
+      });
+      const handle = runnerForProject(projectRoot).run({
+        executable: process.execPath,
+        args: ["-e", ""],
+        cwd: projectRoot
+      });
+      await handle.result;
+
+      expect(fs.existsSync(path.join(outside, "audit.log"))).toBe(false);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("rejects /projects/open paths outside the allowed roots", async () => {

@@ -20,6 +20,17 @@ import { deriveOutcome } from "./runOutcome.js";
 import { playwrightJsonReportProvider } from "../reporting/PlaywrightJsonReportProvider.js";
 import type { ReportProvider } from "../reporting/ReportProvider.js";
 
+interface RunManagerLogger {
+  error(payload: Record<string, unknown>, message: string): void;
+}
+
+function errorCode(error: unknown): string {
+  if (error instanceof Error && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return "UNKNOWN";
+}
+
 export interface RunStartParams {
   projectId: string;
   projectRoot: string;
@@ -41,11 +52,12 @@ export interface RunManager {
 }
 
 interface RunManagerDeps {
-  runner: CommandRunner;
+  runnerForProject: (projectRoot: string) => CommandRunner;
   bus: EventBus;
   /** Optional injection points (defaults wired for production). */
   artifactsStore?: RunArtifactsStore;
   reportProvider?: ReportProvider;
+  logger?: RunManagerLogger;
 }
 
 function newRunId(): string {
@@ -62,10 +74,11 @@ async function safeReadJson<T>(filePath: string): Promise<T | undefined> {
 }
 
 export function createRunManager({
-  runner,
+  runnerForProject,
   bus,
   artifactsStore = defaultArtifactsStore,
-  reportProvider = playwrightJsonReportProvider
+  reportProvider = playwrightJsonReportProvider,
+  logger
 }: RunManagerDeps): RunManager {
   const active = new Map<string, ActiveRunHandle>();
 
@@ -123,6 +136,7 @@ export function createRunManager({
         payload: { command, cwd: params.projectRoot, startedAt: runningMetadata.startedAt }
       });
 
+      const runner = runnerForProject(params.projectRoot);
       handle = runner.run(
         {
           executable: command.executable,
@@ -172,11 +186,12 @@ export function createRunManager({
         const result = await handle.result;
         await logStreams.closeAll();
 
-        // §28 / security review #8: scrub the Playwright JSON before either
-        // the report provider reads it or the API surfaces its path.
-        await artifactsStore
-          .redactPlaywrightResults(paths.playwrightJson)
-          .catch(() => undefined);
+        const redactionWarning = await redactPlaywrightResultsSafely({
+          artifactsStore,
+          logger,
+          runId,
+          playwrightJsonPath: paths.playwrightJson
+        });
 
         const summary = await readSummarySafely(reportProvider, {
           projectRoot: params.projectRoot,
@@ -184,6 +199,7 @@ export function createRunManager({
           playwrightJsonPath: paths.playwrightJson
         });
         const warnings = [...runningMetadata.warnings, ...(summary?.warnings ?? [])];
+        if (redactionWarning) warnings.push(redactionWarning);
 
         const outcome = deriveOutcome(result, startedAt);
         if (outcome.warning) warnings.push(outcome.warning);
@@ -266,6 +282,50 @@ export function createRunManager({
   }
 
   return { startRun, listRuns, cancelRun };
+}
+
+async function redactPlaywrightResultsSafely({
+  artifactsStore,
+  logger,
+  runId,
+  playwrightJsonPath
+}: {
+  artifactsStore: RunArtifactsStore;
+  logger?: RunManagerLogger;
+  runId: string;
+  playwrightJsonPath: string;
+}): Promise<string | undefined> {
+  try {
+    await artifactsStore.redactPlaywrightResults(playwrightJsonPath);
+    return undefined;
+  } catch (error) {
+    const redactionCode = errorCode(error);
+    logger?.error(
+      {
+        runId,
+        err: error instanceof Error ? error.message : String(error),
+        code: redactionCode,
+        playwrightJsonPath
+      },
+      "playwright-results redaction failed"
+    );
+    try {
+      await fs.unlink(playwrightJsonPath);
+      return `Playwright JSON redaction failed; removed raw result artifact. redactionCode=${redactionCode}`;
+    } catch (unlinkError) {
+      const unlinkCode = errorCode(unlinkError);
+      logger?.error(
+        {
+          runId,
+          err: unlinkError instanceof Error ? unlinkError.message : String(unlinkError),
+          code: unlinkCode,
+          playwrightJsonPath
+        },
+        "failed to remove raw playwright-results artifact after redaction failure"
+      );
+      return `Playwright JSON redaction failed; raw result artifact may still contain secrets. redactionCode=${redactionCode}; removalCode=${unlinkCode}`;
+    }
+  }
 }
 
 async function readSummarySafely(

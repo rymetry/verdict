@@ -56,3 +56,67 @@ jobs:
 
       - name: build
         run: pnpm build
+
+  gui-smoke:
+    name: gui smoke (node 24)
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.8.0
+          run_install: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @pwqa-smoke/workbench-gui exec playwright install chromium --with-deps
+
+      - name: Start local workbench
+        env:
+          WORKBENCH_ALLOWED_ROOTS: ${{ github.workspace }}/tests/fixtures
+        run: |
+          pnpm dev:agent > /tmp/playwright-workbench-agent.log 2>&1 &
+          pnpm dev:web > /tmp/playwright-workbench-web.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:4317/health >/dev/null && curl -fsS http://127.0.0.1:5173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::group::agent log"
+          cat /tmp/playwright-workbench-agent.log || true
+          echo "::endgroup::"
+          echo "::group::web log"
+          cat /tmp/playwright-workbench-web.log || true
+          echo "::endgroup::"
+          exit 1
+
+      - name: GUI smoke
+        env:
+          WORKBENCH_URL: http://127.0.0.1:5173
+          FIXTURE_ROOT: ${{ github.workspace }}/tests/fixtures/sample-pw-project
+        run: pnpm smoke:gui
+
+      - name: Upload GUI smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-smoke-artifacts
+          path: |
+            tests/smoke/_artifacts
+            tests/smoke/test-results
+            /tmp/playwright-workbench-agent.log
+            /tmp/playwright-workbench-web.log
+          if-no-files-found: ignore

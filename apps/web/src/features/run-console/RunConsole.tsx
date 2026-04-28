@@ -107,8 +107,8 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React
           aria-label="標準出力"
           className={cn(
             "mt-3 max-h-[40vh] overflow-auto rounded-md border border-[var(--line)]",
-            // mono パネルはダークなまま (light/dark 共通) でターミナル感を出す
-            "bg-[#0f1419] p-3 font-mono text-[11.5px] leading-5 text-[#e6e1cf]",
+            // デザインモックの `.terminal` と同じ白基調 + token 駆動に揃える。
+            "bg-[var(--bg-0)] p-3 font-mono text-[12px] leading-[1.65] text-[var(--ink-1)]",
             "whitespace-pre-wrap break-words"
           )}
         >
@@ -120,9 +120,10 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React
               stderr
             </summary>
             <pre
+              aria-label="標準エラー"
               className={cn(
-                "mt-2 max-h-[30vh] overflow-auto rounded-md border border-[var(--line)]",
-                "bg-[#1a0f0f] p-3 font-mono text-[11.5px] leading-5 text-[#f4cfcf]",
+                "mt-2 max-h-[30vh] overflow-auto rounded-md border border-[var(--fail)]",
+                "bg-[var(--fail-soft)] p-3 font-mono text-[12px] leading-[1.65] text-[var(--fail)]",
                 "whitespace-pre-wrap break-words"
               )}
             >

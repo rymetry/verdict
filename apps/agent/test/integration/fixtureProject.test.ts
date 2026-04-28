@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 import { scanProject } from "../../src/project/scanner";
 import { buildInventory } from "../../src/project/inventory";
 import { createNodeCommandRunner } from "../../src/commands/runner";
-import { DEFAULT_ALLOWED_EXECUTABLES, DEFAULT_ENV_ALLOWLIST } from "../../src/commands/policy";
+import { createDefaultCommandPolicy } from "../../src/commands/policy";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = path.resolve(here, "../../../../tests/fixtures/sample-pw-project");
@@ -48,11 +48,7 @@ describe("integration: sample-pw-project fixture", () => {
       allowedRoots: [fixtureRoot]
     });
     const runner = createNodeCommandRunner({
-      policy: {
-        allowedExecutables: DEFAULT_ALLOWED_EXECUTABLES,
-        cwdBoundary: fixtureRoot,
-        envAllowlist: DEFAULT_ENV_ALLOWLIST
-      }
+      policy: createDefaultCommandPolicy(fixtureRoot)
     });
     const inventory = await buildInventory({
       projectId: summary.id,

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createNodeCommandRunner } from "../src/commands/runner.js";
 import { createEventBus } from "../src/events/bus.js";
 import { createRunManager } from "../src/playwright/runManager.js";
+import { runArtifactsStore } from "../src/playwright/runArtifactsStore.js";
 import {
   type DetectedPackageManager,
   type WorkbenchEvent
@@ -79,7 +80,7 @@ describe("RunManager", () => {
         ]
       }
     });
-    const manager = createRunManager({ runner, bus });
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
 
     const events: WorkbenchEvent[] = [];
     bus.subscribe((event) => events.push(event));
@@ -119,7 +120,7 @@ describe("RunManager", () => {
         envAllowlist: ["PATH", "HOME"]
       }
     });
-    const manager = createRunManager({ runner, bus });
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
 
     const stubPath = writeStub("fail.js", STUB_FAILURE_SCRIPT);
     const pm = fakePackageManager();
@@ -145,7 +146,7 @@ describe("RunManager", () => {
         envAllowlist: ["PATH"]
       }
     });
-    const manager = createRunManager({ runner, bus });
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
 
     const pm = fakePackageManager();
     pm.blockingExecution = true;
@@ -158,5 +159,155 @@ describe("RunManager", () => {
         request: { projectId: workdir, headed: false }
       })
     ).rejects.toThrow(/test block/);
+  });
+
+  it("creates a project-scoped runner for the run's projectRoot", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const requestedRoots: string[] = [];
+    const manager = createRunManager({
+      runnerForProject: (projectRoot) => {
+        requestedRoots.push(projectRoot);
+        return runner;
+      },
+      bus
+    });
+
+    const stubPath = writeStub("stub.js", STUB_SUCCESS_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    await handle.finished;
+
+    expect(requestedRoots).toEqual([workdir]);
+  });
+
+  it("removes raw Playwright JSON and records a warning when redaction fails", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const errors: Array<Record<string, unknown>> = [];
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      artifactsStore: {
+        ...runArtifactsStore,
+        async redactPlaywrightResults() {
+          throw new Error("redaction disk write failed");
+        }
+      },
+      logger: {
+        error(payload) {
+          errors.push(payload);
+        }
+      }
+    });
+
+    const stubPath = writeStub("stub.js", STUB_SUCCESS_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+
+    expect(fs.existsSync(completed.paths.playwrightJson)).toBe(false);
+    expect(completed.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Playwright JSON redaction failed")
+      ])
+    );
+    expect(completed.warnings.join("\n")).not.toContain("redaction disk write failed");
+    expect(completed.warnings.join("\n")).not.toContain(workdir);
+    expect(errors).toEqual([
+      expect.objectContaining({
+        runId: handle.runId,
+        err: "redaction disk write failed",
+        code: "UNKNOWN",
+        playwrightJsonPath: completed.paths.playwrightJson
+      })
+    ]);
+  });
+
+  it("does not claim raw Playwright JSON was removed when cleanup fails", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      artifactsStore: {
+        ...runArtifactsStore,
+        async redactPlaywrightResults(playwrightJsonPath) {
+          fs.rmSync(playwrightJsonPath, { force: true });
+          throw Object.assign(new Error("redaction disk write failed at /private/path"), {
+            code: "EACCES"
+          });
+        }
+      }
+    });
+
+    const stubPath = writeStub("stub.js", STUB_SUCCESS_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+    const warningText = completed.warnings.join("\n");
+
+    expect(warningText).toContain("raw result artifact may still contain secrets");
+    expect(warningText).toContain("redactionCode=EACCES");
+    expect(warningText).toContain("removalCode=ENOENT");
+    expect(warningText).not.toContain("/private/path");
+    expect(warningText).not.toContain(completed.paths.playwrightJson);
   });
 });

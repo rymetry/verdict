@@ -98,6 +98,13 @@ function checkPolicy(spec: CommandSpec, policy: CommandPolicy): void {
       }
     }
   }
+  const validatorError = policy.argValidator?.({
+    executableName: name,
+    args: spec.args
+  });
+  if (validatorError) {
+    throw new CommandPolicyError(validatorError);
+  }
   const cwdAbs = realpathOrThrow(path.resolve(spec.cwd));
   ensureWithinBoundary(cwdAbs, policy.cwdBoundary);
 }
@@ -240,3 +247,4 @@ export function createNodeCommandRunner({
 }
 
 export { DEFAULT_ALLOWED_EXECUTABLES, DEFAULT_ENV_ALLOWLIST };
+export type { CommandPolicy } from "./policy.js";

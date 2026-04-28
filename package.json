@@ -10,7 +10,8 @@
     "dev:web": "pnpm --filter @pwqa/web dev",
     "build": "pnpm --filter '@pwqa/*' build",
     "typecheck": "pnpm --filter @pwqa/shared build && pnpm --filter '@pwqa/*' typecheck",
-    "test": "pnpm --filter '@pwqa/*' test"
+    "test": "pnpm --filter '@pwqa/*' test",
+    "smoke:gui": "pnpm --filter @pwqa-smoke/workbench-gui smoke"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

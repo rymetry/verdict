@@ -4,8 +4,10 @@
  * Drives the Workbench GUI through Playwright to verify the end-to-end
  * surface that unit + integration tests cannot reach: the React shell,
  * TanStack Query plumbing, the project open form, and the inventory render.
- * This spec lives outside the workspace test suite — it is launched
- * out-of-band against an already-running `pnpm dev:agent` + `pnpm preview`.
+ * This spec is now a CI smoke gate and runs against an already-running
+ * `pnpm dev:agent` + `pnpm dev:web`. The Vite dev server proxy is part of
+ * the acceptance surface because the browser app talks to the local Agent
+ * through `/api` and `/ws` in Phase 1.
  *
  * δ (Issue #11) で QA View が Tailwind/shadcn 化されたため、UI 文字列の
  * 検証ポイントを新 design system に合わせて更新している:
@@ -15,6 +17,7 @@
  *  - StatusBar に WebSocket 接続状態 ("WS · Connected" 等) が常時表示される
  */
 import { test, expect } from "@playwright/test";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,6 +27,7 @@ const FIXTURE = process.env.FIXTURE_ROOT ?? path.resolve(here, "../fixtures/samp
 const ARTIFACT_DIR = path.resolve(here, "_artifacts");
 
 test("Workbench GUI: open project + render inventory", async ({ page }) => {
+  fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
   await page.goto(WORKBENCH_URL);
 
   // ブランド表記 (TopBar/Brand コンポーネント)
@@ -47,5 +51,11 @@ test("Workbench GUI: open project + render inventory", async ({ page }) => {
   await expect(page.getByText("tests/example.spec.ts")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("trivial passing assertion")).toBeVisible();
 
-  await page.screenshot({ path: path.join(ARTIFACT_DIR, "gui-smoke.png"), fullPage: true });
+  await page.getByRole("radio", { name: "Light" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.screenshot({ path: path.join(ARTIFACT_DIR, "gui-smoke-light.png"), fullPage: true });
+
+  await page.getByRole("radio", { name: "Dark" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.screenshot({ path: path.join(ARTIFACT_DIR, "gui-smoke-dark.png"), fullPage: true });
 });
