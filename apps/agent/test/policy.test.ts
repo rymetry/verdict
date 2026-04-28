@@ -53,6 +53,7 @@ describe("default Phase 1 command policy", () => {
     ["pnpm", ["exec", "playwright", "test", "../outside.spec.ts"]],
     ["pnpm", ["exec", "playwright", "test", "%2e%2e/outside.spec.ts"]],
     ["pnpm", ["exec", "playwright", "test", "%252e%252e/outside.spec.ts"]],
+    ["pnpm", ["exec", "playwright", "test", "%25252e%25252e/outside.spec.ts"]],
     ["pnpm", ["exec", "playwright", "test", "%zz/outside.spec.ts"]],
     ["pnpm", ["exec", "playwright", "test", "tests/example.spec.ts\0"]],
     ["pnpm", ["exec", "playwright", "test", "--grep", "x".repeat(4_097)]],

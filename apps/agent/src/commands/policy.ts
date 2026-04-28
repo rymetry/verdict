@@ -114,16 +114,30 @@ function isFlagValue(value: string): boolean {
 function isProjectRelativeOperand(value: string): boolean {
   if (isFlagValue(value)) return false;
   if (path.isAbsolute(value)) return false;
-  const parts = value.split(/[\\/]+/);
-  if (parts.includes("..")) return false;
+  const decoded = decodeRepeatedly(value);
+  if (decoded === null) return false;
+  if (path.isAbsolute(decoded)) return false;
+  const parts = decoded.split(/[\\/]+/);
   try {
-    const onceDecoded = decodeURIComponent(value);
-    const decoded = onceDecoded === value ? onceDecoded : decodeURIComponent(onceDecoded);
-    const decodedParts = decoded.split(/[\\/]+/);
-    return !decodedParts.includes("..");
+    return !parts.includes("..");
   } catch {
     return false;
   }
+}
+
+function decodeRepeatedly(value: string): string | null {
+  let current = value;
+  for (let depth = 0; depth < 8; depth += 1) {
+    let next: string;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      return null;
+    }
+    if (next === current) return current;
+    current = next;
+  }
+  return null;
 }
 
 function validateArgValue(value: string): string | null {

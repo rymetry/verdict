@@ -250,12 +250,64 @@ describe("RunManager", () => {
         expect.stringContaining("Playwright JSON redaction failed")
       ])
     );
+    expect(completed.warnings.join("\n")).not.toContain("redaction disk write failed");
+    expect(completed.warnings.join("\n")).not.toContain(workdir);
     expect(errors).toEqual([
       expect.objectContaining({
         runId: handle.runId,
         err: "redaction disk write failed",
+        code: "UNKNOWN",
         playwrightJsonPath: completed.paths.playwrightJson
       })
     ]);
+  });
+
+  it("does not claim raw Playwright JSON was removed when cleanup fails", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      artifactsStore: {
+        ...runArtifactsStore,
+        async redactPlaywrightResults(playwrightJsonPath) {
+          fs.rmSync(playwrightJsonPath, { force: true });
+          throw Object.assign(new Error("redaction disk write failed at /private/path"), {
+            code: "EACCES"
+          });
+        }
+      }
+    });
+
+    const stubPath = writeStub("stub.js", STUB_SUCCESS_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+    const warningText = completed.warnings.join("\n");
+
+    expect(warningText).toContain("raw result artifact may still contain secrets");
+    expect(warningText).toContain("redactionCode=EACCES");
+    expect(warningText).toContain("removalCode=ENOENT");
+    expect(warningText).not.toContain("/private/path");
+    expect(warningText).not.toContain(completed.paths.playwrightJson);
   });
 });

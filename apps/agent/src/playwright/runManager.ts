@@ -24,6 +24,13 @@ interface RunManagerLogger {
   error(payload: Record<string, unknown>, message: string): void;
 }
 
+function errorCode(error: unknown): string {
+  if (error instanceof Error && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return "UNKNOWN";
+}
+
 export interface RunStartParams {
   projectId: string;
   projectRoot: string;
@@ -292,13 +299,32 @@ async function redactPlaywrightResultsSafely({
     await artifactsStore.redactPlaywrightResults(playwrightJsonPath);
     return undefined;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const redactionCode = errorCode(error);
     logger?.error(
-      { runId, err: message, playwrightJsonPath },
+      {
+        runId,
+        err: error instanceof Error ? error.message : String(error),
+        code: redactionCode,
+        playwrightJsonPath
+      },
       "playwright-results redaction failed"
     );
-    await fs.unlink(playwrightJsonPath).catch(() => undefined);
-    return `Playwright JSON redaction failed; removed raw result artifact: ${message}`;
+    try {
+      await fs.unlink(playwrightJsonPath);
+      return `Playwright JSON redaction failed; removed raw result artifact. redactionCode=${redactionCode}`;
+    } catch (unlinkError) {
+      const unlinkCode = errorCode(unlinkError);
+      logger?.error(
+        {
+          runId,
+          err: unlinkError instanceof Error ? unlinkError.message : String(unlinkError),
+          code: unlinkCode,
+          playwrightJsonPath
+        },
+        "failed to remove raw playwright-results artifact after redaction failure"
+      );
+      return `Playwright JSON redaction failed; raw result artifact may still contain secrets. redactionCode=${redactionCode}; removalCode=${unlinkCode}`;
+    }
   }
 }
 
