@@ -15,17 +15,18 @@ export interface RunArtifactsStore {
   writeMetadata(metadataPath: string, metadata: RunMetadata): Promise<void>;
   openLogStreams(stdoutPath: string, stderrPath: string): Promise<RunLogStreams>;
   /**
-   * Reads the Playwright JSON reporter output, applies `redact()` to scrub
-   * leaked secrets out of test titles / error messages / stacks, and writes
-   * the scrubbed body back. PLAN.v2 §28 / security review #8.
-   * No-op when the file is absent (run failed before reporter could emit).
+   * Reads the Playwright JSON reporter output, applies secret redaction
+   * patterns to scrub leaked secrets out of test titles / error messages /
+   * stacks, and writes the scrubbed body back. PLAN.v2 §28 / security
+   * review #8. No-op when the file is absent (run failed before reporter
+   * could emit).
    */
   redactPlaywrightResults(playwrightJsonPath: string): Promise<RedactionOutcome>;
 }
 
 export interface RedactionOutcome {
   applied: boolean;
-  /** True if redact() actually changed the contents. */
+  /** True if redaction actually changed the contents. */
   modified: boolean;
   replacements: number;
 }
@@ -74,8 +75,15 @@ export const runArtifactsStore: RunArtifactsStore = {
     let raw: string;
     try {
       raw = await fs.readFile(playwrightJsonPath, "utf8");
-    } catch {
-      return { applied: false, modified: false, replacements: 0 };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
+        return { applied: false, modified: false, replacements: 0 };
+      }
+      throw error;
     }
     const scrubbed = redactWithStats(raw);
     if (scrubbed.value === raw) {

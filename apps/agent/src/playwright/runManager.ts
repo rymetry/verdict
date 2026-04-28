@@ -11,7 +11,7 @@ import {
   type WorkbenchEventInput
 } from "@pwqa/shared";
 import type { CommandRunner } from "../commands/runner.js";
-import { redact, redactWithStats } from "../commands/redact.js";
+import { redactWithStats, type RedactionResult } from "../commands/redact.js";
 import type { EventBus } from "../events/bus.js";
 import { runPathsFor, workbenchPaths } from "../storage/paths.js";
 import { buildPlaywrightTestCommand } from "./builder.js";
@@ -22,19 +22,10 @@ import {
 import { deriveOutcome } from "./runOutcome.js";
 import { playwrightJsonReportProvider } from "../reporting/PlaywrightJsonReportProvider.js";
 import type { ReportProvider } from "../reporting/ReportProvider.js";
+import { errorCode, type RunManagerLogger } from "./runTypes.js";
+import { createStreamRedactor } from "./streamRedactor.js";
 
-export interface RunManagerLogger {
-  error(payload: Record<string, unknown>, message: string): void;
-  warn?(payload: Record<string, unknown>, message: string): void;
-  info?(payload: Record<string, unknown>, message: string): void;
-}
-
-function errorCode(error: unknown): string {
-  if (error instanceof Error && "code" in error && typeof error.code === "string") {
-    return error.code;
-  }
-  return "UNKNOWN";
-}
+export type { RunManagerLogger } from "./runTypes.js";
 
 export interface RunStartParams {
   projectId: string;
@@ -62,7 +53,7 @@ interface RunManagerDeps {
   /** Optional injection points (defaults wired for production). */
   artifactsStore?: RunArtifactsStore;
   reportProvider?: ReportProvider;
-  redactor?: (chunk: string) => string;
+  redactor?: (chunk: string) => RedactionResult;
   logger?: RunManagerLogger;
 }
 
@@ -274,127 +265,13 @@ function publishTerminalEventSafely({
   });
 }
 
-interface StreamRedactor {
-  redact(stream: "stdout" | "stderr", chunk: string): string;
-  flush(): string[];
-}
-
-/**
- * Redaction failure is handled fail-closed for output chunks: the raw chunk is
- * discarded and a placeholder is delivered instead, then the loss is surfaced
- * through final run warnings without logging the secret-bearing input.
- */
-function createStreamRedactor({
-  redactor,
-  logger,
-  runId
-}: {
-  redactor: (chunk: string) => string;
-  logger?: RunManagerLogger;
-  runId: string;
-}): StreamRedactor {
-  const failures: Record<"stdout" | "stderr", { count: number; firstCode: string; codes: Set<string>; bytes: number }> = {
-    stdout: { count: 0, firstCode: "UNKNOWN", codes: new Set(), bytes: 0 },
-    stderr: { count: 0, firstCode: "UNKNOWN", codes: new Set(), bytes: 0 }
-  };
-  const loggedCodes: Record<"stdout" | "stderr", Set<string>> = {
-    stdout: new Set(),
-    stderr: new Set()
-  };
-  const successes: Record<"stdout" | "stderr", { chunks: number; replacements: number; logged: boolean }> = {
-    stdout: { chunks: 0, replacements: 0, logged: false },
-    stderr: { chunks: 0, replacements: 0, logged: false }
-  };
-
-  function recordFailure(stream: "stdout" | "stderr", chunk: string, error: unknown): void {
-    const code = errorCode(error);
-    const current = failures[stream];
-    failures[stream] = {
-      count: current.count + 1,
-      firstCode: current.count === 0 ? code : current.firstCode,
-      codes: new Set([...current.codes, code]),
-      bytes: current.bytes + Buffer.byteLength(chunk, "utf8")
-    };
-    if (!loggedCodes[stream].has(code)) {
-      loggedCodes[stream].add(code);
-      logger?.error(
-        {
-          runId,
-          stream,
-          artifactKind: "stream-redaction",
-          code,
-          errorName: error instanceof Error ? error.name : typeof error
-        },
-        "run stream redaction failed"
-      );
-    }
-  }
-
-  return {
-    redact(stream, chunk) {
-      try {
-        const result =
-          redactor === redact
-            ? redactWithStats(chunk)
-            : (() => {
-                const value = redactor(chunk);
-                return { value, replacements: value === chunk ? 0 : 1 };
-              })();
-        if (result.replacements > 0) {
-          const success = successes[stream];
-          success.chunks += 1;
-          success.replacements += result.replacements;
-          if (!success.logged) {
-            success.logged = true;
-            logger?.info?.(
-              {
-                runId,
-                stream,
-                artifactKind: "stream-redaction",
-                replacements: result.replacements
-              },
-              "run stream redaction applied"
-            );
-          }
-        }
-        return result.value;
-      } catch (error) {
-        recordFailure(stream, chunk, error);
-        return "[redaction failed]\n";
-      }
-    },
-    flush() {
-      return (["stdout", "stderr"] as const).flatMap((stream) => {
-        const success = successes[stream];
-        if (success.replacements > 0) {
-          logger?.info?.(
-            {
-              runId,
-              stream,
-              artifactKind: "stream-redaction",
-              chunks: success.chunks,
-              replacements: success.replacements
-            },
-            "run stream redaction summary"
-          );
-        }
-        const failure = failures[stream];
-        if (failure.count === 0) return [];
-        const codes = Array.from(failure.codes).join(",");
-        return [
-          `${stream} redaction failed; raw output was replaced before websocket/log delivery. code=${failure.firstCode}; codes=${codes}; failures=${failure.count}; bytes=${failure.bytes}`
-        ];
-      });
-    }
-  };
-}
 
 export function createRunManager({
   runnerForProject,
   bus,
   artifactsStore = defaultArtifactsStore,
   reportProvider = playwrightJsonReportProvider,
-  redactor = redact,
+  redactor = redactWithStats,
   logger
 }: RunManagerDeps): RunManager {
   const active = new Map<string, ActiveRunHandle>();
@@ -587,14 +464,20 @@ export function createRunManager({
         if (redactionWarning) warnings.push(redactionWarning);
 
         const outcome = deriveOutcome(result, startedAt);
-        if (outcome.warning) warnings.push(outcome.warning);
+        if (outcome.status === "error" && outcome.warning) warnings.push(outcome.warning);
+        // Race window: a timeout that fires concurrently with user cancellation
+        // produces both flags. `deriveOutcome` prefers the cancellation status,
+        // so surface the timeout via a warning to preserve the diagnostic trail.
+        if (outcome.status === "cancelled" && result.timedOut) {
+          warnings.push("Run timed out before cancellation propagated.");
+        }
 
         const completed: RunMetadata = {
           ...runningMetadata,
           status: outcome.status,
           exitCode: outcome.exitCode,
           signal: outcome.signal,
-          cancelReason: outcome.cancelReason,
+          cancelReason: outcome.status === "cancelled" ? outcome.cancelReason : undefined,
           durationMs: outcome.durationMs,
           completedAt: new Date().toISOString(),
           summary: summary?.summary,

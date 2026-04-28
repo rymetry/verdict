@@ -302,7 +302,7 @@ export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
 
 export const RunCancelledPayloadSchema = RunTerminalPayloadBaseSchema.extend({
   status: z.literal("cancelled"),
-  cancelReason: RunCancellationReasonSchema.optional()
+  cancelReason: RunCancellationReasonSchema.default("internal")
 });
 export type RunCancelledPayload = z.infer<typeof RunCancelledPayloadSchema>;
 
@@ -357,13 +357,13 @@ export type WorkbenchEventType = z.infer<typeof WorkbenchEventTypeSchema>;
 
 const WorkbenchRunEventBaseSchema = z.object({
   sequence: z.number().int().nonnegative(),
-  timestamp: z.string(),
+  timestamp: z.string().datetime(),
   runId: z.string()
 });
 
 const WorkbenchSnapshotEventBaseSchema = z.object({
   sequence: z.number().int().nonnegative(),
-  timestamp: z.string()
+  timestamp: z.string().datetime()
 });
 
 export const WorkbenchEventSchema = z.discriminatedUnion("type", [

@@ -127,6 +127,10 @@ function cancelReasonLabel(reason: RunCancellationReason): string {
       return "Cancelled by user request";
     case "internal":
       return "Cancelled by workbench";
+    default: {
+      const _exhaustive: never = reason;
+      return `Cancelled (${String(_exhaustive)})`;
+    }
   }
 }
 

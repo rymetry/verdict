@@ -183,6 +183,51 @@ describe("RunManager", () => {
     expect(payload.cancelReason).toBe("user-request");
   });
 
+  it("surfaces timeout warning when cancellation races with timeout", async () => {
+    // Race window: when timer expiry and cancel() fire concurrently the runner
+    // can return both flags true. The terminal event must report the cancellation
+    // status while preserving timeout evidence in warnings.
+    const bus = createEventBus();
+    const runner = {
+      run() {
+        return {
+          result: Promise.resolve({
+            exitCode: null,
+            signal: "SIGTERM" as NodeJS.Signals,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            durationMs: 1,
+            stdout: "",
+            stderr: "",
+            cancelled: true,
+            cancelReason: "user-request" as const,
+            timedOut: true,
+            command: { executable: "node", args: [], cwd: workdir }
+          }),
+          cancel() {}
+        };
+      }
+    };
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
+    const events: WorkbenchEvent[] = [];
+    bus.subscribe((event) => events.push(event));
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: fakePackageManager(),
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+    const terminal = events.find((event) => event.type === "run.cancelled");
+    const payload = RunCancelledPayloadSchema.parse(terminal?.payload);
+
+    expect(completed.status).toBe("cancelled");
+    expect(completed.cancelReason).toBe("user-request");
+    expect(completed.warnings.join("\n")).toMatch(/timed out before cancellation/i);
+    expect(payload.warnings.join("\n")).toMatch(/timed out before cancellation/i);
+  });
+
   it("publishes final warnings in terminal events", async () => {
     const bus = createEventBus();
     const runner = createNodeCommandRunner({
@@ -586,6 +631,11 @@ describe("RunManager", () => {
       ])
     );
     expect(JSON.stringify(infos)).not.toContain(secret);
+    const redactionEntry = infos.find(
+      (i) => i.artifactKind === "stream-redaction" && i.stream === "stdout"
+    );
+    expect(redactionEntry).toBeDefined();
+    expect(redactionEntry!.replacements).toBeGreaterThanOrEqual(1);
   });
 
   it("emits a sanitized run.error fallback when terminal completion publish fails", async () => {
@@ -1017,6 +1067,11 @@ process.exit(1);
       ])
     );
     expect(JSON.stringify(infos)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234");
+    const jsonRedactionEntry = infos.find(
+      (i) => i.artifactKind === "playwright-json-redaction"
+    );
+    expect(jsonRedactionEntry).toBeDefined();
+    expect(jsonRedactionEntry!.replacements).toBeGreaterThanOrEqual(1);
   });
 
   it("removes raw Playwright JSON and records a warning when redaction fails", async () => {

@@ -183,6 +183,27 @@ describe("RunConsole", () => {
     expect(screen.getByText("Cancelled by user request")).toBeInTheDocument();
   });
 
+  it("run.cancelled with internal reason shows 'Cancelled by workbench'", async () => {
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.cancelled",
+        runId: "r1",
+        sequence: 2,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: {
+          status: "cancelled",
+          cancelReason: "internal",
+          exitCode: null,
+          durationMs: 0,
+          warnings: []
+        }
+      });
+    });
+    expect(screen.getByText("Cancelled by workbench")).toBeInTheDocument();
+  });
+
   it("run.cancelled の warnings を表示する", async () => {
     const stream = makeFakeStream();
     render(<RunConsole eventStream={stream} activeRunId="r1" />);
@@ -194,6 +215,7 @@ describe("RunConsole", () => {
         timestamp: "2026-04-28T00:00:00Z",
         payload: {
           status: "cancelled",
+          cancelReason: "internal",
           exitCode: null,
           durationMs: 0,
           warnings: ["Run was cancelled after timeout warning. code=TIMEOUT"]

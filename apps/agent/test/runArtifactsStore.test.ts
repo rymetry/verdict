@@ -78,4 +78,15 @@ describe("runArtifactsStore.redactPlaywrightResults", () => {
     expect(outcome.modified).toBe(false);
     expect(outcome.replacements).toBe(0);
   });
+
+  it("re-throws non-ENOENT filesystem errors", async () => {
+    // Reading a directory as if it were a file produces EISDIR. This deterministically
+    // exercises the non-ENOENT re-throw path on every platform without relying on
+    // permission semantics (which differ for root in CI containers).
+    const dirAsFile = path.join(workdir, "results.json");
+    fs.mkdirSync(dirAsFile);
+    await expect(
+      runArtifactsStore.redactPlaywrightResults(dirAsFile)
+    ).rejects.toMatchObject({ code: "EISDIR" });
+  });
 });

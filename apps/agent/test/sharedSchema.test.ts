@@ -252,4 +252,16 @@ describe("shared run warning schemas", () => {
       payload: { service: "playwright-workbench-agent", version: "0.1.0" }
     });
   });
+
+  it("rejects non-ISO timestamp in event envelope", () => {
+    expect(() =>
+      WorkbenchEventSchema.parse({
+        type: "run.stdout",
+        runId: "run-1",
+        sequence: 1,
+        timestamp: "not-a-date",
+        payload: { chunk: "hello" }
+      })
+    ).toThrow();
+  });
 });

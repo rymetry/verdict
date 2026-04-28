@@ -1,14 +1,25 @@
-import { type RunCancellationReason, type RunStatus } from "@pwqa/shared";
+import { type RunCancellationReason } from "@pwqa/shared";
 import type { CommandResult } from "../commands/runner.js";
 
-export interface RunOutcome {
-  status: RunStatus;
+interface RunOutcomeBase {
   exitCode: number | null;
   signal: string | null;
-  cancelReason?: RunCancellationReason;
   durationMs: number;
-  warning?: string;
 }
+
+/**
+ * Discriminated union by `status`: `cancelReason` is statically required for
+ * cancelled outcomes (eliminating the runtime invariant "cancelled implies
+ * cancelReason exists" via the type system). `warning` carries the
+ * human-readable cause on error outcomes — currently only the timeout
+ * message ("Run timed out and was terminated."). Other failure modes
+ * propagate detail through structured logs and metadata warnings rather
+ * than this field.
+ */
+export type RunOutcome =
+  | (RunOutcomeBase & { status: "passed" | "failed" })
+  | (RunOutcomeBase & { status: "cancelled"; cancelReason: RunCancellationReason })
+  | (RunOutcomeBase & { status: "error"; warning?: string });
 
 /**
  * Pure function that maps a CommandResult into a Workbench RunStatus.

@@ -199,6 +199,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
         } catch (error) {
           logger.error(
             {
+              err: error instanceof Error ? error.message : String(error),
               errorName: error instanceof Error ? error.name : typeof error,
               code:
                 error instanceof Error && "code" in error

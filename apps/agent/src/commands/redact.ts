@@ -27,12 +27,12 @@ const PATTERNS: ReadonlyArray<{ regex: RegExp; replacement: string }> = [
   { regex: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, replacement: "<REDACTED-PEM>" }
 ];
 
-export interface RedactionStats {
-  value: string;
-  replacements: number;
+export interface RedactionResult {
+  readonly value: string;
+  readonly replacements: number;
 }
 
-export function redactWithStats(input: string): RedactionStats {
+export function redactWithStats(input: string): RedactionResult {
   let out = input;
   let replacements = 0;
   for (const { regex, replacement } of PATTERNS) {
