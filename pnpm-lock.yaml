@@ -165,10 +165,10 @@ importers:
         specifier: ^1.55.0
         version: 1.59.1
       allure:
-        specifier: ^3.6.2
+        specifier: ~3.6.2
         version: 3.6.2(preact@10.29.1)(typescript@5.9.3)
       allure-playwright:
-        specifier: ^3.7.1
+        specifier: ~3.7.1
         version: 3.7.1(@playwright/test@1.59.1)
 
   tests/fixtures/sample-pw-project:

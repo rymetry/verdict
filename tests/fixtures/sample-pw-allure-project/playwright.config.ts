@@ -9,6 +9,13 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests",
   reporter: [
+    // list: ローカル CLI 実行時の人間可読ストリーム。
+    // json: PLAN.v2 §21 / §29 で Workbench の inventory + summary 解析に使う
+    //       Playwright 標準 JSON。Phase 1 で AllureReportProvider と並ぶ
+    //       playwrightJsonReportProvider の入力。Allure と並列に出力する
+    //       ことで、Workbench は片方が壊れてももう片方で recovery できる。
+    // allure-playwright: Phase 1.2 の主役。Allure 3 形式の results を吐き、
+    //       後段の `allure generate` / `allure quality-gate` の入力になる。
     ["list"],
     ["json", { outputFile: "playwright-results.json" }],
     [
