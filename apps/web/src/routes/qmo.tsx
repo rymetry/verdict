@@ -1,30 +1,28 @@
-// Insights (旧 QMO) View route。ζ (Issue #13) で本実装を行う placeholder。
-// δ (Issue #11) で Tailwind/shadcn primitives 化した。
-// γ のスコープでは「URL でアクセスできる」「persona toggle で active になる」ことを満たすだけで十分。
+// Insights View route。ζ (Issue #13) で 2-col layout (main + side) の static mock を実装。
+// Phase 1.2 で `useInsightsSummary()` hook (PLAN.v2 §16 AllureReportProvider + §19 API) に
+// 切り替える際は、本ファイルの placeholder import を削除して hook 戻り値を props に渡す。
 //
-// path 名: persona segment は当面 `qmo` を維持する (PERSONA_VIEWS と一致)。
-// ζ で Allure 連携実装時に "/insights" へリネームするか改めて議論する (Issue #10 やること欄)。
+// 設計判断:
+//  - `data-testid="qmo-view"` は γ で導入された router test の identifier を維持
+//    (パス segment は当面 `/qmo` のまま。`/insights` への rename は Issue #10 やること欄で別途議論)。
+//  - Section の `aria-label="Insights View"` で AT に view 名を伝える。router test では
+//    `toHaveAttribute("aria-label", "Insights View")` でこの contract を pin している
+//    (apps/web/test/routes/router.test.tsx の `/qmo` ケース)。文言を変える場合は同 test も同時更新。
+//  - Phase 1 placeholder fixture は `features/insights-view/placeholder-data.ts` から
+//    明示的に import して props で InsightsView に渡す。Phase 1.2 でこの import を削除して
+//    `useInsightsSummary()` 戻り値を渡せば silent fallback は構造上発生しない。
 import * as React from "react";
 import { createRoute } from "@tanstack/react-router";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { InsightsView } from "@/features/insights-view/InsightsView";
+import { SAMPLE_INSIGHTS } from "@/features/insights-view/placeholder-data";
 
 import { rootRoute } from "./__root";
 
-function InsightsView(): React.ReactElement {
+function InsightsViewRoute(): React.ReactElement {
   return (
-    <section data-testid="qmo-view" className="mx-auto max-w-3xl">
-      <Card>
-        <CardHeader>
-          <CardTitle>Insights View</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-[var(--ink-3)]">
-            QMO / Release Owner 向けの Quality Gate / Allure history / Release Readiness Summary は
-            ζ (Issue #13) で実装します。
-          </p>
-        </CardContent>
-      </Card>
+    <section data-testid="qmo-view" aria-label="Insights View" className="flex flex-col gap-4">
+      <InsightsView summary={SAMPLE_INSIGHTS} />
     </section>
   );
 }
@@ -32,5 +30,5 @@ function InsightsView(): React.ReactElement {
 export const qmoRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/qmo",
-  component: InsightsView
+  component: InsightsViewRoute
 });
