@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/server.js";
+import { createDefaultCommandPolicy, type CommandPolicy } from "../src/commands/policy.js";
 
 let workdir: string;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -99,6 +100,65 @@ describe("HTTP API surface", () => {
     );
     expect(titles).toContain("trivial passing assertion");
   }, 90_000);
+
+  it("passes each project root to the injected policy factory", async () => {
+    const requestedRoots: string[] = [];
+    const { runnerForProject } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir]
+      },
+      policyFactory: (projectRoot) => {
+        requestedRoots.push(projectRoot);
+        return createDefaultCommandPolicy(projectRoot);
+      }
+    });
+
+    expect(() =>
+      runnerForProject(workdir).run({
+        executable: "git",
+        args: ["push"],
+        cwd: workdir
+      })
+    ).toThrow(/not in the allowed list/);
+    expect(requestedRoots).toEqual([workdir]);
+  });
+
+  it("does not follow symlinks when writing project audit logs", async () => {
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-outside-")));
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-project-")));
+    fs.symlinkSync(outside, path.join(projectRoot, ".playwright-workbench"));
+    const permissiveNodePolicy = (root: string): CommandPolicy => ({
+      allowedExecutables: ["node"],
+      cwdBoundary: root,
+      envAllowlist: ["PATH"]
+    });
+
+    try {
+      const { runnerForProject } = buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [projectRoot]
+        },
+        policyFactory: permissiveNodePolicy
+      });
+      const handle = runnerForProject(projectRoot).run({
+        executable: process.execPath,
+        args: ["-e", ""],
+        cwd: projectRoot
+      });
+      await handle.result;
+
+      expect(fs.existsSync(path.join(outside, "audit.log"))).toBe(false);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
 
   it("rejects /projects/open paths outside the allowed roots", async () => {
     const { app } = buildApp({

@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import * as fs from "node:fs";
 
 export type CommandArgsValidator = (input: {
   executableName: string;
@@ -80,6 +81,8 @@ const SINGLE_FLAGS = new Set([
   "--reporter=list,json,html"
 ]);
 
+const MAX_ARG_LENGTH = 4_096;
+
 export function resolveExecutableName(executable: string): string {
   return path.basename(executable);
 }
@@ -110,7 +113,23 @@ function isProjectRelativeOperand(value: string): boolean {
   if (isFlagValue(value)) return false;
   if (path.isAbsolute(value)) return false;
   const parts = value.split(/[\\/]+/);
-  return !parts.includes("..");
+  if (parts.includes("..")) return false;
+  try {
+    const decodedParts = decodeURIComponent(value).split(/[\\/]+/);
+    return !decodedParts.includes("..");
+  } catch {
+    return true;
+  }
+}
+
+function validateArgValue(value: string): string | null {
+  if (value.includes("\0")) {
+    return "Arguments must not contain NUL bytes.";
+  }
+  if (value.length > MAX_ARG_LENGTH) {
+    return `Arguments must be ${MAX_ARG_LENGTH} characters or fewer.`;
+  }
+  return null;
 }
 
 export function validatePhase1PlaywrightArgs({
@@ -126,6 +145,11 @@ export function validatePhase1PlaywrightArgs({
   }
   if (!hasPrefix(args, prefix)) {
     return `'${executableName}' must invoke the local Playwright test command with the approved prefix: ${prefix.join(" ")}`;
+  }
+
+  for (const arg of args) {
+    const valueError = validateArgValue(arg);
+    if (valueError) return valueError;
   }
 
   let index = prefix.length;
@@ -159,7 +183,7 @@ export function createDefaultCommandPolicy(cwdBoundary: string): CommandPolicy {
   return {
     allowedExecutables: DEFAULT_ALLOWED_EXECUTABLES,
     argValidator: validatePhase1PlaywrightArgs,
-    cwdBoundary,
+    cwdBoundary: fs.realpathSync(cwdBoundary),
     envAllowlist: DEFAULT_ENV_ALLOWLIST
   };
 }

@@ -3,6 +3,7 @@ import {
   buildPlaywrightTestCommand,
   PlaywrightCommandBuildError
 } from "../src/playwright/builder";
+import { validatePhase1PlaywrightArgs } from "../src/commands/policy";
 import type { DetectedPackageManager } from "@pwqa/shared";
 
 function pmTemplate(): DetectedPackageManager {
@@ -55,6 +56,30 @@ describe("buildPlaywrightTestCommand", () => {
     expect(value).toMatch(/^\(.*\|.*\)$/);
     expect(value).toContain("abc-1");
     expect(value).toContain("def-2");
+  });
+
+  it("emits argv accepted by the default Phase 1 command policy", () => {
+    const { command } = buildPlaywrightTestCommand({
+      packageManager: pmTemplate(),
+      request: {
+        projectId: "/proj",
+        headed: true,
+        projectNames: ["chromium"],
+        grep: "ログインできること",
+        testIds: ["trivial passing assertion"],
+        specPath: "tests/example.spec.ts"
+      },
+      jsonOutputPath: "/proj/.playwright-workbench/runs/1/playwright-results.json",
+      htmlOutputDir: "/proj/.playwright-workbench/runs/1/playwright-report",
+      projectRoot: "/proj"
+    });
+
+    expect(
+      validatePhase1PlaywrightArgs({
+        executableName: command.executable,
+        args: command.args
+      })
+    ).toBeNull();
   });
 
   it("rejects specPath that escapes the project root", () => {

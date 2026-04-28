@@ -39,7 +39,7 @@ const ALLOWED_ORIGINS = new Set<string>([
 
 export interface BuildAppOptions {
   env: AgentEnv;
-  policy?: CommandPolicy;
+  policyFactory?: (projectRoot: string) => CommandPolicy;
   /** Optional override for the audit sink (used by tests). */
   audit?: (entry: AuditEntry) => void;
 }
@@ -55,8 +55,30 @@ export interface BuildAppResult {
 
 function persistAuditEntry(rootDir: string, entry: AuditEntry): void {
   const wb = workbenchPaths(rootDir);
+  if (fsSync.existsSync(wb.workbenchDir)) {
+    const stat = fsSync.lstatSync(wb.workbenchDir);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error(`audit directory is not a safe directory: ${wb.workbenchDir}`);
+    }
+  }
   fsSync.mkdirSync(wb.workbenchDir, { recursive: true });
-  fsSync.appendFileSync(path.join(wb.workbenchDir, "audit.log"), `${JSON.stringify(entry)}\n`, "utf8");
+  const stat = fsSync.lstatSync(wb.workbenchDir);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error(`audit directory is not a safe directory: ${wb.workbenchDir}`);
+  }
+
+  const auditPath = path.join(wb.workbenchDir, "audit.log");
+  const noFollow = fsSync.constants.O_NOFOLLOW ?? 0;
+  const fd = fsSync.openSync(
+    auditPath,
+    fsSync.constants.O_CREAT | fsSync.constants.O_APPEND | fsSync.constants.O_WRONLY | noFollow,
+    0o600
+  );
+  try {
+    fsSync.writeSync(fd, `${JSON.stringify(entry)}\n`, undefined, "utf8");
+  } finally {
+    fsSync.closeSync(fd);
+  }
 }
 
 function attachCors(app: Hono): void {
@@ -147,7 +169,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
   });
 
   const runnerForProject = (projectRoot: string): CommandRunner => {
-    const policy = options.policy ?? createDefaultCommandPolicy(projectRoot);
+    const policy = options.policyFactory?.(projectRoot) ?? createDefaultCommandPolicy(projectRoot);
     return createNodeCommandRunner({
       policy,
       audit: (entry) => {
@@ -155,8 +177,15 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
         try {
           persistAuditEntry(projectRoot, entry);
         } catch (error) {
-          logger.warn(
-            { err: error instanceof Error ? error.message : String(error) },
+          logger.error(
+            {
+              err: error instanceof Error ? error.message : String(error),
+              code:
+                error instanceof Error && "code" in error
+                  ? String((error as NodeJS.ErrnoException).code)
+                  : undefined,
+              projectRoot
+            },
             "failed to persist audit log entry"
           );
         }
