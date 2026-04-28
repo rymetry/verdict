@@ -195,7 +195,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
   };
 
   const projectStore = createProjectStore();
-  const runManager = createRunManager({ runnerForProject, bus });
+  const runManager = createRunManager({ runnerForProject, bus, logger });
 
   const app = new Hono();
   attachCors(app);

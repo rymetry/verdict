@@ -39,6 +39,10 @@ describe("default Phase 1 command policy", () => {
     expect(validate(executableName, args)).toBeNull();
   });
 
+  it("allows a grep value exactly at the argument length boundary", () => {
+    expect(validate("pnpm", ["exec", "playwright", "test", "--grep", "x".repeat(4_096)])).toBeNull();
+  });
+
   it.each([
     ["npx", ["cowsay"]],
     ["pnpm", ["exec", "arbitrary", "test"]],
@@ -48,8 +52,11 @@ describe("default Phase 1 command policy", () => {
     ["pnpm", ["exec", "playwright", "test", "/tmp/example.spec.ts"]],
     ["pnpm", ["exec", "playwright", "test", "../outside.spec.ts"]],
     ["pnpm", ["exec", "playwright", "test", "%2e%2e/outside.spec.ts"]],
+    ["pnpm", ["exec", "playwright", "test", "%252e%252e/outside.spec.ts"]],
+    ["pnpm", ["exec", "playwright", "test", "%zz/outside.spec.ts"]],
     ["pnpm", ["exec", "playwright", "test", "tests/example.spec.ts\0"]],
     ["pnpm", ["exec", "playwright", "test", "--grep", "x".repeat(4_097)]],
+    ["pnpm", ["exec", "playwright", "test", "--reporter=list,json,html,allure-playwright"]],
     ["pnpm", ["exec", "playwright", "test", "--grep", "--headed"]]
   ])("rejects unsafe command shape for %s", (executableName, args) => {
     expect(validate(executableName, args)).toEqual(expect.any(String));

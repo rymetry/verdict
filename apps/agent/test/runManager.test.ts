@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createNodeCommandRunner } from "../src/commands/runner.js";
 import { createEventBus } from "../src/events/bus.js";
 import { createRunManager } from "../src/playwright/runManager.js";
+import { runArtifactsStore } from "../src/playwright/runArtifactsStore.js";
 import {
   type DetectedPackageManager,
   type WorkbenchEvent
@@ -197,5 +198,64 @@ describe("RunManager", () => {
     await handle.finished;
 
     expect(requestedRoots).toEqual([workdir]);
+  });
+
+  it("removes raw Playwright JSON and records a warning when redaction fails", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const errors: Array<Record<string, unknown>> = [];
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      artifactsStore: {
+        ...runArtifactsStore,
+        async redactPlaywrightResults() {
+          throw new Error("redaction disk write failed");
+        }
+      },
+      logger: {
+        error(payload) {
+          errors.push(payload);
+        }
+      }
+    });
+
+    const stubPath = writeStub("stub.js", STUB_SUCCESS_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+
+    expect(fs.existsSync(completed.paths.playwrightJson)).toBe(false);
+    expect(completed.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Playwright JSON redaction failed")
+      ])
+    );
+    expect(errors).toEqual([
+      expect.objectContaining({
+        runId: handle.runId,
+        err: "redaction disk write failed",
+        playwrightJsonPath: completed.paths.playwrightJson
+      })
+    ]);
   });
 });

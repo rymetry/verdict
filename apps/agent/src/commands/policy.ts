@@ -78,6 +78,8 @@ const SINGLE_FLAGS = new Set([
   "--list",
   "--headed",
   "--reporter=json",
+  // Allure reporter is intentionally excluded from the Phase 1 default policy.
+  // Phase 1.2 should add it through a dedicated adapter/policy, not by widening this default.
   "--reporter=list,json,html"
 ]);
 
@@ -115,10 +117,12 @@ function isProjectRelativeOperand(value: string): boolean {
   const parts = value.split(/[\\/]+/);
   if (parts.includes("..")) return false;
   try {
-    const decodedParts = decodeURIComponent(value).split(/[\\/]+/);
+    const onceDecoded = decodeURIComponent(value);
+    const decoded = onceDecoded === value ? onceDecoded : decodeURIComponent(onceDecoded);
+    const decodedParts = decoded.split(/[\\/]+/);
     return !decodedParts.includes("..");
   } catch {
-    return true;
+    return false;
   }
 }
 

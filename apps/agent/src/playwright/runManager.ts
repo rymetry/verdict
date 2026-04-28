@@ -20,6 +20,10 @@ import { deriveOutcome } from "./runOutcome.js";
 import { playwrightJsonReportProvider } from "../reporting/PlaywrightJsonReportProvider.js";
 import type { ReportProvider } from "../reporting/ReportProvider.js";
 
+interface RunManagerLogger {
+  error(payload: Record<string, unknown>, message: string): void;
+}
+
 export interface RunStartParams {
   projectId: string;
   projectRoot: string;
@@ -46,6 +50,7 @@ interface RunManagerDeps {
   /** Optional injection points (defaults wired for production). */
   artifactsStore?: RunArtifactsStore;
   reportProvider?: ReportProvider;
+  logger?: RunManagerLogger;
 }
 
 function newRunId(): string {
@@ -65,7 +70,8 @@ export function createRunManager({
   runnerForProject,
   bus,
   artifactsStore = defaultArtifactsStore,
-  reportProvider = playwrightJsonReportProvider
+  reportProvider = playwrightJsonReportProvider,
+  logger
 }: RunManagerDeps): RunManager {
   const active = new Map<string, ActiveRunHandle>();
 
@@ -173,11 +179,12 @@ export function createRunManager({
         const result = await handle.result;
         await logStreams.closeAll();
 
-        // §28 / security review #8: scrub the Playwright JSON before either
-        // the report provider reads it or the API surfaces its path.
-        await artifactsStore
-          .redactPlaywrightResults(paths.playwrightJson)
-          .catch(() => undefined);
+        const redactionWarning = await redactPlaywrightResultsSafely({
+          artifactsStore,
+          logger,
+          runId,
+          playwrightJsonPath: paths.playwrightJson
+        });
 
         const summary = await readSummarySafely(reportProvider, {
           projectRoot: params.projectRoot,
@@ -185,6 +192,7 @@ export function createRunManager({
           playwrightJsonPath: paths.playwrightJson
         });
         const warnings = [...runningMetadata.warnings, ...(summary?.warnings ?? [])];
+        if (redactionWarning) warnings.push(redactionWarning);
 
         const outcome = deriveOutcome(result, startedAt);
         if (outcome.warning) warnings.push(outcome.warning);
@@ -267,6 +275,31 @@ export function createRunManager({
   }
 
   return { startRun, listRuns, cancelRun };
+}
+
+async function redactPlaywrightResultsSafely({
+  artifactsStore,
+  logger,
+  runId,
+  playwrightJsonPath
+}: {
+  artifactsStore: RunArtifactsStore;
+  logger?: RunManagerLogger;
+  runId: string;
+  playwrightJsonPath: string;
+}): Promise<string | undefined> {
+  try {
+    await artifactsStore.redactPlaywrightResults(playwrightJsonPath);
+    return undefined;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger?.error(
+      { runId, err: message, playwrightJsonPath },
+      "playwright-results redaction failed"
+    );
+    await fs.unlink(playwrightJsonPath).catch(() => undefined);
+    return `Playwright JSON redaction failed; removed raw result artifact: ${message}`;
+  }
 }
 
 async function readSummarySafely(

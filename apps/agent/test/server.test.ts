@@ -126,6 +126,35 @@ describe("HTTP API surface", () => {
     expect(requestedRoots).toEqual([workdir]);
   });
 
+  it("keeps project-scoped runners isolated across project roots", () => {
+    const otherRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-server-other-")));
+    try {
+      const { runnerForProject } = buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [workdir, otherRoot]
+        },
+        policyFactory: (projectRoot): CommandPolicy => ({
+          allowedExecutables: ["node"],
+          cwdBoundary: projectRoot,
+          envAllowlist: ["PATH"]
+        })
+      });
+
+      expect(() =>
+        runnerForProject(workdir).run({
+          executable: process.execPath,
+          args: ["-e", ""],
+          cwd: otherRoot
+        })
+      ).toThrow(/escapes the project boundary/);
+    } finally {
+      fs.rmSync(otherRoot, { recursive: true, force: true });
+    }
+  });
+
   it("does not follow symlinks when writing project audit logs", async () => {
     const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-outside-")));
     const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-project-")));
