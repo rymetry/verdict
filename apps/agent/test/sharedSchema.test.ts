@@ -3,7 +3,11 @@ import {
   RunCompletedPayloadSchema,
   RunCancelledPayloadSchema,
   RunErrorPayloadSchema,
-  RunListItemSchema
+  RunListItemSchema,
+  RunQueuedPayloadSchema,
+  RunStartedPayloadSchema,
+  SnapshotPayloadSchema,
+  terminalStatusMatchesEvent
 } from "@pwqa/shared";
 
 describe("shared run warning schemas", () => {
@@ -122,5 +126,43 @@ describe("shared run warning schemas", () => {
         warnings: []
       })
     ).toThrow();
+  });
+
+  it("round-trips non-terminal event payload schemas", () => {
+    expect(
+      RunQueuedPayloadSchema.parse({
+        request: { projectId: "project-1", headed: false }
+      })
+    ).toEqual({ request: { projectId: "project-1", headed: false } });
+
+    expect(
+      RunStartedPayloadSchema.parse({
+        command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+        cwd: "/tmp/project",
+        startedAt: "2026-04-28T00:00:00.000Z"
+      })
+    ).toEqual({
+      command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+      cwd: "/tmp/project",
+      startedAt: "2026-04-28T00:00:00.000Z"
+    });
+
+    expect(
+      SnapshotPayloadSchema.parse({
+        service: "playwright-workbench-agent",
+        version: "0.1.0"
+      })
+    ).toEqual({
+      service: "playwright-workbench-agent",
+      version: "0.1.0"
+    });
+  });
+
+  it("keeps terminal event and status mapping in shared code", () => {
+    expect(terminalStatusMatchesEvent("run.completed", "passed")).toBe(true);
+    expect(terminalStatusMatchesEvent("run.completed", "failed")).toBe(true);
+    expect(terminalStatusMatchesEvent("run.completed", "error")).toBe(false);
+    expect(terminalStatusMatchesEvent("run.cancelled", "cancelled")).toBe(true);
+    expect(terminalStatusMatchesEvent("run.error", "error")).toBe(true);
   });
 });

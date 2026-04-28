@@ -6,6 +6,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import { type WSContext } from "hono/ws";
 import {
   HealthResponseSchema,
+  SnapshotPayloadSchema,
   type HealthResponse,
   type WorkbenchEvent
 } from "@pwqa/shared";
@@ -16,7 +17,7 @@ import {
   type AuditEntry,
   type CommandRunner
 } from "./commands/runner.js";
-import { AuditPersistenceError } from "./commands/audit.js";
+import { AuditPersistenceError } from "./lib/errors.js";
 import {
   createDefaultCommandPolicy,
   type CommandPolicy
@@ -134,15 +135,16 @@ function attachWebSocket(
             }
           });
           try {
+            const payload = SnapshotPayloadSchema.parse({
+              service: "playwright-workbench-agent",
+              version: SERVICE_VERSION
+            });
             ws.send(
               JSON.stringify({
                 type: "snapshot",
                 sequence: 0,
                 timestamp: new Date().toISOString(),
-                payload: {
-                  service: "playwright-workbench-agent",
-                  version: SERVICE_VERSION
-                }
+                payload
               } satisfies WorkbenchEvent)
             );
           } catch {

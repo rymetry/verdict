@@ -88,6 +88,35 @@ describe("RunConsole applyEvent", () => {
     expect(consoleSpy).not.toHaveBeenCalled();
   });
 
+  it("terminal event type と payload status が矛盾したら payload を信頼しない", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const next = applyEvent(
+      initialRunConsoleState,
+      evt({
+        type: "run.cancelled",
+        payload: {
+          exitCode: 1,
+          status: "error",
+          durationMs: 123,
+          warnings: ["should not be trusted"],
+          message: "internal message should not render"
+        }
+      })
+    );
+
+    expect(next.status).toBe("cancelled");
+    expect(next.exitCode).toBeNull();
+    expect(next.warnings).toEqual([]);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[RunConsole] run.cancelled payload schema mismatch",
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining("does not match event type run.cancelled")
+        })
+      ])
+    );
+  });
+
   it("MAX_LINES (1000) 到達後は先頭が drop され末尾が保たれる", () => {
     // メモリリーク防衛の boundary 検証。1000 件 push 後にもう 1 件入れると、
     // stdout[0] が "1" ではなく "2" になり、長さは 1000 で固定される。

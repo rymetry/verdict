@@ -4,6 +4,7 @@ import {
   RunStdStreamPayloadSchema,
   RunTerminalPayloadSchema,
   SnapshotPayloadSchema,
+  terminalStatusMatchesEvent,
   type WorkbenchEvent
 } from "@pwqa/shared";
 
@@ -23,11 +24,9 @@ export interface CreateEventBusOptions {
   onListenerError?: (error: unknown) => void;
 }
 
-const TERMINAL_STATUS_BY_EVENT = {
-  "run.completed": new Set(["passed", "failed"]),
-  "run.cancelled": new Set(["cancelled"]),
-  "run.error": new Set(["error"])
-} as const;
+function assertNever(value: never): never {
+  throw new Error(`Unhandled event type: ${String(value)}`);
+}
 
 /**
  * Producer-side contract check for WS payloads. Envelope validation alone keeps
@@ -35,32 +34,48 @@ const TERMINAL_STATUS_BY_EVENT = {
  * enter history or reach subscribers.
  */
 function assertValidPayload(input: Omit<WorkbenchEvent, "sequence" | "timestamp">): void {
-  const result = (() => {
-    if (input.type === "run.queued") return RunQueuedPayloadSchema.safeParse(input.payload);
-    if (input.type === "run.started") return RunStartedPayloadSchema.safeParse(input.payload);
-    if (input.type === "run.stdout" || input.type === "run.stderr") {
-      return RunStdStreamPayloadSchema.safeParse(input.payload);
+  switch (input.type) {
+    case "run.queued": {
+      const result = RunQueuedPayloadSchema.safeParse(input.payload);
+      if (!result.success) throwPayloadError(input.type, result.error.issues);
+      return;
     }
-    if (
-      input.type === "run.completed" ||
-      input.type === "run.cancelled" ||
-      input.type === "run.error"
-    ) {
+    case "run.started": {
+      const result = RunStartedPayloadSchema.safeParse(input.payload);
+      if (!result.success) throwPayloadError(input.type, result.error.issues);
+      return;
+    }
+    case "run.stdout":
+    case "run.stderr": {
+      const result = RunStdStreamPayloadSchema.safeParse(input.payload);
+      if (!result.success) throwPayloadError(input.type, result.error.issues);
+      return;
+    }
+    case "run.completed":
+    case "run.cancelled":
+    case "run.error": {
       const parsed = RunTerminalPayloadSchema.safeParse(input.payload);
-      if (!parsed.success) return parsed;
-      if (!TERMINAL_STATUS_BY_EVENT[input.type].has(parsed.data.status as never)) {
+      if (!parsed.success) throwPayloadError(input.type, parsed.error.issues);
+      if (!terminalStatusMatchesEvent(input.type, parsed.data.status)) {
         throw new Error(`Invalid ${input.type} payload: status ${parsed.data.status} does not match event type`);
       }
-      return parsed;
+      return;
     }
-    if (input.type === "snapshot") return SnapshotPayloadSchema.safeParse(input.payload);
-    return null;
-  })();
-  if (result && !result.success) {
-    throw new Error(
-      `Invalid ${input.type} payload: ${result.error.issues.map((i) => i.message).join("; ")}`
-    );
+    case "snapshot": {
+      const result = SnapshotPayloadSchema.safeParse(input.payload);
+      if (!result.success) throwPayloadError(input.type, result.error.issues);
+      return;
+    }
+    default:
+      assertNever(input.type);
   }
+}
+
+function throwPayloadError(
+  type: WorkbenchEvent["type"],
+  issues: Array<{ message: string }>
+): never {
+  throw new Error(`Invalid ${type} payload: ${issues.map((i) => i.message).join("; ")}`);
 }
 
 export function createEventBus(options: CreateEventBusOptions = {}): EventBus {

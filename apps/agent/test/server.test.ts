@@ -9,10 +9,42 @@ import {
   createDefaultCommandPolicy,
   type CommandPolicy
 } from "../src/commands/policy.js";
+import type { DetectedPackageManager, ProjectSummary } from "@pwqa/shared";
 
 let workdir: string;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = path.resolve(here, "../../../tests/fixtures/sample-pw-project");
+
+function fakePackageManager(command = { executable: process.execPath, args: ["-e", ""] }): DetectedPackageManager {
+  return {
+    name: "npm",
+    status: "ok",
+    confidence: "high",
+    reason: "test",
+    warnings: [],
+    errors: [],
+    lockfiles: ["package-lock.json"],
+    packageManagerField: undefined,
+    hasPlaywrightDevDependency: true,
+    localBinaryUsable: true,
+    blockingExecution: false,
+    commandTemplates: {
+      playwrightTest: command
+    }
+  };
+}
+
+function fakeProjectSummary(projectRoot: string, packageManager = fakePackageManager()): ProjectSummary {
+  return {
+    id: projectRoot,
+    rootPath: projectRoot,
+    packageManager,
+    hasAllurePlaywright: false,
+    hasAllureCli: false,
+    warnings: [],
+    blockingExecution: false
+  };
+}
 
 beforeAll(() => {
   workdir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-server-")));
@@ -273,6 +305,79 @@ describe("HTTP API surface", () => {
     expect(body.error.code).toBe("RUN_START_FAILED");
     expect(body.error.message).toBe("Run failed before it could be started.");
     expect(body.error.message).not.toContain(workdir);
+  });
+
+  it("maps command policy startup failures to a sanitized HTTP code", async () => {
+    const packageManager = fakePackageManager({ executable: process.execPath, args: ["-e", ""] });
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      },
+      policyFactory: (root): CommandPolicy => ({
+        allowedExecutables: ["definitely-not-node"],
+        argValidator: unsafelyAllowAnyArgsValidator,
+        cwdBoundary: root,
+        envAllowlist: ["PATH"]
+      })
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir, packageManager), packageManager });
+
+    const response = await app.request("/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: workdir, headed: false })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("RUN_COMMAND_REJECTED");
+    expect(body.error.message).toBe("Runner rejected the command before spawn.");
+    expect(body.error.message).not.toContain(workdir);
+  });
+
+  it("maps fail-closed audit persistence failures to a sanitized HTTP code", async () => {
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-http-audit-outside-")));
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-http-audit-project-")));
+    const packageManager = fakePackageManager({ executable: process.execPath, args: ["-e", ""] });
+    fs.symlinkSync(outside, path.join(projectRoot, ".playwright-workbench"));
+    try {
+      const { app, projectStore } = buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [projectRoot],
+          failClosedAudit: true
+        },
+        policyFactory: (root): CommandPolicy => ({
+          allowedExecutables: ["node"],
+          argValidator: unsafelyAllowAnyArgsValidator,
+          cwdBoundary: root,
+          envAllowlist: ["PATH"]
+        })
+      });
+      projectStore.set({ summary: fakeProjectSummary(projectRoot, packageManager), packageManager });
+
+      const response = await app.request("/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: projectRoot, headed: false })
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(body.error.code).toBe("RUN_AUDIT_PERSIST_FAILED");
+      expect(body.error.message).toBe("Run could not start because audit logging failed.");
+      expect(body.error.message).not.toContain(projectRoot);
+      expect(body.error.message).not.toContain(outside);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("fails closed on audit persistence errors when AGENT_FAIL_CLOSED_AUDIT is enabled", async () => {

@@ -5,7 +5,8 @@ import {
   type DetectedPackageManager,
   type RunMetadata,
   type RunRequest,
-  type TestResultSummary
+  type TestResultSummary,
+  type WorkbenchEvent
 } from "@pwqa/shared";
 import type { CommandRunner } from "../commands/runner.js";
 import { redact } from "../commands/redact.js";
@@ -104,7 +105,10 @@ function createLogWriteTracker({
     stdout: { count: 0, firstCode: "UNKNOWN", codes: new Set() },
     stderr: { count: 0, firstCode: "UNKNOWN", codes: new Set() }
   };
-  const logged = { stdout: false, stderr: false };
+  const loggedCodes: Record<"stdout" | "stderr", Set<string>> = {
+    stdout: new Set(),
+    stderr: new Set()
+  };
   const queues: Record<"stdout" | "stderr", Promise<void>> = {
     stdout: Promise.resolve(),
     stderr: Promise.resolve()
@@ -118,9 +122,9 @@ function createLogWriteTracker({
       firstCode: current.count === 0 ? code : current.firstCode,
       codes: new Set([...current.codes, code])
     };
-    if (!logged[stream]) {
-      logged[stream] = true;
-      // 構造化ログは stream ごとの最初の原因に揃え、後続の code 差分は warning の codes に集約する。
+    if (!loggedCodes[stream].has(code)) {
+      loggedCodes[stream].add(code);
+      // 同一 code の連続失敗は集約し、異なる code は構造化ログにも残して調査可能にする。
       logger?.error(
         {
           runId,
@@ -158,6 +162,82 @@ function createLogWriteTracker({
       });
     }
   };
+}
+
+type PublishInput = Omit<WorkbenchEvent, "sequence" | "timestamp">;
+
+function publishEventSafely({
+  bus,
+  logger,
+  event,
+  message
+}: {
+  bus: EventBus;
+  logger?: RunManagerLogger;
+  event: PublishInput;
+  message: string;
+}): unknown | null {
+  try {
+    bus.publish(event);
+    return null;
+  } catch (error) {
+    logger?.error(
+      {
+        runId: event.runId,
+        eventType: event.type,
+        code: errorCode(error),
+        err: error instanceof Error ? error.message : String(error)
+      },
+      message
+    );
+    return error;
+  }
+}
+
+function publishTerminalEventSafely({
+  bus,
+  logger,
+  event,
+  fallbackWarnings
+}: {
+  bus: EventBus;
+  logger?: RunManagerLogger;
+  event: PublishInput;
+  fallbackWarnings: string[];
+}): void {
+  const error = publishEventSafely({
+    bus,
+    logger,
+    event,
+    message: "terminal event publish failed"
+  });
+  if (!error || event.type === "run.error") return;
+
+  const payload =
+    typeof event.payload === "object" && event.payload !== null
+      ? (event.payload as { durationMs?: unknown; exitCode?: unknown; signal?: unknown })
+      : {};
+  const code = errorCode(error);
+  publishEventSafely({
+    bus,
+    logger,
+    event: {
+      type: "run.error",
+      runId: event.runId,
+      payload: {
+        message: "Terminal event could not be delivered.",
+        exitCode: typeof payload.exitCode === "number" ? payload.exitCode : null,
+        signal: typeof payload.signal === "string" ? payload.signal : null,
+        status: "error",
+        durationMs: typeof payload.durationMs === "number" ? payload.durationMs : 0,
+        warnings: [
+          ...fallbackWarnings,
+          `Terminal event could not be delivered. code=${code}`
+        ]
+      }
+    },
+    message: "terminal fallback event publish failed"
+  });
 }
 
 export function createRunManager({
@@ -208,7 +288,12 @@ export function createRunManager({
     };
 
     await artifactsStore.writeMetadata(paths.metadataJson, initialMetadata);
-    bus.publish({ type: "run.queued", runId, payload: { request: params.request } });
+    publishEventSafely({
+      bus,
+      logger,
+      event: { type: "run.queued", runId, payload: { request: params.request } },
+      message: "run queued event publish failed"
+    });
 
     const logStreams = await artifactsStore.openLogStreams(paths.stdoutLog, paths.stderrLog);
     const logWriter = createLogWriteTracker({ logStreams, logger, runId });
@@ -218,10 +303,15 @@ export function createRunManager({
     try {
       runningMetadata = { ...initialMetadata, status: "running" };
       await artifactsStore.writeMetadata(paths.metadataJson, runningMetadata);
-      bus.publish({
-        type: "run.started",
-        runId,
-        payload: { command, cwd: params.projectRoot, startedAt: runningMetadata.startedAt }
+      publishEventSafely({
+        bus,
+        logger,
+        event: {
+          type: "run.started",
+          runId,
+          payload: { command, cwd: params.projectRoot, startedAt: runningMetadata.startedAt }
+        },
+        message: "run started event publish failed"
       });
 
       const runner = runnerForProject(params.projectRoot);
@@ -237,12 +327,22 @@ export function createRunManager({
           onStdout: (chunk) => {
             const safe = redact(chunk);
             logWriter.write("stdout", safe);
-            bus.publish({ type: "run.stdout", runId, payload: { chunk: safe } });
+            publishEventSafely({
+              bus,
+              logger,
+              event: { type: "run.stdout", runId, payload: { chunk: safe } },
+              message: "run stdout event publish failed"
+            });
           },
           onStderr: (chunk) => {
             const safe = redact(chunk);
             logWriter.write("stderr", safe);
-            bus.publish({ type: "run.stderr", runId, payload: { chunk: safe } });
+            publishEventSafely({
+              bus,
+              logger,
+              event: { type: "run.stderr", runId, payload: { chunk: safe } },
+              message: "run stderr event publish failed"
+            });
           }
         }
       );
@@ -261,17 +361,22 @@ export function createRunManager({
         ]
       };
       await artifactsStore.writeMetadata(paths.metadataJson, failed);
-      bus.publish({
-        type: "run.error",
-        runId,
-        payload: {
-          message: "Runner rejected the command before spawn.",
-          exitCode: null,
-          signal: null,
-          status: "error",
-          durationMs: failed.durationMs ?? 0,
-          warnings: failed.warnings
-        }
+      publishTerminalEventSafely({
+        bus,
+        logger,
+        event: {
+          type: "run.error",
+          runId,
+          payload: {
+            message: "Runner rejected the command before spawn.",
+            exitCode: null,
+            signal: null,
+            status: "error",
+            durationMs: failed.durationMs ?? 0,
+            warnings: failed.warnings
+          }
+        },
+        fallbackWarnings: failed.warnings
       });
       throw error;
     }
@@ -347,8 +452,11 @@ export function createRunManager({
                   summary: summary?.summary,
                   warnings
                 };
-        try {
-          bus.publish({
+        publishTerminalEventSafely({
+          bus,
+          logger,
+          fallbackWarnings: warnings,
+          event: {
             type:
               outcome.status === "cancelled"
                 ? "run.cancelled"
@@ -357,15 +465,9 @@ export function createRunManager({
                   : "run.completed",
             runId,
             payload: terminalPayload
-          });
-        } catch (error) {
-          logger?.error(
-            { runId, err: error instanceof Error ? error.message : String(error) },
-            "terminal event publish failed"
-          );
-        } finally {
-          active.delete(runId);
-        }
+          }
+        });
+        active.delete(runId);
         return completed;
       } catch (error) {
         const logWriteWarnings = await logWriter.flush();
@@ -383,8 +485,11 @@ export function createRunManager({
           ]
         };
         await artifactsStore.writeMetadata(paths.metadataJson, completed);
-        try {
-          bus.publish({
+        publishTerminalEventSafely({
+          bus,
+          logger,
+          fallbackWarnings: completed.warnings,
+          event: {
             type: "run.error",
             runId,
             payload: {
@@ -395,15 +500,9 @@ export function createRunManager({
               durationMs: completed.durationMs ?? 0,
               warnings: completed.warnings
             }
-          });
-        } catch (publishError) {
-          logger?.error(
-            { runId, err: publishError instanceof Error ? publishError.message : String(publishError) },
-            "terminal event publish failed"
-          );
-        } finally {
-          active.delete(runId);
-        }
+          }
+        });
+        active.delete(runId);
         return completed;
       }
     })();

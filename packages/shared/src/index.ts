@@ -312,6 +312,25 @@ export const RunTerminalPayloadSchema = z.discriminatedUnion("status", [
 ]);
 export type RunTerminalPayload = z.infer<typeof RunTerminalPayloadSchema>;
 
+export const TerminalStatusByEvent = {
+  "run.completed": ["passed", "failed"],
+  "run.cancelled": ["cancelled"],
+  "run.error": ["error"]
+} as const;
+
+export type TerminalEventType = keyof typeof TerminalStatusByEvent;
+
+export function isTerminalEventType(type: WorkbenchEventType): type is TerminalEventType {
+  return type === "run.completed" || type === "run.cancelled" || type === "run.error";
+}
+
+export function terminalStatusMatchesEvent(
+  type: TerminalEventType,
+  status: RunTerminalPayload["status"]
+): boolean {
+  return (TerminalStatusByEvent[type] as readonly string[]).includes(status);
+}
+
 export const WorkbenchEventTypeSchema = z.enum([
   "run.queued",
   "run.started",

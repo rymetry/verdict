@@ -285,7 +285,7 @@ describe("RunManager", () => {
     expect(warningText).toContain("code=EBADF");
     expect(warningText).not.toContain("/private/stdout.log");
     expect(warningText).not.toContain("/private/stderr.log");
-    expect(errors).toEqual([
+    expect(errors).toEqual(expect.arrayContaining([
       expect.objectContaining({
         runId: handle.runId,
         stream: "stdout",
@@ -295,12 +295,157 @@ describe("RunManager", () => {
       }),
       expect.objectContaining({
         runId: handle.runId,
+        stream: "stdout",
+        artifactKind: "log",
+        code: "EACCES",
+        err: "disk full at /private/stdout.log"
+      }),
+      expect.objectContaining({
+        runId: handle.runId,
         stream: "stderr",
         artifactKind: "log",
         code: "EBADF",
         err: "bad fd at /private/stderr.log"
       })
+    ]));
+    expect(errors).toHaveLength(3);
+  });
+
+  it("does not let stdout publish validation failures escape runner callbacks", async () => {
+    const published: Array<Omit<WorkbenchEvent, "sequence" | "timestamp">> = [];
+    const bus = {
+      publish(event: Omit<WorkbenchEvent, "sequence" | "timestamp">) {
+        published.push(event);
+        if (event.type === "run.stdout") {
+          throw new Error("invalid stdout payload");
+        }
+        return { ...event, sequence: published.length, timestamp: new Date().toISOString() };
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      snapshot() {
+        return [];
+      }
+    };
+    const runner = {
+      run(_spec: unknown, handlers = {}) {
+        const streamHandlers = handlers as { onStdout?: (chunk: string) => void };
+        expect(() => streamHandlers.onStdout?.("hello")).not.toThrow();
+        return {
+          result: Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            durationMs: 1,
+            stdout: "hello",
+            stderr: "",
+            cancelled: false,
+            timedOut: false,
+            command: { executable: "node", args: [], cwd: workdir }
+          }),
+          cancel() {}
+        };
+      }
+    };
+    const errors: Array<Record<string, unknown>> = [];
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      reportProvider: {
+        name: "test-provider",
+        async readSummary() {
+          return undefined;
+        }
+      },
+      logger: {
+        error(payload) {
+          errors.push(payload);
+        }
+      }
+    });
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: fakePackageManager(),
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+
+    expect(completed.status).toBe("passed");
+    expect(errors).toEqual([
+      expect.objectContaining({
+        runId: handle.runId,
+        eventType: "run.stdout",
+        code: "UNKNOWN"
+      })
     ]);
+  });
+
+  it("emits a sanitized run.error fallback when terminal completion publish fails", async () => {
+    const published: Array<Omit<WorkbenchEvent, "sequence" | "timestamp">> = [];
+    const bus = {
+      publish(event: Omit<WorkbenchEvent, "sequence" | "timestamp">) {
+        published.push(event);
+        if (event.type === "run.completed") {
+          throw new Error("terminal schema drift at /private/path");
+        }
+        return { ...event, sequence: published.length, timestamp: new Date().toISOString() };
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      snapshot() {
+        return [];
+      }
+    };
+    const runner = {
+      run() {
+        return {
+          result: Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            durationMs: 1,
+            stdout: "",
+            stderr: "",
+            cancelled: false,
+            timedOut: false,
+            command: { executable: "node", args: [], cwd: workdir }
+          }),
+          cancel() {}
+        };
+      }
+    };
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      reportProvider: {
+        name: "test-provider",
+        async readSummary() {
+          return undefined;
+        }
+      }
+    });
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: fakePackageManager(),
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+
+    expect(completed.status).toBe("passed");
+    const fallback = published.find((event) => event.type === "run.error");
+    expect(fallback).toBeDefined();
+    const payload = RunErrorPayloadSchema.parse(fallback?.payload);
+    expect(payload.message).toBe("Terminal event could not be delivered.");
+    expect(payload.warnings.join("\n")).toContain("Terminal event could not be delivered. code=UNKNOWN");
+    expect(payload.warnings.join("\n")).not.toContain("/private/path");
   });
 
   it("keeps websocket stdout delivery when real runner log persistence fails", async () => {

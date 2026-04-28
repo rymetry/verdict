@@ -13,7 +13,7 @@ import { apiError } from "../lib/apiError.js";
 import { pathExists } from "../lib/pathExists.js";
 import { CommandPolicyError } from "../commands/runner.js";
 import { PlaywrightCommandBuildError } from "../playwright/builder.js";
-import { AuditPersistenceError } from "../commands/audit.js";
+import { AuditPersistenceError } from "../lib/errors.js";
 
 function errorCode(error: unknown): string {
   if (error instanceof Error && "code" in error && typeof error.code === "string") {
