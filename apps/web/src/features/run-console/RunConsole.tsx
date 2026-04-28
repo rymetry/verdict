@@ -23,6 +23,7 @@ import type { EventStream } from "@/api/events";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { RunWarningsAlert } from "./RunWarningsAlert";
 
 interface RunConsoleProps {
   eventStream: EventStream;
@@ -34,6 +35,7 @@ export interface RunConsoleState {
   exitCode: number | null;
   stdout: string[];
   stderr: string[];
+  warnings: string[];
   durationMs?: number;
   summary?: { total: number; passed: number; failed: number; skipped: number; flaky: number };
 }
@@ -42,7 +44,8 @@ export const initialRunConsoleState: RunConsoleState = {
   status: "idle",
   exitCode: null,
   stdout: [],
-  stderr: []
+  stderr: [],
+  warnings: []
 };
 
 const MAX_LINES = 1000;
@@ -102,6 +105,7 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React
             {state.durationMs ? ` · ${(state.durationMs / 1000).toFixed(1)}s` : ""}
           </p>
         ) : null}
+        <RunWarningsAlert warnings={state.warnings} />
         <pre
           ref={stdoutRef}
           aria-label="標準出力"
@@ -204,6 +208,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
         status,
         exitCode: payload?.exitCode ?? null,
         durationMs: payload?.durationMs ?? state.durationMs,
+        warnings: payload?.warnings ?? state.warnings,
         summary: payload?.summary
           ? {
               total: payload.summary.total,

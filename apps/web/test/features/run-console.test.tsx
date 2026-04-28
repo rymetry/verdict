@@ -114,6 +114,7 @@ describe("RunConsole", () => {
           status: "passed",
           exitCode: 0,
           durationMs: 12000,
+          warnings: [],
           summary: {
             total: 3,
             passed: 3,
@@ -127,6 +128,37 @@ describe("RunConsole", () => {
     });
     expect(screen.getByText("Passed")).toBeInTheDocument();
     expect(screen.getByText(/3 passed · 0 failed/)).toBeInTheDocument();
+  });
+
+  it("run.completed の warnings を warning alert として表示する", async () => {
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.completed",
+        runId: "r1",
+        sequence: 2,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: {
+          status: "passed",
+          exitCode: 0,
+          durationMs: 12000,
+          warnings: [
+            "stdout log write failed; websocket stream was still delivered. code=ENOSPC; failures=1"
+          ],
+          summary: {
+            total: 1,
+            passed: 1,
+            failed: 0,
+            skipped: 0,
+            flaky: 0,
+            failedTests: []
+          }
+        }
+      });
+    });
+    expect(screen.getByText("Run warnings")).toBeInTheDocument();
+    expect(screen.getByText(/stdout log write failed/)).toBeInTheDocument();
   });
 
   it("run.cancelled は Cancelled badge を出す", async () => {
@@ -143,7 +175,8 @@ describe("RunConsole", () => {
         payload: {
           status: "cancelled",
           exitCode: null,
-          durationMs: 0
+          durationMs: 0,
+          warnings: []
         }
       });
     });

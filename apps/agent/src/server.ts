@@ -188,6 +188,9 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
             },
             "failed to persist audit log entry"
           );
+          if (env.failClosedAudit) {
+            throw error;
+          }
         }
         options.audit?.(entry);
       }
@@ -204,7 +207,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     "/",
     projectsRoutes({ projectStore, runnerForProject, allowedRoots: env.allowedRoots })
   );
-  app.route("/", runsRoutes({ projectStore, runManager }));
+  app.route("/", runsRoutes({ projectStore, runManager, logger }));
   const injectWebSocket = attachWebSocket(app, bus, logger);
 
   if (env.initialProjectRoot) {

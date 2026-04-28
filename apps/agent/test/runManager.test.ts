@@ -2,11 +2,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { allowAnyArgsValidator } from "../src/commands/policy.js";
 import { createNodeCommandRunner } from "../src/commands/runner.js";
 import { createEventBus } from "../src/events/bus.js";
 import { createRunManager } from "../src/playwright/runManager.js";
 import { runArtifactsStore } from "../src/playwright/runArtifactsStore.js";
 import {
+  RunCompletedPayloadSchema,
+  RunErrorPayloadSchema,
   type DetectedPackageManager,
   type WorkbenchEvent
 } from "@pwqa/shared";
@@ -70,6 +73,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
+        argValidator: allowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: [
           "PATH",
@@ -105,6 +109,9 @@ describe("RunManager", () => {
     expect(types).toContain("run.started");
     expect(types).toContain("run.stdout");
     expect(types).toContain("run.completed");
+    const completedEvent = events.find((event) => event.type === "run.completed");
+    const payload = RunCompletedPayloadSchema.parse(completedEvent?.payload);
+    expect(payload.warnings).toEqual([]);
     const runDir = path.join(workdir, ".playwright-workbench", "runs", handle.runId);
     expect(fs.existsSync(path.join(runDir, "metadata.json"))).toBe(true);
     expect(fs.existsSync(path.join(runDir, "stdout.log"))).toBe(true);
@@ -116,6 +123,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
+        argValidator: allowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: ["PATH", "HOME"]
       }
@@ -137,11 +145,131 @@ describe("RunManager", () => {
     expect(completed.exitCode).toBe(1);
   });
 
+  it("publishes final warnings in terminal events", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        argValidator: allowAnyArgsValidator,
+        cwdBoundary: workdir,
+        envAllowlist: ["PATH", "HOME"]
+      }
+    });
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      reportProvider: {
+        name: "test-provider",
+        async readSummary() {
+          throw Object.assign(new Error("summary path /private/result.json"), {
+            code: "EACCES"
+          });
+        }
+      }
+    });
+    const events: WorkbenchEvent[] = [];
+    bus.subscribe((event) => events.push(event));
+
+    const stubPath = writeStub("fail-with-summary-warning.js", STUB_FAILURE_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+    const terminal = events.find((event) => event.type === "run.completed");
+    const payload = RunCompletedPayloadSchema.parse(terminal?.payload);
+
+    expect(completed.warnings.join("\n")).toContain("test-provider report read failed");
+    expect(payload.warnings).toEqual(completed.warnings);
+    expect(payload.warnings.join("\n")).toContain("code=EACCES");
+    expect(payload.warnings.join("\n")).not.toContain("/private/result.json");
+  });
+
+  it("records log write failures as run warnings while still publishing websocket chunks", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        argValidator: allowAnyArgsValidator,
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const errors: Array<Record<string, unknown>> = [];
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      artifactsStore: {
+        ...runArtifactsStore,
+        async openLogStreams(stdoutPath, stderrPath) {
+          const streams = await runArtifactsStore.openLogStreams(stdoutPath, stderrPath);
+          return {
+            ...streams,
+            stdout: {
+              ...streams.stdout,
+              write: async () => {
+                throw Object.assign(new Error("disk full at /private/stdout.log"), {
+                  code: "ENOSPC"
+                });
+              }
+            } as never
+          };
+        }
+      },
+      logger: {
+        error(payload) {
+          errors.push(payload);
+        }
+      }
+    });
+    const events: WorkbenchEvent[] = [];
+    bus.subscribe((event) => events.push(event));
+
+    const stubPath = writeStub("stdout-write-fails.js", STUB_SUCCESS_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+
+    expect(events.some((event) => event.type === "run.stdout")).toBe(true);
+    const warningText = completed.warnings.join("\n");
+    expect(warningText).toContain("stdout log write failed");
+    expect(warningText).toContain("code=ENOSPC");
+    expect(warningText).not.toContain("/private/stdout.log");
+    expect(errors).toEqual([
+      expect.objectContaining({
+        runId: handle.runId,
+        stream: "stdout",
+        artifactKind: "log",
+        code: "ENOSPC",
+        err: "disk full at /private/stdout.log"
+      })
+    ]);
+  });
+
   it("rejects runs when packageManager.blockingExecution is true", async () => {
     const bus = createEventBus();
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
+        argValidator: allowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: ["PATH"]
       }
@@ -166,6 +294,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
+        argValidator: allowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: [
           "PATH",
@@ -205,6 +334,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
+        argValidator: allowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: [
           "PATH",
@@ -267,6 +397,7 @@ describe("RunManager", () => {
     const runner = createNodeCommandRunner({
       policy: {
         allowedExecutables: ["node"],
+        argValidator: allowAnyArgsValidator,
         cwdBoundary: workdir,
         envAllowlist: [
           "PATH",
@@ -309,5 +440,64 @@ describe("RunManager", () => {
     expect(warningText).toContain("removalCode=ENOENT");
     expect(warningText).not.toContain("/private/path");
     expect(warningText).not.toContain(completed.paths.playwrightJson);
+  });
+
+  it("publishes run.error payloads with terminal warning fields", async () => {
+    const bus = createEventBus();
+    const manager = createRunManager({
+      runnerForProject: () => ({
+        run() {
+          throw Object.assign(new Error("policy path /private/project"), {
+            code: "COMMAND_POLICY"
+          });
+        }
+      }),
+      bus
+    });
+    const events: WorkbenchEvent[] = [];
+    bus.subscribe((event) => events.push(event));
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: ["stub.js"] };
+
+    await expect(
+      manager.startRun({
+        projectId: workdir,
+        projectRoot: workdir,
+        packageManager: pm,
+        request: { projectId: workdir, headed: false }
+      })
+    ).rejects.toThrow(/policy path/);
+
+    const errorEvent = events.find((event) => event.type === "run.error");
+    const payload = RunErrorPayloadSchema.parse(errorEvent?.payload);
+    expect(payload.status).toBe("error");
+    expect(payload.warnings.join("\n")).toContain("code=COMMAND_POLICY");
+    expect(payload.warnings.join("\n")).not.toContain("/private/project");
+  });
+
+  it("logs corrupted persisted metadata but quietly skips missing metadata", async () => {
+    const { loadRunsFromDisk } = await import("../src/playwright/runManager.js");
+    const runsRoot = path.join(workdir, ".playwright-workbench", "runs");
+    fs.mkdirSync(path.join(runsRoot, "missing-metadata"), { recursive: true });
+    fs.mkdirSync(path.join(runsRoot, "bad-json"), { recursive: true });
+    fs.writeFileSync(path.join(runsRoot, "bad-json", "metadata.json"), "{not json");
+    const warnings: Array<Record<string, unknown>> = [];
+
+    const runs = await loadRunsFromDisk(workdir, {
+      error() {},
+      warn(payload) {
+        warnings.push(payload);
+      }
+    });
+
+    expect(runs).toEqual([]);
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        runDir: "bad-json",
+        artifactKind: "metadata",
+        reason: "invalid-json",
+        code: "INVALID_JSON"
+      })
+    ]);
   });
 });

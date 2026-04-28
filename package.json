@@ -9,7 +9,7 @@
     "dev:agent": "pnpm --filter @pwqa/agent dev",
     "dev:web": "pnpm --filter @pwqa/web dev",
     "build": "pnpm --filter '@pwqa/*' build",
-    "typecheck": "pnpm --filter @pwqa/shared build && pnpm --filter '@pwqa/*' typecheck",
+    "typecheck": "pnpm --filter @pwqa/shared build && pnpm --filter '@pwqa/*' typecheck && pnpm --filter @pwqa/agent typecheck:test",
     "test": "pnpm --filter '@pwqa/*' test",
     "smoke:gui": "pnpm --filter @pwqa-smoke/workbench-gui smoke"
   },

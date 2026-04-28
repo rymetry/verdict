@@ -66,6 +66,18 @@ describe("useStartRunMutation", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["runs"] });
   });
 
+  it("成功時に run metadata を ['runs', runId] cache へ seed する", async () => {
+    const metadata = makeQueuedMetadata("r-cache");
+    vi.mocked(startRun).mockResolvedValue({ runId: "r-cache", metadata });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const { result } = renderHook(() => useStartRunMutation(), { wrapper: wrapper(client) });
+    result.current.mutate(makeRunRequest());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(client.getQueryData(["runs", "r-cache"])).toEqual(metadata);
+  });
+
   it("startRun が reject した場合 mutation は error を保持する", async () => {
     vi.mocked(startRun).mockRejectedValue(new Error("upstream 503"));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

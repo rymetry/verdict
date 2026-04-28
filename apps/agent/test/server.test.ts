@@ -4,7 +4,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/server.js";
-import { createDefaultCommandPolicy, type CommandPolicy } from "../src/commands/policy.js";
+import {
+  allowAnyArgsValidator,
+  createDefaultCommandPolicy,
+  type CommandPolicy
+} from "../src/commands/policy.js";
 
 let workdir: string;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -138,6 +142,7 @@ describe("HTTP API surface", () => {
         },
         policyFactory: (projectRoot): CommandPolicy => ({
           allowedExecutables: ["node"],
+          argValidator: allowAnyArgsValidator,
           cwdBoundary: projectRoot,
           envAllowlist: ["PATH"]
         })
@@ -161,6 +166,7 @@ describe("HTTP API surface", () => {
     fs.symlinkSync(outside, path.join(projectRoot, ".playwright-workbench"));
     const permissiveNodePolicy = (root: string): CommandPolicy => ({
       allowedExecutables: ["node"],
+      argValidator: allowAnyArgsValidator,
       cwdBoundary: root,
       envAllowlist: ["PATH"]
     });
@@ -183,6 +189,42 @@ describe("HTTP API surface", () => {
       await handle.result;
 
       expect(fs.existsSync(path.join(outside, "audit.log"))).toBe(false);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed on audit persistence errors when AGENT_FAIL_CLOSED_AUDIT is enabled", async () => {
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-outside-")));
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-audit-project-")));
+    fs.symlinkSync(outside, path.join(projectRoot, ".playwright-workbench"));
+    const permissiveNodePolicy = (root: string): CommandPolicy => ({
+      allowedExecutables: ["node"],
+      argValidator: allowAnyArgsValidator,
+      cwdBoundary: root,
+      envAllowlist: ["PATH"]
+    });
+
+    try {
+      const { runnerForProject } = buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [projectRoot],
+          failClosedAudit: true
+        },
+        policyFactory: permissiveNodePolicy
+      });
+
+      expect(() =>
+        runnerForProject(projectRoot).run({
+          executable: process.execPath,
+          args: ["-e", ""],
+          cwd: projectRoot
+        })
+      ).toThrow(/audit directory is not a safe directory/);
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true });
       fs.rmSync(outside, { recursive: true, force: true });
@@ -219,6 +261,65 @@ describe("HTTP API surface", () => {
     });
     const response = await app.request("/runs/non-existent");
     expect(response.status).toBe(404);
+  });
+
+  it("includes warnings in GET /runs list items", async () => {
+    const runDir = path.join(workdir, ".playwright-workbench", "runs", "r-warning-list");
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(runDir, "metadata.json"),
+      JSON.stringify({
+        runId: "r-warning-list",
+        projectId: workdir,
+        projectRoot: workdir,
+        status: "passed",
+        startedAt: "2026-04-28T00:00:00Z",
+        completedAt: "2026-04-28T00:00:01Z",
+        command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+        cwd: workdir,
+        exitCode: 0,
+        signal: null,
+        durationMs: 1000,
+        requested: { projectId: workdir, headed: false },
+        paths: {
+          runDir,
+          metadataJson: path.join(runDir, "metadata.json"),
+          stdoutLog: path.join(runDir, "stdout.log"),
+          stderrLog: path.join(runDir, "stderr.log"),
+          playwrightJson: path.join(runDir, "playwright-results.json"),
+          playwrightHtml: path.join(runDir, "playwright-report"),
+          artifactsJson: path.join(runDir, "artifacts.json")
+        },
+        warnings: ["stdout log write failed; websocket stream was still delivered. code=ENOSPC; failures=1"]
+      })
+    );
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir]
+      }
+    });
+    await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: workdir })
+    });
+
+    const response = await app.request("/runs");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId: "r-warning-list",
+          warnings: [
+            "stdout log write failed; websocket stream was still delivered. code=ENOSPC; failures=1"
+          ]
+        })
+      ])
+    );
   });
 
   it("returns 400 for malformed /projects/open body", async () => {

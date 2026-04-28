@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatMutationError } from "@/lib/mutation-error";
+import { RunWarningsAlert } from "@/features/run-console/RunWarningsAlert";
 
 interface FailureReviewProps {
   /** active run の id。null のときは empty state を出す (caller が render を gate しても良い)。 */
@@ -39,7 +40,10 @@ export function FailureReview({ runId }: FailureReviewProps): React.ReactElement
       return fetchRun(runId);
     },
     enabled: typeof runId === "string" && runId.length > 0,
-    refetchInterval: 2_000
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "running" || status === "queued" ? 2_000 : false;
+    }
   });
 
   // silent failure 防衛: error の存在を本番でも痕跡を残す。
@@ -85,16 +89,21 @@ export function FailureReview({ runId }: FailureReviewProps): React.ReactElement
               {formatMutationError(runQuery.error, "Run 情報を取得できませんでした")}
             </AlertDescription>
           </Alert>
-        ) : runQuery.data?.summary?.failedTests?.length ? (
-          <FailedTestList failedTests={runQuery.data.summary.failedTests} />
         ) : (
-          <p className="text-sm text-[var(--ink-3)]">
-            {runQuery.data?.status === "passed"
-              ? "全テストが成功しました。"
-              : runQuery.data?.summary
-                ? "このランに失敗テストはありません。"
-                : "Run の完了を待機中…"}
-          </p>
+          <>
+            <RunWarningsAlert warnings={runQuery.data?.warnings ?? []} />
+            {runQuery.data?.summary?.failedTests?.length ? (
+              <FailedTestList failedTests={runQuery.data.summary.failedTests} />
+            ) : (
+              <p className="mt-3 text-sm text-[var(--ink-3)]">
+                {runQuery.data?.status === "passed"
+                  ? "全テストが成功しました。"
+                  : runQuery.data?.summary
+                    ? "このランに失敗テストはありません。"
+                    : "Run の完了を待機中…"}
+              </p>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

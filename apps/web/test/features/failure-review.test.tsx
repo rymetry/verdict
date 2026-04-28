@@ -66,6 +66,22 @@ describe("FailureReview", () => {
     expect(await screen.findByText(/全テストが成功しました/)).toBeInTheDocument();
   });
 
+  it("persisted warnings を Run 結果パネルに表示する", async () => {
+    vi.mocked(fetchRun).mockResolvedValue(
+      makeRunMetadata("r1", {
+        status: "passed",
+        summary: undefined,
+        warnings: [
+          "Playwright JSON redaction failed; raw result artifact may still contain secrets. redactionCode=EACCES; removalCode=ENOENT"
+        ]
+      })
+    );
+    renderWithRunId("r1");
+    expect(await screen.findByText("Run warnings")).toBeInTheDocument();
+    expect(screen.getByText(/Playwright JSON redaction failed/)).toBeInTheDocument();
+    expect(screen.getByText(/全テストが成功しました/)).toBeInTheDocument();
+  });
+
   it("summary はあるが failedTests が空のとき '失敗テストはありません' を出す", async () => {
     vi.mocked(fetchRun).mockResolvedValue(
       makeRunMetadata("r1", {

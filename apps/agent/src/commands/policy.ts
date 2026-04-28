@@ -1,10 +1,36 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 
+export type CommandArgsValidationCode =
+  | "unsupported-executable"
+  | "invalid-prefix"
+  | "nul-byte"
+  | "argument-too-long"
+  | "missing-flag-value"
+  | "disallowed-flag"
+  | "invalid-uri-encoding"
+  | "decode-depth-exceeded"
+  | "absolute-path"
+  | "path-traversal"
+  | "flag-like-operand";
+
+export type CommandArgsValidationResult =
+  | { ok: true }
+  | { ok: false; code: CommandArgsValidationCode; message: string };
+
 export type CommandArgsValidator = (input: {
   executableName: string;
   args: ReadonlyArray<string>;
-}) => string | null;
+}) => CommandArgsValidationResult;
+
+export const argsValid = Object.freeze({ ok: true } satisfies CommandArgsValidationResult);
+
+export function argsInvalid(
+  code: CommandArgsValidationCode,
+  message: string
+): CommandArgsValidationResult {
+  return { ok: false, code, message };
+}
 
 export interface CommandPolicy {
   /**
@@ -21,11 +47,13 @@ export interface CommandPolicy {
    */
   argAllowlists?: Readonly<Record<string, ReadonlyArray<RegExp>>>;
   /**
-   * Optional validator that can inspect the whole argv sequence. Playwright
+   * Validator that can inspect the whole argv sequence. Playwright
    * flags such as `--grep <value>` need pair-aware validation so Japanese
    * text, spaces, and regex syntax are not accidentally rejected.
+   * Custom policies that intentionally allow arbitrary args must opt in via
+   * `allowAnyArgsValidator()` instead of omitting validation.
    */
-  argValidator?: CommandArgsValidator;
+  argValidator: CommandArgsValidator;
   /**
    * Realpath of the project root. The command's `cwd` must be inside
    * this directory.
@@ -114,39 +142,62 @@ function isFlagValue(value: string): boolean {
   return value.length === 0 || value.startsWith("-");
 }
 
-function isProjectRelativeOperand(value: string): boolean {
-  if (isFlagValue(value)) return false;
-  if (path.isAbsolute(value)) return false;
+type DecodeRepeatedlyResult =
+  | { ok: true; value: string }
+  | { ok: false; code: "invalid-uri-encoding" | "decode-depth-exceeded" };
+
+function validateProjectRelativeOperand(value: string): CommandArgsValidationResult {
+  if (isFlagValue(value)) {
+    return argsInvalid("flag-like-operand", `Spec operand '${value}' must not look like a flag.`);
+  }
+  if (path.isAbsolute(value)) {
+    return argsInvalid("absolute-path", `Spec operand '${value}' must be project-relative.`);
+  }
   const decoded = decodeRepeatedly(value);
-  if (decoded === null) return false;
-  if (path.isAbsolute(decoded)) return false;
-  const parts = decoded.split(/[\\/]+/);
-  return !parts.includes("..");
+  if (!decoded.ok) {
+    return argsInvalid(
+      decoded.code,
+      decoded.code === "invalid-uri-encoding"
+        ? `Spec operand '${value}' contains invalid percent encoding.`
+        : `Spec operand '${value}' exceeded the maximum percent-decoding depth.`
+    );
+  }
+  if (path.isAbsolute(decoded.value)) {
+    return argsInvalid("absolute-path", `Spec operand '${value}' must decode to a project-relative path.`);
+  }
+  const parts = decoded.value.split(/[\\/]+/);
+  if (parts.includes("..")) {
+    return argsInvalid("path-traversal", `Spec operand '${value}' must stay inside the project root.`);
+  }
+  return argsValid;
 }
 
-function decodeRepeatedly(value: string): string | null {
+function decodeRepeatedly(value: string): DecodeRepeatedlyResult {
   let current = value;
   for (let depth = 0; depth < MAX_DECODE_DEPTH; depth += 1) {
     let next: string;
     try {
       next = decodeURIComponent(current);
     } catch {
-      return null;
+      return { ok: false, code: "invalid-uri-encoding" };
     }
-    if (next === current) return current;
+    if (next === current) return { ok: true, value: current };
     current = next;
   }
-  return null;
+  return { ok: false, code: "decode-depth-exceeded" };
 }
 
-function validateArgValue(value: string): string | null {
+function validateArgValue(value: string): CommandArgsValidationResult {
   if (value.includes("\0")) {
-    return "Arguments must not contain NUL bytes.";
+    return argsInvalid("nul-byte", "Arguments must not contain NUL bytes.");
   }
   if (value.length > MAX_ARG_LENGTH) {
-    return `Arguments must be ${MAX_ARG_LENGTH} characters or fewer.`;
+    return argsInvalid(
+      "argument-too-long",
+      `Arguments must be ${MAX_ARG_LENGTH} characters or fewer.`
+    );
   }
-  return null;
+  return argsValid;
 }
 
 export function validatePhase1PlaywrightArgs({
@@ -155,18 +206,24 @@ export function validatePhase1PlaywrightArgs({
 }: {
   executableName: string;
   args: ReadonlyArray<string>;
-}): string | null {
+}): CommandArgsValidationResult {
   const prefix = PLAYWRIGHT_PREFIXES[executableName];
   if (!prefix) {
-    return `Executable '${executableName}' is not supported by the default Phase 1 Playwright policy.`;
+    return argsInvalid(
+      "unsupported-executable",
+      `Executable '${executableName}' is not supported by the default Phase 1 Playwright policy.`
+    );
   }
   if (!hasPrefix(args, prefix)) {
-    return `'${executableName}' must invoke the local Playwright test command with the approved prefix: ${prefix.join(" ")}`;
+    return argsInvalid(
+      "invalid-prefix",
+      `'${executableName}' must invoke the local Playwright test command with the approved prefix: ${prefix.join(" ")}`
+    );
   }
 
   for (const arg of args) {
     const valueError = validateArgValue(arg);
-    if (valueError) return valueError;
+    if (!valueError.ok) return valueError;
   }
 
   let index = prefix.length;
@@ -179,21 +236,27 @@ export function validatePhase1PlaywrightArgs({
     if (arg === "--grep" || arg === "--project") {
       const value = args[index + 1];
       if (value === undefined || isFlagValue(value)) {
-        return `${arg} must be followed by a non-flag value.`;
+        return argsInvalid("missing-flag-value", `${arg} must be followed by a non-flag value.`);
       }
       index += 2;
       continue;
     }
     if (arg.startsWith("-")) {
-      return `Flag '${arg}' is not allowed for the default Phase 1 Playwright policy.`;
+      return argsInvalid(
+        "disallowed-flag",
+        `Flag '${arg}' is not allowed for the default Phase 1 Playwright policy.`
+      );
     }
-    if (!isProjectRelativeOperand(arg)) {
-      return `Spec operand '${arg}' must be a project-relative path inside the project root.`;
-    }
+    const operandResult = validateProjectRelativeOperand(arg);
+    if (!operandResult.ok) return operandResult;
     index += 1;
   }
 
-  return null;
+  return argsValid;
+}
+
+export function allowAnyArgsValidator(): CommandArgsValidationResult {
+  return argsValid;
 }
 
 export function createDefaultCommandPolicy(cwdBoundary: string): CommandPolicy {

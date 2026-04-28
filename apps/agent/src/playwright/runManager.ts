@@ -20,8 +20,9 @@ import { deriveOutcome } from "./runOutcome.js";
 import { playwrightJsonReportProvider } from "../reporting/PlaywrightJsonReportProvider.js";
 import type { ReportProvider } from "../reporting/ReportProvider.js";
 
-interface RunManagerLogger {
+export interface RunManagerLogger {
   error(payload: Record<string, unknown>, message: string): void;
+  warn?(payload: Record<string, unknown>, message: string): void;
 }
 
 function errorCode(error: unknown): string {
@@ -64,13 +65,87 @@ function newRunId(): string {
   return `run-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 }
 
-async function safeReadJson<T>(filePath: string): Promise<T | undefined> {
+type JsonReadResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "missing" | "invalid-json" | "read-error"; code: string };
+
+async function readJsonFile<T>(filePath: string): Promise<JsonReadResult<T>> {
+  let raw: string;
   try {
-    const raw = await fs.readFile(filePath, "utf8");
-    return JSON.parse(raw) as T;
-  } catch {
-    return undefined;
+    raw = await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    const code = errorCode(error);
+    return { ok: false, reason: code === "ENOENT" ? "missing" : "read-error", code };
   }
+  try {
+    return { ok: true, value: JSON.parse(raw) as T };
+  } catch {
+    return { ok: false, reason: "invalid-json", code: "INVALID_JSON" };
+  }
+}
+
+interface LogWriteTracker {
+  write(stream: "stdout" | "stderr", chunk: string): void;
+  flush(): Promise<string[]>;
+}
+
+function createLogWriteTracker({
+  logStreams,
+  logger,
+  runId
+}: {
+  logStreams: Awaited<ReturnType<RunArtifactsStore["openLogStreams"]>>;
+  logger?: RunManagerLogger;
+  runId: string;
+}): LogWriteTracker {
+  const failures: Record<"stdout" | "stderr", { count: number; code: string }> = {
+    stdout: { count: 0, code: "UNKNOWN" },
+    stderr: { count: 0, code: "UNKNOWN" }
+  };
+  const logged = { stdout: false, stderr: false };
+  let queue = Promise.resolve();
+
+  function recordFailure(stream: "stdout" | "stderr", error: unknown): void {
+    const code = errorCode(error);
+    failures[stream] = { count: failures[stream].count + 1, code };
+    if (!logged[stream]) {
+      logged[stream] = true;
+      logger?.error(
+        {
+          runId,
+          stream,
+          artifactKind: "log",
+          code,
+          err: error instanceof Error ? error.message : String(error)
+        },
+        "run log write failed"
+      );
+    }
+  }
+
+  return {
+    write(stream, chunk) {
+      const target = stream === "stdout" ? logStreams.stdout : logStreams.stderr;
+      queue = queue
+        .then(() => target.write(chunk))
+        .then(
+          () => undefined,
+          (error) => {
+            recordFailure(stream, error);
+          }
+        );
+    },
+    async flush() {
+      await queue;
+      return (["stdout", "stderr"] as const).flatMap((stream) => {
+        const failure = failures[stream];
+        if (failure.count === 0) return [];
+        return [
+          `${stream} log write failed; websocket stream was still delivered. code=${failure.code}; failures=${failure.count}`
+        ];
+      });
+    }
+  };
 }
 
 export function createRunManager({
@@ -124,6 +199,7 @@ export function createRunManager({
     bus.publish({ type: "run.queued", runId, payload: { request: params.request } });
 
     const logStreams = await artifactsStore.openLogStreams(paths.stdoutLog, paths.stderrLog);
+    const logWriter = createLogWriteTracker({ logStreams, logger, runId });
 
     let runningMetadata: RunMetadata;
     let handle;
@@ -148,12 +224,12 @@ export function createRunManager({
         {
           onStdout: (chunk) => {
             const safe = redact(chunk);
-            logStreams.stdout.write(safe).catch(() => undefined);
+            logWriter.write("stdout", safe);
             bus.publish({ type: "run.stdout", runId, payload: { chunk: safe } });
           },
           onStderr: (chunk) => {
             const safe = redact(chunk);
-            logStreams.stderr.write(safe).catch(() => undefined);
+            logWriter.write("stderr", safe);
             bus.publish({ type: "run.stderr", runId, payload: { chunk: safe } });
           }
         }
@@ -169,14 +245,21 @@ export function createRunManager({
         durationMs: Date.now() - startedAt.getTime(),
         warnings: [
           ...initialMetadata.warnings,
-          `Runner rejected the command: ${error instanceof Error ? error.message : String(error)}`
+          `Runner rejected the command before spawn. code=${errorCode(error)}`
         ]
       };
       await artifactsStore.writeMetadata(paths.metadataJson, failed);
       bus.publish({
         type: "run.error",
         runId,
-        payload: { message: error instanceof Error ? error.message : String(error) }
+        payload: {
+          message: "Runner rejected the command before spawn.",
+          exitCode: null,
+          signal: null,
+          status: "error",
+          durationMs: failed.durationMs ?? 0,
+          warnings: failed.warnings
+        }
       });
       throw error;
     }
@@ -184,6 +267,7 @@ export function createRunManager({
     const finished: Promise<RunMetadata> = (async () => {
       try {
         const result = await handle.result;
+        const logWriteWarnings = await logWriter.flush();
         await logStreams.closeAll();
 
         const redactionWarning = await redactPlaywrightResultsSafely({
@@ -194,11 +278,17 @@ export function createRunManager({
         });
 
         const summary = await readSummarySafely(reportProvider, {
+          logger,
+          runId,
           projectRoot: params.projectRoot,
           runDir: paths.runDir,
           playwrightJsonPath: paths.playwrightJson
         });
-        const warnings = [...runningMetadata.warnings, ...(summary?.warnings ?? [])];
+        const warnings = [
+          ...runningMetadata.warnings,
+          ...logWriteWarnings,
+          ...(summary?.warnings ?? [])
+        ];
         if (redactionWarning) warnings.push(redactionWarning);
 
         const outcome = deriveOutcome(result, startedAt);
@@ -225,16 +315,19 @@ export function createRunManager({
                 : "run.completed",
           runId,
           payload: {
+            ...(outcome.status === "error" ? { message: "Run completed with error status." } : {}),
             exitCode: outcome.exitCode,
             signal: outcome.signal,
             status: outcome.status,
             durationMs: outcome.durationMs,
-            summary: summary?.summary
+            summary: summary?.summary,
+            warnings
           }
         });
         active.delete(runId);
         return completed;
       } catch (error) {
+        const logWriteWarnings = await logWriter.flush();
         await logStreams.closeAll();
         const completedAt = new Date();
         const completed: RunMetadata = {
@@ -244,14 +337,22 @@ export function createRunManager({
           durationMs: completedAt.getTime() - startedAt.getTime(),
           warnings: [
             ...runningMetadata.warnings,
-            `Runner failed: ${error instanceof Error ? error.message : String(error)}`
+            ...logWriteWarnings,
+            `Runner failed after spawn. code=${errorCode(error)}`
           ]
         };
         await artifactsStore.writeMetadata(paths.metadataJson, completed);
         bus.publish({
           type: "run.error",
           runId,
-          payload: { message: error instanceof Error ? error.message : String(error) }
+          payload: {
+            message: "Runner failed after spawn.",
+            exitCode: null,
+            signal: null,
+            status: "error",
+            durationMs: completed.durationMs ?? 0,
+            warnings: completed.warnings
+          }
         });
         active.delete(runId);
         return completed;
@@ -330,16 +431,31 @@ async function redactPlaywrightResultsSafely({
 
 async function readSummarySafely(
   provider: ReportProvider,
-  input: { projectRoot: string; runDir: string; playwrightJsonPath: string }
+  input: {
+    logger?: RunManagerLogger;
+    runId: string;
+    projectRoot: string;
+    runDir: string;
+    playwrightJsonPath: string;
+  }
 ): Promise<{ summary?: TestResultSummary; warnings: string[] } | undefined> {
   try {
     const result = await provider.readSummary(input);
     return result;
   } catch (error) {
+    const code = errorCode(error);
+    input.logger?.error(
+      {
+        runId: input.runId,
+        provider: provider.name,
+        artifactKind: "playwright-json-summary",
+        code,
+        err: error instanceof Error ? error.message : String(error)
+      },
+      "report summary read failed"
+    );
     return {
-      warnings: [
-        `${provider.name} report read failed: ${error instanceof Error ? error.message : String(error)}`
-      ]
+      warnings: [`${provider.name} report read failed; summary unavailable. code=${code}`]
     };
   }
 }
@@ -348,7 +464,10 @@ async function readSummarySafely(
  * Reads run metadata from disk for a given project. Used to populate the run
  * list across server restarts and for runs that are no longer active.
  */
-export async function loadRunsFromDisk(projectRoot: string): Promise<RunMetadata[]> {
+export async function loadRunsFromDisk(
+  projectRoot: string,
+  logger?: RunManagerLogger
+): Promise<RunMetadata[]> {
   const wb = workbenchPaths(projectRoot);
   let entries: import("node:fs").Dirent[] = [];
   try {
@@ -362,8 +481,22 @@ export async function loadRunsFromDisk(projectRoot: string): Promise<RunMetadata
     const metadataPath = path.join(wb.runsDir, entry.name, "metadata.json");
     const stat = await fs.lstat(metadataPath).catch(() => null);
     if (!stat || !stat.isFile()) continue;
-    const metadata = await safeReadJson<RunMetadata>(metadataPath);
-    if (metadata) runs.push(metadata);
+    const metadata = await readJsonFile<RunMetadata>(metadataPath);
+    if (metadata.ok) {
+      runs.push(metadata.value);
+      continue;
+    }
+    if (metadata.reason !== "missing") {
+      logger?.warn?.(
+        {
+          runDir: entry.name,
+          artifactKind: "metadata",
+          reason: metadata.reason,
+          code: metadata.code
+        },
+        "run metadata could not be loaded"
+      );
+    }
   }
   return runs.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
 }
@@ -374,9 +507,10 @@ export async function loadRunsFromDisk(projectRoot: string): Promise<RunMetadata
  */
 export async function mergeActiveAndPersistedRuns(
   manager: RunManager,
-  projectRoot: string
+  projectRoot: string,
+  logger?: RunManagerLogger
 ): Promise<RunMetadata[]> {
-  const fromDisk = await loadRunsFromDisk(projectRoot);
+  const fromDisk = await loadRunsFromDisk(projectRoot, logger);
   const fromMemory = await manager.listRuns();
   const byId = new Map<string, RunMetadata>();
   for (const run of fromDisk) byId.set(run.runId, run);

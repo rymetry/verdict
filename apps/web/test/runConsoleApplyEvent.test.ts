@@ -57,6 +57,7 @@ describe("RunConsole applyEvent", () => {
           exitCode: 0,
           status: "passed",
           durationMs: 1234,
+          warnings: ["summary unavailable"],
           summary: { total: 1, passed: 1, failed: 0, skipped: 0, flaky: 0, failedTests: [] }
         }
       })
@@ -65,6 +66,7 @@ describe("RunConsole applyEvent", () => {
     expect(next.exitCode).toBe(0);
     expect(next.durationMs).toBe(1234);
     expect(next.summary?.passed).toBe(1);
+    expect(next.warnings).toEqual(["summary unavailable"]);
   });
 
   it("treats run.cancelled as cancelled status regardless of payload", () => {
@@ -101,6 +103,7 @@ describe("RunConsole applyEvent", () => {
           exitCode: 1,
           status: "failed",
           durationMs: 555,
+          warnings: ["stdout log write failed; websocket stream was still delivered. code=ENOSPC; failures=1"],
           summary: { total: 2, passed: 0, failed: 2, skipped: 0, flaky: 0, failedTests: [] }
         }
       })
@@ -108,6 +111,7 @@ describe("RunConsole applyEvent", () => {
     expect(next.status).toBe("failed");
     expect(next.exitCode).toBe(1);
     expect(next.summary?.failed).toBe(2);
+    expect(next.warnings.join("\n")).toContain("stdout log write failed");
   });
 
   it("run.error は payload に関わらず error status に遷移する", () => {
@@ -118,7 +122,9 @@ describe("RunConsole applyEvent", () => {
         payload: {
           exitCode: 137,
           status: "error",
-          durationMs: 0
+          durationMs: 0,
+          warnings: [],
+          message: "Runner failed after spawn."
         }
       })
     );

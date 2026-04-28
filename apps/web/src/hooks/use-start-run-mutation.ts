@@ -39,6 +39,7 @@ export function useStartRunMutation(): StartRunMutation {
     retry: 0,
     onSuccess: (response, request) => {
       startTracking(response.runId, request);
+      queryClient.setQueryData(["runs", response.runId], response.metadata);
       // invalidate は副作用的だが、同じ queryKey を購読しているコンポーネントの refetch 漏れを
       // 防ぐため、rejection は log だけ残して握りつぶさない。本フックの呼び出し成功 (run 起動成功)
       // 自体は完了しており、UI 状態は startTracking で先に確定しているため、ここで例外を上に

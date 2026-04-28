@@ -268,11 +268,12 @@ export const RunCompletedPayloadSchema = z.object({
   signal: z.string().nullable().optional(),
   status: RunStatusSchema,
   durationMs: z.number().int().nonnegative(),
-  summary: TestResultSummarySchema.optional()
+  summary: TestResultSummarySchema.optional(),
+  warnings: z.array(z.string()).default([])
 });
 export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
 
-export const RunErrorPayloadSchema = z.object({
+export const RunErrorPayloadSchema = RunCompletedPayloadSchema.extend({
   message: z.string()
 });
 export type RunErrorPayload = z.infer<typeof RunErrorPayloadSchema>;
@@ -318,7 +319,8 @@ export const RunListItemSchema = RunMetadataSchema.pick({
   completedAt: true,
   durationMs: true,
   exitCode: true,
-  summary: true
+  summary: true,
+  warnings: true
 });
 export type RunListItem = z.infer<typeof RunListItemSchema>;
 

@@ -9,6 +9,8 @@ export interface AgentEnv {
   initialProjectRoot?: string;
   /** Allowed runtime root directories (realpath). Used to gate `POST /projects/open`. */
   allowedRoots: ReadonlyArray<string>;
+  /** When true, command execution fails if audit persistence fails. */
+  failClosedAudit?: boolean;
 }
 
 interface BuildEnvInput {
@@ -83,6 +85,8 @@ export function buildAgentEnv({ argv = [], env = process.env }: BuildEnvInput = 
     host,
     logLevel,
     initialProjectRoot,
-    allowedRoots
+    allowedRoots,
+    failClosedAudit:
+      env.AGENT_FAIL_CLOSED_AUDIT === "1" || env.AGENT_FAIL_CLOSED_AUDIT === "true"
   };
 }
