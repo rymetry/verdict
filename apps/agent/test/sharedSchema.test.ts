@@ -69,12 +69,24 @@ describe("shared run warning schemas", () => {
 
     expect(
       RunErrorPayloadSchema.parse({
+        message: "Runner failed after spawn.",
         exitCode: null,
         signal: null,
         status: "error",
         durationMs: 123
       }).warnings
     ).toEqual([]);
+  });
+
+  it("requires run.error payloads to include a safe message", () => {
+    expect(() =>
+      RunErrorPayloadSchema.parse({
+        exitCode: null,
+        signal: null,
+        status: "error",
+        durationMs: 123
+      })
+    ).toThrow();
   });
 
   it("does not allow success or failure statuses in run.error payloads", () => {

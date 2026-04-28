@@ -69,12 +69,23 @@ describe("RunConsole applyEvent", () => {
     expect(next.warnings).toEqual(["summary unavailable"]);
   });
 
-  it("treats run.cancelled as cancelled status regardless of payload", () => {
+  it("run.cancelled は schema-valid payload で cancelled status に遷移する", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const next = applyEvent(
       initialRunConsoleState,
-      evt({ type: "run.cancelled", payload: {} })
+      evt({
+        type: "run.cancelled",
+        payload: {
+          exitCode: null,
+          status: "cancelled",
+          durationMs: 1,
+          warnings: ["cancelled by user"]
+        }
+      })
     );
     expect(next.status).toBe("cancelled");
+    expect(next.warnings).toEqual(["cancelled by user"]);
+    expect(consoleSpy).not.toHaveBeenCalled();
   });
 
   it("MAX_LINES (1000) 到達後は先頭が drop され末尾が保たれる", () => {

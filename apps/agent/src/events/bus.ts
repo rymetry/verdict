@@ -1,4 +1,10 @@
-import { type WorkbenchEvent } from "@pwqa/shared";
+import {
+  RunCancelledPayloadSchema,
+  RunCompletedPayloadSchema,
+  RunErrorPayloadSchema,
+  RunStdStreamPayloadSchema,
+  type WorkbenchEvent
+} from "@pwqa/shared";
 
 export type EventListener = (event: WorkbenchEvent) => void;
 
@@ -16,6 +22,22 @@ export interface CreateEventBusOptions {
   onListenerError?: (error: unknown) => void;
 }
 
+function assertValidPayload(input: Omit<WorkbenchEvent, "sequence" | "timestamp">): void {
+  const result =
+    input.type === "run.stdout" || input.type === "run.stderr"
+      ? RunStdStreamPayloadSchema.safeParse(input.payload)
+      : input.type === "run.completed"
+        ? RunCompletedPayloadSchema.safeParse(input.payload)
+        : input.type === "run.cancelled"
+          ? RunCancelledPayloadSchema.safeParse(input.payload)
+          : input.type === "run.error"
+            ? RunErrorPayloadSchema.safeParse(input.payload)
+            : null;
+  if (result && !result.success) {
+    throw new Error(`Invalid ${input.type} payload: ${result.error.issues.map((i) => i.message).join("; ")}`);
+  }
+}
+
 export function createEventBus(options: CreateEventBusOptions = {}): EventBus {
   const listeners = new Set<EventListener>();
   let nextSequence = 0;
@@ -24,6 +46,7 @@ export function createEventBus(options: CreateEventBusOptions = {}): EventBus {
 
   return {
     publish(input) {
+      assertValidPayload(input);
       const sequence = ++nextSequence;
       const event: WorkbenchEvent = {
         ...input,

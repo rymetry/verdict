@@ -249,6 +249,12 @@ describe("RunManager", () => {
           };
         }
       },
+      reportProvider: {
+        name: "test-provider",
+        async readSummary() {
+          return undefined;
+        }
+      },
       logger: {
         error(payload) {
           errors.push(payload);
@@ -295,6 +301,63 @@ describe("RunManager", () => {
         err: "bad fd at /private/stderr.log"
       })
     ]);
+  });
+
+  it("keeps websocket stdout delivery when real runner log persistence fails", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        argValidator: unsafelyAllowAnyArgsValidator,
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const manager = createRunManager({
+      runnerForProject: () => runner,
+      bus,
+      artifactsStore: {
+        ...runArtifactsStore,
+        async openLogStreams(stdoutPath, stderrPath) {
+          const streams = await runArtifactsStore.openLogStreams(stdoutPath, stderrPath);
+          return {
+            ...streams,
+            stdout: {
+              ...streams.stdout,
+              write: async () => {
+                throw Object.assign(new Error("disk full at /private/stdout.log"), {
+                  code: "ENOSPC"
+                });
+              }
+            } as never
+          };
+        }
+      }
+    });
+    const events: WorkbenchEvent[] = [];
+    bus.subscribe((event) => events.push(event));
+
+    const stubPath = writeStub("stdout-write-fails.js", STUB_SUCCESS_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+
+    expect(events.some((event) => event.type === "run.stdout")).toBe(true);
+    expect(completed.warnings.join("\n")).toContain("stdout log write failed");
+    expect(completed.warnings.join("\n")).toContain("code=ENOSPC");
   });
 
   it("rejects runs when packageManager.blockingExecution is true", async () => {
@@ -513,6 +576,7 @@ describe("RunManager", () => {
     const runsRoot = path.join(workdir, ".playwright-workbench", "runs");
     fs.mkdirSync(path.join(runsRoot, "missing-metadata"), { recursive: true });
     fs.mkdirSync(path.join(runsRoot, "bad-json"), { recursive: true });
+    fs.mkdirSync(path.join(runsRoot, "metadata-dir", "metadata.json"), { recursive: true });
     fs.writeFileSync(path.join(runsRoot, "bad-json", "metadata.json"), "{not json");
     const warnings: Array<Record<string, unknown>> = [];
 
@@ -524,14 +588,20 @@ describe("RunManager", () => {
     });
 
     expect(runs).toEqual([]);
-    expect(warnings).toEqual([
+    expect(warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({
         runDir: "bad-json",
         artifactKind: "metadata",
         reason: "invalid-json",
         code: "INVALID_JSON"
+      }),
+      expect.objectContaining({
+        runDir: "metadata-dir",
+        artifactKind: "metadata",
+        reason: "not-file"
       })
-    ]);
+    ]));
+    expect(warnings).toHaveLength(2);
   });
 
   it("logs runs directory list failures except for missing runs directory", async () => {

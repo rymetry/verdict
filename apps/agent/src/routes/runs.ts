@@ -11,12 +11,47 @@ import { mergeActiveAndPersistedRuns } from "../playwright/runManager.js";
 import type { ProjectStore } from "../project/store.js";
 import { apiError } from "../lib/apiError.js";
 import { pathExists } from "../lib/pathExists.js";
+import { CommandPolicyError } from "../commands/runner.js";
+import { PlaywrightCommandBuildError } from "../playwright/builder.js";
 
 function errorCode(error: unknown): string {
   if (error instanceof Error && "code" in error && typeof error.code === "string") {
     return error.code;
   }
   return "UNKNOWN";
+}
+
+function startupFailureResponse(error: unknown): {
+  code: string;
+  message: string;
+  status: 400 | 500;
+} {
+  if (error instanceof PlaywrightCommandBuildError) {
+    return {
+      code: `RUN_COMMAND_BUILD_${error.code}`,
+      message: "Run command could not be built from the request.",
+      status: 400
+    };
+  }
+  if (error instanceof CommandPolicyError) {
+    return {
+      code: "RUN_COMMAND_REJECTED",
+      message: "Runner rejected the command before spawn.",
+      status: 400
+    };
+  }
+  if (errorCode(error) === "AUDIT_PERSIST_FAILED") {
+    return {
+      code: "RUN_AUDIT_PERSIST_FAILED",
+      message: "Run could not start because audit logging failed.",
+      status: 500
+    };
+  }
+  return {
+    code: "RUN_START_FAILED",
+    message: "Run failed before it could be started.",
+    status: 500
+  };
 }
 
 interface Deps {
@@ -67,7 +102,8 @@ export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
         },
         "run start failed"
       );
-      return apiError(c, "RUN_FAILED", "Run failed before it could be started.", 500);
+      const response = startupFailureResponse(error);
+      return apiError(c, response.code, response.message, response.status);
     }
   });
 

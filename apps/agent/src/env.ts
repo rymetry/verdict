@@ -10,7 +10,7 @@ export interface AgentEnv {
   /** Allowed runtime root directories (realpath). Used to gate `POST /projects/open`. */
   allowedRoots: ReadonlyArray<string>;
   /** When true, command execution fails if audit persistence fails. */
-  failClosedAudit?: boolean;
+  failClosedAudit: boolean;
 }
 
 interface BuildEnvInput {
@@ -37,7 +37,7 @@ function parseHost(raw: string | undefined, allowAnyHost: boolean): string {
   if (allowAnyHost) return value;
   if (!SAFE_HOSTS.has(value)) {
     throw new Error(
-      `Refusing to bind to non-loopback host '${value}'. Set WORKBENCH_ALLOW_REMOTE=1 to override.`
+      `Refusing to bind to non-loopback host '${value}'. Set WORKBENCH_ALLOW_REMOTE=1 or true to override.`
     );
   }
   return value;
@@ -52,6 +52,7 @@ function realpathSafe(input: string): string | undefined {
 }
 
 function parseBooleanFlag(raw: string | undefined): boolean {
+  // Env flags intentionally accept only explicit truthy values; "yes"/"on" stay false.
   const value = raw?.trim().toLowerCase();
   return value === "1" || value === "true";
 }

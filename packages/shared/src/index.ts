@@ -263,34 +263,36 @@ export const RunStdStreamPayloadSchema = z.object({
 });
 export type RunStdStreamPayload = z.infer<typeof RunStdStreamPayloadSchema>;
 
-export const RunCompletedPayloadSchema = z.object({
+const RunTerminalPayloadBaseSchema = z.object({
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable().optional(),
-  status: z.enum(["passed", "failed"]),
   durationMs: z.number().int().nonnegative(),
-  summary: TestResultSummarySchema.optional(),
   warnings: z.array(z.string()).default([])
+});
+
+export const RunCompletedPayloadSchema = RunTerminalPayloadBaseSchema.extend({
+  status: z.enum(["passed", "failed"]),
+  summary: TestResultSummarySchema.optional()
 });
 export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
 
-export const RunCancelledPayloadSchema = z.object({
-  exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
-  status: z.literal("cancelled"),
-  durationMs: z.number().int().nonnegative(),
-  warnings: z.array(z.string()).default([])
+export const RunCancelledPayloadSchema = RunTerminalPayloadBaseSchema.extend({
+  status: z.literal("cancelled")
 });
 export type RunCancelledPayload = z.infer<typeof RunCancelledPayloadSchema>;
 
-export const RunErrorPayloadSchema = z.object({
-  message: z.string().optional(),
-  exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
+export const RunErrorPayloadSchema = RunTerminalPayloadBaseSchema.extend({
   status: z.literal("error"),
-  durationMs: z.number().int().nonnegative(),
-  warnings: z.array(z.string()).default([])
+  message: z.string()
 });
 export type RunErrorPayload = z.infer<typeof RunErrorPayloadSchema>;
+
+export const RunTerminalPayloadSchema = z.discriminatedUnion("status", [
+  RunCompletedPayloadSchema,
+  RunCancelledPayloadSchema,
+  RunErrorPayloadSchema
+]);
+export type RunTerminalPayload = z.infer<typeof RunTerminalPayloadSchema>;
 
 export const WorkbenchEventTypeSchema = z.enum([
   "run.queued",

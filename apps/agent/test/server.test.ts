@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -38,7 +38,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       }
     });
     const response = await app.request("/health");
@@ -54,7 +55,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       }
     });
     const open = await app.request("/projects/open", {
@@ -81,7 +83,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [fixtureRealpath]
+        allowedRoots: [fixtureRealpath],
+      failClosedAudit: false
       }
     });
     const open = await app.request("/projects/open", {
@@ -112,7 +115,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       },
       policyFactory: (projectRoot) => {
         requestedRoots.push(projectRoot);
@@ -138,7 +142,8 @@ describe("HTTP API surface", () => {
           port: 0,
           host: "127.0.0.1",
           logLevel: "silent",
-          allowedRoots: [workdir, otherRoot]
+          allowedRoots: [workdir, otherRoot],
+        failClosedAudit: false
         },
         policyFactory: (projectRoot): CommandPolicy => ({
           allowedExecutables: ["node"],
@@ -177,7 +182,8 @@ describe("HTTP API surface", () => {
           port: 0,
           host: "127.0.0.1",
           logLevel: "silent",
-          allowedRoots: [projectRoot]
+          allowedRoots: [projectRoot],
+        failClosedAudit: false
         },
         policyFactory: permissiveNodePolicy
       });
@@ -222,7 +228,16 @@ describe("HTTP API surface", () => {
       });
 
       await expect(handle.result).resolves.toEqual(expect.objectContaining({ exitCode: 0 }));
-      expect(fs.existsSync(path.join(projectRoot, ".playwright-workbench", "audit.log"))).toBe(true);
+      const auditPath = path.join(projectRoot, ".playwright-workbench", "audit.log");
+      const auditLines = fs.readFileSync(auditPath, "utf8").trim().split("\n");
+      expect(auditLines).toHaveLength(1);
+      expect(JSON.parse(auditLines[0]!)).toEqual(
+        expect.objectContaining({
+          executable: process.execPath,
+          args: ["-e", ""],
+          cwd: projectRoot
+        })
+      );
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -234,7 +249,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       },
       policyFactory: (): CommandPolicy => {
         throw new Error(`policy failed at ${workdir}`);
@@ -254,6 +270,7 @@ describe("HTTP API surface", () => {
     const body = await response.json();
 
     expect(response.status).toBe(500);
+    expect(body.error.code).toBe("RUN_START_FAILED");
     expect(body.error.message).toBe("Run failed before it could be started.");
     expect(body.error.message).not.toContain(workdir);
   });
@@ -268,6 +285,7 @@ describe("HTTP API surface", () => {
       cwdBoundary: root,
       envAllowlist: ["PATH"]
     });
+    const auditObserver = vi.fn();
 
     try {
       const { runnerForProject } = buildApp({
@@ -278,7 +296,8 @@ describe("HTTP API surface", () => {
           allowedRoots: [projectRoot],
           failClosedAudit: true
         },
-        policyFactory: permissiveNodePolicy
+        policyFactory: permissiveNodePolicy,
+        audit: auditObserver
       });
 
       expect(() =>
@@ -287,7 +306,14 @@ describe("HTTP API surface", () => {
           args: ["-e", ""],
           cwd: projectRoot
         })
-      ).toThrow(/audit directory is not a safe directory/);
+      ).toThrow(/Audit persistence failed/);
+      expect(auditObserver).toHaveBeenCalledWith(
+        expect.objectContaining({
+          executable: process.execPath,
+          args: ["-e", ""],
+          cwd: projectRoot
+        })
+      );
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true });
       fs.rmSync(outside, { recursive: true, force: true });
@@ -300,7 +326,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [path.join(os.tmpdir(), "definitely-not-here")]
+        allowedRoots: [path.join(os.tmpdir(), "definitely-not-here")],
+      failClosedAudit: false
       }
     });
     const open = await app.request("/projects/open", {
@@ -319,7 +346,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       }
     });
     const response = await app.request("/runs/non-existent");
@@ -361,7 +389,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       }
     });
     await app.request("/projects/open", {
@@ -391,7 +420,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       }
     });
     const response = await app.request("/projects/open", {
@@ -410,7 +440,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       }
     });
     await app.request("/projects/open", {
@@ -435,7 +466,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       }
     });
     await app.request("/projects/open", {
@@ -460,7 +492,8 @@ describe("HTTP API surface", () => {
         port: 0,
         host: "127.0.0.1",
         logLevel: "silent",
-        allowedRoots: [workdir]
+        allowedRoots: [workdir],
+      failClosedAudit: false
       }
     });
     const allowed = await app.request("/health", {

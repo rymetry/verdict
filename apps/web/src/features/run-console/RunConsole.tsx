@@ -57,6 +57,17 @@ function trim(lines: string[], next: string): string[] {
   return [...lines.slice(lines.length - MAX_LINES + 1), next];
 }
 
+function applyTerminalFields(
+  state: RunConsoleState,
+  payload: { exitCode: number | null; durationMs: number; warnings: string[] } | null
+): Pick<RunConsoleState, "exitCode" | "durationMs" | "warnings"> {
+  return {
+    exitCode: payload?.exitCode ?? null,
+    durationMs: payload?.durationMs ?? state.durationMs,
+    warnings: payload?.warnings ?? state.warnings
+  };
+}
+
 export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React.ReactElement {
   const [state, setState] = React.useState<RunConsoleState>(initialRunConsoleState);
   const stdoutRef = React.useRef<HTMLPreElement>(null);
@@ -196,9 +207,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       return {
         ...state,
         status,
-        exitCode: payload?.exitCode ?? null,
-        durationMs: payload?.durationMs ?? state.durationMs,
-        warnings: payload?.warnings ?? state.warnings,
+        ...applyTerminalFields(state, payload),
         summary: payload?.summary
           ? {
               total: payload.summary.total,
@@ -220,9 +229,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       return {
         ...state,
         status: "cancelled",
-        exitCode: payload?.exitCode ?? null,
-        durationMs: payload?.durationMs ?? state.durationMs,
-        warnings: payload?.warnings ?? state.warnings
+        ...applyTerminalFields(state, payload)
       };
     }
     case "run.error": {
@@ -235,9 +242,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       return {
         ...state,
         status: "error",
-        exitCode: payload?.exitCode ?? null,
-        durationMs: payload?.durationMs ?? state.durationMs,
-        warnings: payload?.warnings ?? state.warnings
+        ...applyTerminalFields(state, payload)
       };
     }
     case "snapshot":

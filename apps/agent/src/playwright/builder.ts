@@ -32,7 +32,7 @@ export function buildPlaywrightTestCommand(input: PlaywrightCommandInput): {
   const base = input.packageManager.commandTemplates.playwrightTest;
   const args = [...base.args];
 
-  // PoC §21: list / json / html reporters by default. allure-playwright is added in Phase 1.2.
+  // 追加 reporter は専用 adapter policy で許可し、既定の reporter セットは広げない。
   args.push(`--reporter=${REPORTERS.join(",")}`);
 
   if (input.request.headed) {

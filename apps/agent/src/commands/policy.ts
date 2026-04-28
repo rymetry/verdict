@@ -40,7 +40,11 @@ export interface CommandPolicy {
    * must opt in through adapter-specific policies when those phases land.
    */
   allowedExecutables: ReadonlyArray<string>;
-  /** Optional positional-arg allowlists per executable. */
+  /**
+   * Optional positional-arg allowlists per executable. `npm` is intentionally
+   * absent from the default executables so `npm run <script>` cannot bypass the
+   * Playwright-specific argv validator.
+   */
   argAllowlists?: Readonly<Record<string, ReadonlyArray<RegExp>>>;
   /**
    * Validator that can inspect the whole argv sequence. Playwright
@@ -254,8 +258,6 @@ export function validatePhase1PlaywrightArgs({
 export function unsafelyAllowAnyArgsValidator(): CommandArgsValidationResult {
   return argsValid;
 }
-
-export { unsafelyAllowAnyArgsValidator as allowAnyArgsValidator };
 
 export function createDefaultCommandPolicy(cwdBoundary: string): CommandPolicy {
   return {

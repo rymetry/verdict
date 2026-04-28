@@ -170,8 +170,6 @@ describe("RunConsole", () => {
         runId: "r1",
         sequence: 3,
         timestamp: "2026-04-28T00:00:00Z",
-        // applyEvent は run.cancelled の場合 payload schema 一致しなくても "cancelled" を返す。
-        // 安全のため durationMs を nonnegative integer で渡す。
         payload: {
           status: "cancelled",
           exitCode: null,
@@ -181,6 +179,30 @@ describe("RunConsole", () => {
       });
     });
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
+  });
+
+  it("run.error は Error badge と warnings を表示する", async () => {
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.error",
+        runId: "r1",
+        sequence: 3,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: {
+          message: "Runner failed after spawn.",
+          status: "error",
+          exitCode: null,
+          durationMs: 0,
+          warnings: ["Runner failed after spawn. code=UNKNOWN"]
+        }
+      });
+    });
+
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.getByText("Run warnings")).toBeInTheDocument();
+    expect(screen.getByText(/Runner failed after spawn/)).toBeInTheDocument();
   });
 
   it("stderr が出ると details が描画される", async () => {

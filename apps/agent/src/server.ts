@@ -53,6 +53,15 @@ export interface BuildAppResult {
   projectStore: ProjectStore;
 }
 
+class AuditPersistenceError extends Error {
+  readonly code = "AUDIT_PERSIST_FAILED";
+
+  constructor(cause: unknown) {
+    super("Audit persistence failed", { cause });
+    this.name = "AuditPersistenceError";
+  }
+}
+
 function persistAuditEntry(rootDir: string, entry: AuditEntry): void {
   const wb = workbenchPaths(rootDir);
   if (fsSync.existsSync(wb.workbenchDir)) {
@@ -174,9 +183,11 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       policy,
       audit: (entry) => {
         logger.info({ audit: entry }, "command audit");
+        let auditPersistenceError: AuditPersistenceError | undefined;
         try {
           persistAuditEntry(projectRoot, entry);
         } catch (error) {
+          auditPersistenceError = new AuditPersistenceError(error);
           logger.error(
             {
               err: error instanceof Error ? error.message : String(error),
@@ -188,11 +199,11 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
             },
             "failed to persist audit log entry"
           );
-          if (env.failClosedAudit) {
-            throw error;
-          }
         }
         options.audit?.(entry);
+        if (auditPersistenceError && env.failClosedAudit) {
+          throw auditPersistenceError;
+        }
       }
     });
   };

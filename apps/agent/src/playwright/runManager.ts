@@ -119,6 +119,7 @@ function createLogWriteTracker({
     };
     if (!logged[stream]) {
       logged[stream] = true;
+      // 後続失敗は count で集約し、構造化ログは stream ごとの最初の原因に揃える。
       logger?.error(
         {
           runId,
@@ -279,13 +280,7 @@ export function createRunManager({
         const logWriteWarnings = await logWriter.flush();
         await logStreams.closeAll();
 
-        const redactionWarning = await redactPlaywrightResultsSafely({
-          artifactsStore,
-          logger,
-          runId,
-          playwrightJsonPath: paths.playwrightJson
-        });
-
+        // redaction で raw JSON を削除する可能性があるため、summary は先に読み取る。
         const summary = await readSummarySafely(
           reportProvider,
           {
@@ -295,6 +290,12 @@ export function createRunManager({
           },
           { logger, runId }
         );
+        const redactionWarning = await redactPlaywrightResultsSafely({
+          artifactsStore,
+          logger,
+          runId,
+          playwrightJsonPath: paths.playwrightJson
+        });
         const warnings = [
           ...runningMetadata.warnings,
           ...logWriteWarnings,
@@ -317,6 +318,7 @@ export function createRunManager({
         };
         await artifactsStore.writeMetadata(paths.metadataJson, completed);
 
+        // terminal event ごとに payload shape が異なるため、summary/message の混在をここで防ぐ。
         const terminalPayload =
           outcome.status === "cancelled"
             ? {
@@ -425,7 +427,8 @@ async function redactPlaywrightResultsSafely({
   runId: string;
   playwrightJsonPath: string;
 }): Promise<string | undefined> {
-  // raw reporter output は secret を含み得るため、redaction 失敗時は削除を優先する。
+  // raw reporter output は secret を含み得る。成功なら無警告、redaction 失敗でも削除できたら
+  // "removed" warning、削除も失敗したら secret 残存可能性を明示する warning に分ける。
   try {
     await artifactsStore.redactPlaywrightResults(playwrightJsonPath);
     return undefined;
@@ -532,7 +535,17 @@ export async function loadRunsFromDisk(
       }
       continue;
     }
-    if (!stat.isFile()) continue;
+    if (!stat.isFile()) {
+      logger?.warn?.(
+        {
+          runDir: entry.name,
+          artifactKind: "metadata",
+          reason: "not-file"
+        },
+        "run metadata is not a regular file"
+      );
+      continue;
+    }
     const metadata = await readJsonFile<RunMetadata>(metadataPath);
     if (metadata.ok) {
       runs.push(metadata.value);

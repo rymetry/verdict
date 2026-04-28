@@ -14,12 +14,26 @@ afterEach(() => {
 });
 
 describe("PlaywrightJsonReportProvider", () => {
-  it("returns undefined when the JSON file is absent", async () => {
+  it("throws when the JSON file is absent so the caller can log the read failure", async () => {
+    await expect(
+      playwrightJsonReportProvider.readSummary({
+        projectRoot: workdir,
+        runDir: workdir,
+        playwrightJsonPath: path.join(workdir, "missing.json")
+      })
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("returns undefined when the JSON file is empty", async () => {
+    const file = path.join(workdir, "empty.json");
+    fs.writeFileSync(file, "");
+
     const result = await playwrightJsonReportProvider.readSummary({
       projectRoot: workdir,
       runDir: workdir,
-      playwrightJsonPath: path.join(workdir, "missing.json")
+      playwrightJsonPath: file
     });
+
     expect(result).toBeUndefined();
   });
 
