@@ -593,8 +593,16 @@ describe("RunManager", () => {
     const bus = createEventBus();
     const runner = {
       run(_spec: unknown, handlers = {}) {
-        const streamHandlers = handlers as { onStdout?: (chunk: string) => void };
+        // Issue #31: emit on both stdout and stderr so the streamIdentity()
+        // helper at streamRedactor.ts gets exercised on both branches.
+        // A transposition bug (stderr → "stdout-log") would make this test
+        // assert the wrong identity for the stderr entry below.
+        const streamHandlers = handlers as {
+          onStdout?: (chunk: string) => void;
+          onStderr?: (chunk: string) => void;
+        };
         streamHandlers.onStdout?.(`${secret}\n`);
+        streamHandlers.onStderr?.(`${secret}\n`);
         return {
           result: Promise.resolve({
             exitCode: 0,
@@ -645,15 +653,32 @@ describe("RunManager", () => {
           artifactKind: "stdout-log",
           op: "stream-redaction",
           replacements: expect.any(Number)
+        }),
+        expect.objectContaining({
+          runId: handle.runId,
+          artifactKind: "stderr-log",
+          op: "stream-redaction",
+          replacements: expect.any(Number)
         })
       ])
     );
     expect(JSON.stringify(infos)).not.toContain(secret);
-    const redactionEntry = infos.find(
+    const stdoutEntry = infos.find(
       (i) => i.artifactKind === "stdout-log" && i.op === "stream-redaction"
     );
-    expect(redactionEntry).toBeDefined();
-    expect(redactionEntry!.replacements).toBeGreaterThanOrEqual(1);
+    const stderrEntry = infos.find(
+      (i) => i.artifactKind === "stderr-log" && i.op === "stream-redaction"
+    );
+    expect(stdoutEntry).toBeDefined();
+    expect(stderrEntry).toBeDefined();
+    expect(stdoutEntry!.replacements).toBeGreaterThanOrEqual(1);
+    expect(stderrEntry!.replacements).toBeGreaterThanOrEqual(1);
+    // Issue #31 regression: identity now carries the stream — the
+    // auxiliary `stream` field must not sneak back in on either branch
+    // of streamIdentity() (the failure path is asserted at the
+    // redaction-failure test above).
+    expect(stdoutEntry).not.toHaveProperty("stream");
+    expect(stderrEntry).not.toHaveProperty("stream");
   });
 
   it("emits a sanitized run.error fallback when terminal completion publish fails", async () => {
@@ -1200,6 +1225,12 @@ process.exit(1);
         ]
       }
     });
+    // Issue #31 follow-up: capture logger errors so we can verify BOTH
+    // redaction-failure error logs (the redact throw and the unlink-after-
+    // redact-failure throw) carry the new `op: "redaction"` axis. Without
+    // capturing here the unlink branch would have no behavioural test, and
+    // a future swap that drops `op` on the unlink site would silently pass.
+    const errors: Array<Record<string, unknown>> = [];
     const manager = createRunManager({
       runnerForProject: () => runner,
       bus,
@@ -1210,6 +1241,11 @@ process.exit(1);
           throw Object.assign(new Error("redaction disk write failed at /private/path"), {
             code: "EACCES"
           });
+        }
+      },
+      logger: {
+        error(payload) {
+          errors.push(payload);
         }
       }
     });
@@ -1232,6 +1268,36 @@ process.exit(1);
     expect(warningText).toContain("removalCode=ENOENT");
     expect(warningText).not.toContain("/private/path");
     expect(warningText).not.toContain(completed.paths.playwrightJson);
+
+    // Issue #31 regression: redaction-throw and unlink-after-redact-failure
+    // both share `playwright-json` identity + `op: "redaction"`. The two
+    // events are distinguished by `code` (EACCES vs ENOENT) — that is the
+    // discriminator log-aggregator queries should rely on, not the
+    // (identical) artifact axes.
+    const redactionErrors = errors.filter(
+      (e) => e.artifactKind === "playwright-json" && e.op === "redaction"
+    );
+    expect(redactionErrors).toHaveLength(2);
+    expect(redactionErrors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId: handle.runId,
+          artifactKind: "playwright-json",
+          op: "redaction",
+          code: "EACCES"
+        }),
+        expect.objectContaining({
+          runId: handle.runId,
+          artifactKind: "playwright-json",
+          op: "redaction",
+          code: "ENOENT"
+        })
+      ])
+    );
+    // Path-redaction guarantee: the path-bearing message ("/private/path")
+    // must not appear in any structured-log payload, and `err` must be
+    // dropped by `errorLogFields`.
+    expectNoPathLeak(redactionErrors, ["/private/path", completed.paths.playwrightJson]);
   });
 
   it("publishes run.error payloads with terminal warning fields", async () => {

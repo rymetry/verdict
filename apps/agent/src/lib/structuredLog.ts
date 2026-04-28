@@ -36,9 +36,13 @@ import { createHash } from "node:crypto";
  * `O(reporter × operation)` when Allure adds `allure-results` /
  * `allure-report` / `allure-exports` identities in Phase 1.2.
  *
- * `playwright-html` (Phase 1.7 でのプレースホルダ。実 emission はまだ無い)
- * は Phase 1.2 で `allure-report` (Allure HTML) と並ぶことを見越して、
- * reporter prefix 付きの identity 名規則に統一済み。
+ * Note on `playwright-html`: added now as the canonical identity for
+ * Playwright HTML reporter output, but Phase 1.7 has zero emit sites for
+ * it. The rename `html-report` → `playwright-html` is locked in here
+ * (rather than during Phase 1.2) so that the Allure addition
+ * (`allure-report`) becomes a mechanically-additive change rather than a
+ * synchronized rename + addition in a single Phase 1.2 PR. The identity-
+ * name regularity (`<reporter>-<format>`) is the load-bearing convention.
  */
 export type ArtifactKind =
   | "playwright-json"

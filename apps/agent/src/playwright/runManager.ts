@@ -654,6 +654,15 @@ async function redactPlaywrightResultsSafely({
       const unlinkCode = errorCode(unlinkError);
       // 削除失敗も "redaction" operation のクリーンアップ失敗 (raw artifact が
       // 残るリスク) として扱う。identity は同じ playwright-json。
+      //
+      // Issue #31 注記: 上の redact-throw とこの unlink-throw は
+      // `{ artifactKind, op }` の 2 軸が同一なので、log-aggregator query で
+      // 区別したい場合は `code` (redact 側は redactPlaywrightResults の例外、
+      // 多くは EACCES/EROFS など。unlink 側は ENOENT/EBUSY など) と
+      // log message ("playwright-results redaction failed" vs
+      // "failed to remove raw playwright-results artifact after redaction
+      // failure") を併用する。`artifactKind` + `op` だけでは唯一識別できない
+      // 設計を意図しており、運用 query 側で discriminator を組む必要がある。
       logger?.error(
         {
           runId,
