@@ -1,7 +1,7 @@
 // Developer View 中央カラム: ソース / 差分 / ターミナル の 3 タブ placeholder。
 //
 // Phase 1.2 で接続する際の置換:
-//  - source タブ: Monaco Editor (PLAN.v2 §17 の design system 一覧で予定済) で実 spec を読み込み
+//  - source タブ: Monaco Editor (PLAN.v2 §7 Technology Stack に採用予定) で実 spec を読み込み
 //  - diff タブ: simple-git の diff stream → diff renderer
 //  - terminal タブ: xterm.js + WebSocket `run.stdout/stderr` ストリーム
 // 本 placeholder は静的 HTML で構造のみ pin し、上記置換時の差分を最小化する。
@@ -14,17 +14,19 @@ import { cn } from "@/lib/utils";
 import {
   DEVELOPER_VIEW_LABELS,
   PHASE_1_2_PLACEHOLDER_LABEL,
-  SAMPLE_DIFF,
-  SAMPLE_SOURCE,
-  SAMPLE_TERMINAL,
   type SourceLine
-} from "./sample-data";
+} from "./types";
 
 interface SourceTabsCardProps {
-  source?: ReadonlyArray<SourceLine>;
-  diff?: ReadonlyArray<SourceLine>;
+  /**
+   * INVARIANT (Phase 1.2 移行時):
+   *  - loading / error / empty は呼び出し側で分岐し、Card には「描画する内容」のみ渡す。
+   *  - 空配列で "障害" と "本当に空" を区別できなくなる silent failure を避ける。
+   */
+  source: ReadonlyArray<SourceLine>;
+  diff: ReadonlyArray<SourceLine>;
   /** ターミナル出力 (1 行 = 1 配列要素) */
-  terminal?: ReadonlyArray<string>;
+  terminal: ReadonlyArray<string>;
 }
 
 const TAB_VALUES = {
@@ -33,23 +35,25 @@ const TAB_VALUES = {
   terminal: "terminal"
 } as const;
 
-function renderLine(line: SourceLine, index: number): React.ReactElement {
-  const stateClass =
-    line.state === "fail"
-      ? "bg-[var(--fail-soft)] text-[var(--fail)]"
-      : line.state === "added"
-        ? "bg-[var(--pass-soft)] text-[var(--pass)]"
-        : line.state === "removed"
-          ? "bg-[var(--fail-soft)] text-[var(--fail)] line-through"
-          : "text-[var(--ink-1)]";
+// state ごとの class を Record で 1 箇所にまとめ、ネスト三項を排除する (SLAP)。
+const LINE_STATE_CLASS: Record<NonNullable<SourceLine["state"]> | "default", string> = {
+  fail: "bg-[var(--fail-soft)] text-[var(--fail)]",
+  added: "bg-[var(--pass-soft)] text-[var(--pass)]",
+  removed: "bg-[var(--fail-soft)] text-[var(--fail)] line-through",
+  default: "text-[var(--ink-1)]"
+};
 
+function renderLine(line: SourceLine, index: number): React.ReactElement {
+  const stateKey = line.state ?? "default";
   return (
     <div
-      // 行番号 + index で組成: 同一行番号 ('-' / '+') が複数出現する diff 用に index をキーに含める
+      // 行番号 + index で組成: SAMPLE_DIFF で `+` / `-` が複数出現する diff 用に index を含める
       key={`${line.lineNo}-${index}`}
+      // 状態を data 属性で expose することで、test は class 文字列に結合せず data-line-state を assert できる
+      data-line-state={stateKey}
       className={cn(
         "flex gap-3 rounded-sm px-2 py-0.5 font-mono text-xs",
-        stateClass
+        LINE_STATE_CLASS[stateKey]
       )}
     >
       <span
@@ -64,9 +68,9 @@ function renderLine(line: SourceLine, index: number): React.ReactElement {
 }
 
 export function SourceTabsCard({
-  source = SAMPLE_SOURCE,
-  diff = SAMPLE_DIFF,
-  terminal = SAMPLE_TERMINAL
+  source,
+  diff,
+  terminal
 }: SourceTabsCardProps): React.ReactElement {
   return (
     <Card data-testid="dev-source-tabs-card">

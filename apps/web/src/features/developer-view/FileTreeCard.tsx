@@ -1,9 +1,9 @@
 // Developer View 左カラム: 関連ファイルツリー (Phase 1.2 で接続予定の placeholder)。
 //
 // Phase 1.2 で実データ接続する際の差分:
-//  - sample-data.ts の `SAMPLE_FILE_TREE` を `useQuery(["dev-view", "file-tree", projectId])` に置換
-//  - Failure detail から派生する spec / Page Object / Fixture を関連ファイルとして列挙
-//  - active item は store の `activeSpecId` などから派生
+//  - props を `useQuery(["dev-view", "file-tree", projectId])` の結果に置換
+//  - active spec / Page Object / Fixture / Config を Phase 1.2 の inventory + run context から導出
+//  - active item は store の active spec id 等から派生
 import * as React from "react";
 import { File as FileIcon } from "lucide-react";
 
@@ -13,18 +13,22 @@ import { cn } from "@/lib/utils";
 import {
   DEVELOPER_VIEW_LABELS,
   PHASE_1_2_PLACEHOLDER_LABEL,
-  SAMPLE_FILE_TREE,
   type FileTreeGroup
-} from "./sample-data";
+} from "./types";
 
 interface FileTreeCardProps {
-  /** Phase 1.2 でクエリ結果を渡せるよう Props で差し替え可能にしておく (default は sample) */
-  groups?: ReadonlyArray<FileTreeGroup>;
+  /**
+   * 関連ファイルツリーのグループ群。
+   *
+   * INVARIANT (Phase 1.2 移行時):
+   *  - loading / error / empty は呼び出し側 (route component) で分岐し、
+   *    このコンポーネントには「描画する実データ (or placeholder fixture)」のみを渡すこと。
+   *  - 空配列を許容すると "API 障害" と "本当にゼロ件" の区別がつかなくなる (silent failure)。
+   */
+  groups: ReadonlyArray<FileTreeGroup>;
 }
 
-export function FileTreeCard({
-  groups = SAMPLE_FILE_TREE
-}: FileTreeCardProps): React.ReactElement {
+export function FileTreeCard({ groups }: FileTreeCardProps): React.ReactElement {
   const total = groups.reduce((acc, g) => acc + g.items.length, 0);
 
   return (
@@ -49,7 +53,9 @@ export function FileTreeCard({
                 {group.items.map((item) => (
                   <li
                     key={item.name}
-                    aria-current={item.current ? "true" : undefined}
+                    // ファイルツリー内の現在地を示すため WAI-ARIA 1.2 の "location" を採用。
+                    // 値非依存の test (`[aria-current]` selector) でも検出可能。
+                    aria-current={item.current ? "location" : undefined}
                     className={cn(
                       "flex items-center gap-2 rounded-md px-2 py-1 text-sm",
                       item.current
