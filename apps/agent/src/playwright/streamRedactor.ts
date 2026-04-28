@@ -1,5 +1,10 @@
 import { type RedactionResult } from "../commands/redact.js";
-import { errorCode, type RunManagerLogger, type StreamRedactor } from "./runTypes.js";
+import {
+  type ArtifactKind,
+  errorCode,
+  type RunManagerLogger,
+  type StreamRedactor
+} from "./runTypes.js";
 
 export { type StreamRedactor };
 
@@ -45,7 +50,7 @@ export function createStreamRedactor({
         {
           runId,
           stream,
-          artifactKind: "stream-redaction",
+          artifactKind: "stream-redaction" satisfies ArtifactKind,
           code,
           errorName: error instanceof Error ? error.name : typeof error
         },
@@ -82,7 +87,7 @@ export function createStreamRedactor({
             {
               runId,
               stream,
-              artifactKind: "stream-redaction",
+              artifactKind: "stream-redaction" satisfies ArtifactKind,
               chunks: success.chunks,
               replacements: success.replacements
             },

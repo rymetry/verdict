@@ -1,0 +1,107 @@
+import { createHash } from "node:crypto";
+
+/**
+ * Structured-log helpers shared across agent modules. Centralized here (not in
+ * `playwright/runTypes.ts`) so non-playwright modules — `server.ts`,
+ * `routes/runs.ts` — depend on a generic `lib/` utility instead of reaching
+ * into a feature-namespaced module.
+ *
+ * Path-redaction policy (Issue #27):
+ * - `errorCode(error)` exposes the stable code surface (`"ENOENT"`,
+ *   `"AUDIT_PERSIST_FAILED"`, `"UNKNOWN"`, ...) for both pino payloads and
+ *   user-visible run-warning strings (`code=...`).
+ * - `errorLogFields(error)` is **fail-closed**: drops `error.message` so
+ *   ErrnoException paths (`ENOENT: open '/Users/...'`) and domain-error
+ *   messages (`CommandPolicyError: cwd /Users/... escapes the project boundary`)
+ *   cannot leak into structured logs. Always emits `errorName` for
+ *   class-level triage. Callers opt in to `{ keepMessage: true }` only when
+ *   the error message is known to be path-free.
+ * - `projectIdHash(projectId)` collapses the path-bearing project identifier
+ *   to a non-reversible 8-character correlation token.
+ */
+
+/**
+ * Closed string union for structured-log artifact identification. Logger call
+ * sites use `artifactKind: "..." satisfies ArtifactKind` instead of including
+ * absolute filesystem paths, so log aggregators / bug reports / support
+ * snippets cannot leak `/Users/<username>/...` or internal directory layout
+ * (Issue #27). Run-scoped paths can always be reconstructed from `runId` via
+ * `runPathsFor()`; project-scoped paths surface through the dedicated
+ * `Initial project loaded` startup log.
+ */
+export type ArtifactKind =
+  | "playwright-json"
+  | "playwright-json-redaction"
+  | "playwright-json-summary"
+  | "stdout-log"
+  | "stderr-log"
+  | "metadata"
+  | "html-report"
+  | "stream-redaction"
+  | "runs-directory"
+  | "audit-log";
+
+/**
+ * Extracts a string error code from an unknown thrown value. Returns
+ * `"UNKNOWN"` for non-Error values or Errors without a `code` property. The
+ * fallback string is significant: it appears in user-visible warning messages
+ * (e.g. `code=UNKNOWN`), so callers can rely on getting a non-empty string.
+ */
+export function errorCode(error: unknown): string {
+  if (error instanceof Error && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return "UNKNOWN";
+}
+
+/**
+ * Returns a structured-log payload fragment summarizing an unknown thrown
+ * value. **Fail-closed by default**: drops `error.message` so absolute
+ * filesystem paths embedded in ErrnoException-style messages
+ * (`ENOENT: open '/Users/...'`) and in domain error messages (e.g.
+ * `CommandPolicyError: cwd /Users/... escapes the project boundary`) cannot
+ * leak into structured logs.
+ *
+ * Always includes `errorName` (class-level signal: `"Error"`,
+ * `"AuditPersistenceError"`, `"TypeError"`) so operators can still
+ * differentiate error classes for triage without seeing message contents.
+ *
+ * Pass `{ keepMessage: true }` only when the call site is **certain** the
+ * error message is path-free (e.g. validation library failures with stable
+ * messages). Defaulting to drop is the security boundary; `keepMessage` is
+ * the opt-in escape hatch.
+ */
+export function errorLogFields(
+  error: unknown,
+  opts: { keepMessage?: boolean } = {}
+): { code: string; errorName: string; err?: string; causeCode?: string } {
+  const code = errorCode(error);
+  const errorName = error instanceof Error ? error.name : typeof error;
+  // Wrapped errors (e.g. `AuditPersistenceError(cause: ENOENT)`) are common
+  // for domain-level rethrow patterns. Surfacing `causeCode` keeps the inner
+  // error class identifiable for triage even though the wrapper hides the
+  // path-bearing message.
+  const cause = error instanceof Error ? (error as Error & { cause?: unknown }).cause : undefined;
+  const causeCode = cause instanceof Error ? errorCode(cause) : undefined;
+  const causeFields = causeCode && causeCode !== "UNKNOWN" ? { causeCode } : {};
+  if (!opts.keepMessage) {
+    return { code, errorName, ...causeFields };
+  }
+  if (error instanceof Error) {
+    return { code, errorName, err: error.message, ...causeFields };
+  }
+  return { code, errorName, err: String(error), ...causeFields };
+}
+
+/**
+ * Stable, non-reversible 8-character correlation token for project-scoped
+ * structured logs. `ProjectSummary.id` is currently set to the project's
+ * realpath (`apps/agent/src/project/scanner.ts:174`), so logging it directly
+ * leaks `/Users/<name>/...`. Hashing strikes the balance: operators can group
+ * logs from the same project without seeing the path. Reversal would require
+ * brute-forcing the SHA-256 prefix over a corpus of plausible project
+ * locations, which is impractical in operational triage.
+ */
+export function projectIdHash(projectId: string): string {
+  return createHash("sha256").update(projectId).digest("hex").slice(0, 8);
+}

@@ -372,26 +372,31 @@ describe("RunManager", () => {
       expect.objectContaining({
         runId: handle.runId,
         stream: "stdout",
-        artifactKind: "log",
-        code: "ENOSPC",
-        err: "disk full at /private/stdout.log"
+        artifactKind: "stdout-log",
+        code: "ENOSPC"
       }),
       expect.objectContaining({
         runId: handle.runId,
         stream: "stdout",
-        artifactKind: "log",
-        code: "EACCES",
-        err: "disk full at /private/stdout.log"
+        artifactKind: "stdout-log",
+        code: "EACCES"
       }),
       expect.objectContaining({
         runId: handle.runId,
         stream: "stderr",
-        artifactKind: "log",
-        code: "EBADF",
-        err: "bad fd at /private/stderr.log"
+        artifactKind: "stderr-log",
+        code: "EBADF"
       })
     ]));
     expect(errors).toHaveLength(3);
+    // Issue #27: ErrnoException messages embed the failing path; structured
+    // logs must rely on `code` alone so absolute paths do not leak.
+    const errorsAsJson = JSON.stringify(errors);
+    expect(errorsAsJson).not.toContain("/private/stdout.log");
+    expect(errorsAsJson).not.toContain("/private/stderr.log");
+    for (const entry of errors) {
+      expect(entry).not.toHaveProperty("err");
+    }
   });
 
   it("does not let stream publish validation failures escape runner callbacks", async () => {
@@ -470,14 +475,24 @@ describe("RunManager", () => {
       expect.objectContaining({
         runId: handle.runId,
         eventType: "run.stdout",
-        code: "PAYLOAD_VALIDATION_FAILED"
+        code: "PAYLOAD_VALIDATION_FAILED",
+        // Bus errors are Zod-validated, path-free; publishEventSafely opts in
+        // to keepMessage:true so the validation diagnostic is preserved.
+        err: "invalid run.stdout payload"
       }),
       expect.objectContaining({
         runId: handle.runId,
         eventType: "run.stderr",
-        code: "PAYLOAD_VALIDATION_FAILED"
+        code: "PAYLOAD_VALIDATION_FAILED",
+        err: "invalid run.stderr payload"
       })
     ]));
+    // Issue #27: even on the keepMessage opt-in path, no absolute filesystem
+    // path should appear (defense-in-depth: confirm the opt-in is restricted
+    // to truly path-free message sources).
+    const errorsAsJson = JSON.stringify(errors);
+    expect(errorsAsJson).not.toContain(workdir);
+    expect(errorsAsJson).not.toMatch(/\/Users\/[A-Za-z0-9_-]+\//);
   });
 
   it("replaces chunks when stream redaction fails and surfaces a sanitized warning", async () => {
@@ -1131,18 +1146,30 @@ process.exit(1);
       expect.arrayContaining([
         expect.objectContaining({
           runId: handle.runId,
-          err: "redaction disk write failed",
           code: "UNKNOWN",
-          playwrightJsonPath: completed.paths.playwrightJson
+          errorName: "Error",
+          artifactKind: "playwright-json"
         }),
         expect.objectContaining({
           runId: handle.runId,
           provider: "playwright-json",
           artifactKind: "playwright-json-summary",
-          code: "ENOENT"
+          code: "ENOENT",
+          errorName: "Error"
         })
       ])
     );
+    // Issue #27: structured-log payload must not leak absolute filesystem
+    // paths. `runId` + `artifactKind` is sufficient for log correlation;
+    // run-scoped paths can be reconstructed via `runPathsFor()`. `err`
+    // (the message) is dropped by fail-closed default in `errorLogFields`.
+    const errorsAsJson = JSON.stringify(errors);
+    expect(errorsAsJson).not.toContain(completed.paths.playwrightJson);
+    expect(errorsAsJson).not.toContain(workdir);
+    for (const entry of errors) {
+      expect(entry).not.toHaveProperty("playwrightJsonPath");
+      expect(entry).not.toHaveProperty("err");
+    }
   });
 
   it("does not claim raw Playwright JSON was removed when cleanup fails", async () => {
