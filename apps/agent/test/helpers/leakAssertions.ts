@@ -11,12 +11,20 @@ import { expect } from "vitest";
  *
  * Default `forbiddenKeys` is `["err"]` — the field that `errorLogFields()`
  * drops by fail-closed default (`apps/agent/src/lib/structuredLog.ts`). Pass
- * an explicit array to **replace** (not extend) the default; this keeps the
- * call site self-documenting about what is enforced.
+ * an explicit array to **replace** (not extend) the default. Replace
+ * semantics is load-bearing, not stylistic: callers like
+ * `runManager.test.ts` `forbiddenKeys: ["err", "playwrightJsonPath"]`
+ * intentionally re-state `"err"` alongside the route-specific key. An
+ * extending API would let a caller write `forbiddenKeys: ["playwrightJsonPath"]`
+ * and silently lose the `err` enforcement — replacing forces the caller to
+ * type out the full list, which makes drift visible in code review.
  *
- * Scope: applies to the `for-of` collection-wide check pattern. Single-entry
- * `errors.find(...).not.toHaveProperty("err")` cases stay inline because
- * extracting them would require a different shape and reduce readability.
+ * When to use this helper: asserting over an entire payload **collection**
+ * (the `for-of` pattern) — call sites at `runManager.test.ts:395, 1162`.
+ * For a single-entry assertion where a `find(...)` predicate already
+ * pinpoints one record (e.g. `server.test.ts:510, 578, 812`), prefer
+ * inline `expect(entry).not.toHaveProperty(...)` — wrapping a single entry
+ * here would require array-wrapping at the call site and obscure intent.
  */
 export function expectNoPathLeak(
   payloads: ReadonlyArray<Record<string, unknown>>,
