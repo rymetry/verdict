@@ -132,11 +132,13 @@ describe("AllureReportProvider", () => {
     });
   });
 
-  it("treats Allure 'broken' as failed and emits a distinguishing warning", async () => {
+  it("treats Allure 'broken' as failed, surfaces ALLURE_BROKEN_TEST code, and preserves raw status in failedTests", async () => {
     writeAllureResult("uuid-broken", {
       uuid: "uuid-broken",
       name: "fixture setup throws",
       status: "broken",
+      start: 0,
+      stop: 100,
       statusDetails: { message: "before-each hook failed" },
     });
 
@@ -149,9 +151,13 @@ describe("AllureReportProvider", () => {
     expect(result?.summary.failed).toBe(1);
     expect(result?.summary.passed).toBe(0);
     expect(result?.summary.failedTests).toHaveLength(1);
+    // The shared TestResultSummary collapses broken into failed counter,
+    // but failedTests[i].status preserves the raw "broken" string so QMO
+    // View (Phase 5) can `filter(t => t.status === "broken")`.
+    expect(result?.summary.failedTests[0]?.status).toBe("broken");
     expect(result?.warnings).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("Allure broken status"),
+        expect.stringContaining("ALLURE_BROKEN_TEST"),
       ])
     );
   });
@@ -176,16 +182,20 @@ describe("AllureReportProvider", () => {
     expect(result?.summary.failedTests).toEqual([]);
   });
 
-  it("excludes 'unknown' status from counts and warns instead", async () => {
+  it("excludes 'unknown' status from counts and surfaces ALLURE_UNKNOWN_STATUS code", async () => {
     writeAllureResult("uuid-unknown", {
       uuid: "uuid-unknown",
       name: "interrupted before completion",
       status: "unknown",
+      start: 0,
+      stop: 50,
     });
     writeAllureResult("uuid-pass", {
       uuid: "uuid-pass",
       name: "passes",
       status: "passed",
+      start: 0,
+      stop: 100,
     });
 
     const result = await allureReportProvider.readSummary({
@@ -201,7 +211,79 @@ describe("AllureReportProvider", () => {
     expect(result?.summary.total).toBe(1);
     expect(result?.warnings).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("status \"unknown\""),
+        expect.stringContaining("ALLURE_UNKNOWN_STATUS"),
+      ])
+    );
+  });
+
+  it("warns ALLURE_MALFORMED_TIMING when start/stop are missing on a non-skipped test", async () => {
+    writeAllureResult("uuid-no-timing", {
+      uuid: "uuid-no-timing",
+      name: "missing start/stop",
+      status: "passed",
+      // start and stop deliberately omitted
+    });
+
+    const result = await allureReportProvider.readSummary({
+      projectRoot: workdir,
+      runDir: workdir,
+      playwrightJsonPath: path.join(workdir, "ignored.json"),
+    });
+
+    expect(result?.summary.passed).toBe(1);
+    // Total durationMs is undefined because no entry contributes timing
+    expect(result?.summary.durationMs).toBeUndefined();
+    expect(result?.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("ALLURE_MALFORMED_TIMING"),
+      ])
+    );
+  });
+
+  it("does NOT warn malformed timing on legitimately skipped tests", async () => {
+    writeAllureResult("uuid-skip", {
+      uuid: "uuid-skip",
+      name: "intentionally skipped",
+      status: "skipped",
+      // skipped tests legitimately omit timing
+    });
+
+    const result = await allureReportProvider.readSummary({
+      projectRoot: workdir,
+      runDir: workdir,
+      playwrightJsonPath: path.join(workdir, "ignored.json"),
+    });
+
+    expect(result?.summary.skipped).toBe(1);
+    expect(result?.warnings).not.toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("ALLURE_MALFORMED_TIMING"),
+      ])
+    );
+  });
+
+  it("warns ALLURE_MALFORMED_TIMING and coerces to 0 when stop < start", async () => {
+    writeAllureResult("uuid-negative", {
+      uuid: "uuid-negative",
+      name: "negative duration",
+      status: "passed",
+      start: 200,
+      stop: 100,
+    });
+
+    const result = await allureReportProvider.readSummary({
+      projectRoot: workdir,
+      runDir: workdir,
+      playwrightJsonPath: path.join(workdir, "ignored.json"),
+    });
+
+    expect(result?.summary.passed).toBe(1);
+    // Negative coerced to 0 → totalDurationMs is 0 → durationMs becomes undefined
+    expect(result?.summary.durationMs).toBeUndefined();
+    expect(result?.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("ALLURE_MALFORMED_TIMING"),
+        expect.stringContaining("stop < start"),
       ])
     );
   });
@@ -229,13 +311,15 @@ describe("AllureReportProvider", () => {
     );
   });
 
-  it("continues parsing when one file fails schema validation", async () => {
+  it("continues parsing when one file fails schema validation, includes zod issue paths", async () => {
     writeAllureResult("uuid-good", {
       uuid: "uuid-good",
       name: "passes",
       status: "passed",
+      start: 0,
+      stop: 10,
     });
-    // status field missing → zod validation fails
+    // status field missing → zod validation fails on `status` field
     fs.writeFileSync(
       path.join(allureResultsDir, "schema-bad-result.json"),
       JSON.stringify({ uuid: "x", name: "missing status" })
@@ -252,6 +336,8 @@ describe("AllureReportProvider", () => {
       expect.arrayContaining([
         expect.stringContaining("schema-bad-result.json"),
         expect.stringContaining("schema"),
+        // zod issue path should surface the failing field name
+        expect.stringContaining("issues=status"),
       ])
     );
   });
@@ -285,6 +371,8 @@ describe("AllureReportProvider", () => {
       uuid: "uuid-pass",
       name: "passes",
       status: "passed",
+      start: 0,
+      stop: 10,
     });
     // Allure outputs many other files in the same directory
     fs.writeFileSync(

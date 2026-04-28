@@ -17,6 +17,19 @@ import type {
  * label parsing, attachment shape) stay confined to this module — callers
  * see only the normalized contract.
  *
+ * **Status mapping note (PLAN.v2 §27)**: The shared `TestResultSummary`
+ * shape exposes only `passed` / `failed` / `skipped` counters. Allure's
+ * `broken` (test infrastructure failure) is folded into `failed` because
+ * the shared schema does not currently differentiate. The distinction is
+ * not lost: each broken test is preserved in `failedTests[]` with its
+ * original `status: "broken"` string, so QMO View (Phase 5) can
+ * `failedTests.filter(t => t.status === "broken")` to surface
+ * infrastructure failures separately. A more structured solution
+ * (extending `TestResultSummary` with `brokenCount` / `unknownCount`)
+ * is deferred to Phase 5 when QMO View needs are concrete; the warning
+ * codes added here (`ALLURE_BROKEN_TEST`, `ALLURE_UNKNOWN_STATUS`,
+ * `ALLURE_MALFORMED_TIMING`) provide the bridge until then.
+ *
  * Out of scope for T202 (handled by dedicated tasks):
  *   - History trend (`history.json`) → T206
  *   - Quality Gate result → T205
@@ -24,6 +37,21 @@ import type {
  *   - HTML report generation (CLI subprocess) → T204
  *   - Run pipeline integration → T203
  */
+
+/**
+ * Stable warning code prefixes for Allure-specific summary signals.
+ * Embedded in warning text so log aggregators / QMO View can pattern-match
+ * specific conditions without parsing free text. Adding a new code requires
+ * updating callers that branch on warnings.
+ */
+export const ALLURE_WARNING_CODES = {
+  /** Allure status="broken" — test infrastructure failure folded into `failed` count */
+  BROKEN: "ALLURE_BROKEN_TEST",
+  /** Allure status="unknown" — neither pass nor fail; excluded from counters */
+  UNKNOWN: "ALLURE_UNKNOWN_STATUS",
+  /** Result file lacks valid `start`/`stop` or has `stop < start` — duration unreliable */
+  MALFORMED_TIMING: "ALLURE_MALFORMED_TIMING",
+} as const;
 export const allureReportProvider: ReportProvider = {
   name: "allure",
   async readSummary(
@@ -57,10 +85,7 @@ function aggregateAllureResults(
   const failedTests: FailedTest[] = [];
 
   for (const result of results) {
-    const durationMs =
-      typeof result.start === "number" && typeof result.stop === "number"
-        ? Math.max(0, result.stop - result.start)
-        : undefined;
+    const durationMs = computeDuration(result, warnings);
     if (durationMs !== undefined) totalDurationMs += durationMs;
 
     switch (result.status) {
@@ -69,15 +94,18 @@ function aggregateAllureResults(
         break;
       case "failed":
       case "broken":
-        // Allure の `broken` はテスト本体ではなく fixture / setup の異常
-        // を意味するが、Workbench TestResultSummary は単純な pass/fail/
-        // skipped の三値しか持たない。PLAN.v2 §27 QMO View で broken を
-        // 別 surface する判断は Phase 5 以降。本タスクでは failed に集約し、
-        // warning に内訳を残して aggregator query で区別可能にする。
+        // Allure の `broken` はテスト本体ではなく fixture / setup の異常を
+        // 意味する。Workbench TestResultSummary が pass/fail/skipped の三値
+        // しか持たないため failed に集約するが、`failedTests[].status` には
+        // raw な "broken" 文字列が残るので QMO View (Phase 5) で
+        // `filter(t => t.status === "broken")` により再度区別可能。
+        // PLAN.v2 §27 で broken を別 surface する判断は Phase 5 以降。
         failed += 1;
         if (result.status === "broken") {
           warnings.push(
-            `Allure broken status (test infrastructure failure): ${result.name ?? result.uuid}`
+            `${ALLURE_WARNING_CODES.BROKEN}: test infrastructure failure: ${
+              result.name ?? result.uuid
+            }`
           );
         }
         failedTests.push(toFailedTest(result, projectRoot, durationMs));
@@ -88,9 +116,13 @@ function aggregateAllureResults(
       case "unknown":
         // unknown はテスト実行が中断 / report 生成漏れ等を示唆する。pass にも
         // fail にも入れない (count 整合性が崩れるが PLAN.v2 §27 で異常検知
-        // として surface する)。集計から除外し warning に上げる。
+        // として surface する)。集計から除外し structured warning code 付き
+        // で警告。aggregator query で `ALLURE_UNKNOWN_STATUS` を pattern
+        // match できる。
         warnings.push(
-          `Allure result has status "unknown" and will not be counted: ${result.name ?? result.uuid}`
+          `${ALLURE_WARNING_CODES.UNKNOWN}: result has status "unknown" and will not be counted: ${
+            result.name ?? result.uuid
+          }`
         );
         break;
     }
@@ -105,6 +137,43 @@ function aggregateAllureResults(
     durationMs: totalDurationMs > 0 ? totalDurationMs : undefined,
     failedTests,
   };
+}
+
+/**
+ * Computes duration in ms from Allure `start`/`stop` timestamps. Emits a
+ * structured warning when timing is malformed (missing fields for non-
+ * skipped tests, or `stop < start` which would otherwise be silently
+ * coerced to 0). Skipped tests legitimately have no timing, so they do
+ * not trigger the warning.
+ */
+function computeDuration(result: AllureResult, warnings: string[]): number | undefined {
+  const hasStart = typeof result.start === "number";
+  const hasStop = typeof result.stop === "number";
+
+  if (hasStart && hasStop) {
+    const raw = (result.stop as number) - (result.start as number);
+    if (raw < 0) {
+      warnings.push(
+        `${ALLURE_WARNING_CODES.MALFORMED_TIMING}: stop < start in result ${
+          result.name ?? result.uuid
+        }; coercing to 0`
+      );
+      return 0;
+    }
+    return raw;
+  }
+
+  // Missing timing on a non-skipped test is a data-quality signal: a real
+  // test run that produced a result file should have both timestamps.
+  // Skipped tests legitimately omit them.
+  if (result.status !== "skipped") {
+    warnings.push(
+      `${ALLURE_WARNING_CODES.MALFORMED_TIMING}: missing start/stop in result ${
+        result.name ?? result.uuid
+      }`
+    );
+  }
+  return undefined;
 }
 
 function toFailedTest(
