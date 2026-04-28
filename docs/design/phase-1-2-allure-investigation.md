@@ -146,3 +146,57 @@ PoC では「Allure setup required」と表示し、必要 dependencies (`allure
 
 - phase_4_5_failure_count: 0
 - pr_merge_failure_count: 0
+
+---
+
+## 訂正 (2026-04-29 / T201 着手時の実機検証)
+
+T201 で `pnpm install` 後に `allure@3.6.2` の CLI を実機で `--help` 実行した結果、本メモの 2 箇所に誤りがあったため訂正する。原調査は Context7 + 公式 docs ページに基づくが、CLI help が完全には docs に反映されていなかったことに起因する。
+
+### 訂正 1: `allure agent` コマンドは **存在する** (誤: 存在しない)
+
+`allure --help` 出力から確認した実在サブコマンド:
+- `allure agent [flags] ...` — "Run specified command in Allure agent mode"
+- `allure agent latest` — 直近 agent output ディレクトリを表示
+- `allure agent select` — 既存 agent output から testplan を生成 (`testplan.json`)
+- `allure agent state-dir` — agent state ディレクトリのパスを表示
+
+PLAN.v2 §10 / §38 / 本メモの「`allure agent` 不在」記述は **誤り**。ただし、PLAN.v2 §10 の方針 (「`allure agent` コマンドに依存せず、Workbench 側で summary を生成する」) は **依然として有効** — Allure agent は test rerun / testplan 連携に特化した機能で、AI/QMO summary 生成には別経路 (Workbench 側で `allure log` / `allure csv` + raw allure-results 読み込み) を使う方針は変更不要。
+
+### 訂正 2: `allure log` は CLI コマンドで **ある** (誤: plugin-log のみ)
+
+`allure --help` 出力で確認:
+- `allure log [--config] [--cwd] [--group-by] [--all-steps] [--with-trace] <results-dir>` — "Prints Allure Results to the console"
+
+つまり `plugin-log` を `allurerc.mjs` で有効化しなくても、CLI から直接 `allure log ./allure-results` で text 出力を得られる。Phase 1.2 (T207) の AI/QMO summary 生成は、CLI 直接呼び出し or plugin-log 経由の **どちらでも実装可能**。
+
+CLI 直接呼び出しのほうが Workbench 側 CommandRunner の audit log + policy enforcement レイヤと整合するため、**CLI 直接を第一選択** に変更する (本メモ §1 "CLI vs Programmatic API の選択" の延長線で同じ判断)。
+
+### その他確認できた CLI コマンド (T200 に明記なかったもの)
+
+- `allure history [--history-path,-h] [--history-limit] [--report-name,--name] <results-dir>` — history 生成 ("Generates the history to specified folder")。`historyPath` config なしでも CLI で history 出力可能
+- `allure known-issue [--output,-o] <results-dir>` — 既知 issue list 生成
+- `allure open [--config,-c] [--port] [--cwd] [--hide-labels] [results-or-pattern]` — report serve (`allure serve` ではなく `allure open` が正)
+- `allure run [--config] [--rerun] [--silent] ...` — run + report wrapper
+- `allure testplan [--output,-o] <results-dir>` — testplan.json 生成
+- `allure watch <results-dir>` — real-time 監視
+- `allure results pack` / `allure results unpack` — zip archive
+
+### Report 形式 (default の `allure generate` 以外に複数)
+
+`allure --help` "Reports" セクション:
+- `allure allure2` — Allure Classic format
+- `allure awesome` — Allure Awesome (Allure 3 のデフォルト UI)
+- `allure classic` — Classic format (allure2 と別?)
+- `allure csv` — CSV export
+- `allure dashboard` — Dashboard report
+- `allure log` — Console text (上述)
+
+`allure generate` は内部的にこれらのレポーター plugin を呼ぶ汎用ラッパー。Phase 1.2 では `allure generate` (デフォルトで `awesome` plugin が動く) + 必要に応じて `allure csv` / `allure log` の組合せで進める。
+
+### Phase 1.2 着手時の修正点
+
+1. CLI subprocess 呼び出し設計 (T202) では、`allure agent` / `allure log` / `allure history` / `allure known-issue` も allow list に含める判断を再検討
+2. `allurerc.mjs` の `plugins.log` / `plugins.csv` 設定は **必須ではない** (CLI 直接呼び出しで代替可能)。fixture には documentation 価値で残すが、Workbench 側の必須前提から外す
+3. PLAN.v2 §10 / §38 は `allure agent` 不在前提。次回 PLAN 改訂で「存在するが Workbench は別 summary 経路を採用」に文言修正する
+
