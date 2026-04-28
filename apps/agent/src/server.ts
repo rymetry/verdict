@@ -272,8 +272,13 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
 
 async function main(): Promise<void> {
   const env = buildAgentEnv({ argv: process.argv.slice(2) });
+  // Issue #30 項目 D: pino logger は 1 インスタンスに統一する。`buildApp`
+  // 内部の `options.logger ?? createLogger(env.logLevel)` 経路を経由させる
+  // ことで、main() 用の "Local Agent listening" 出力と buildApp 内の
+  // structured-log 出力が同じ pino インスタンス(=同じ pid/level/destination)
+  // を共有する。
   const logger = createLogger(env.logLevel);
-  const { app, injectWebSocket } = buildApp({ env });
+  const { app, injectWebSocket } = buildApp({ env, logger });
   const server = serve(
     { fetch: app.fetch, port: env.port, hostname: env.host },
     (info) => {

@@ -22,7 +22,8 @@ import {
 import { deriveOutcome } from "./runOutcome.js";
 import { playwrightJsonReportProvider } from "../reporting/PlaywrightJsonReportProvider.js";
 import type { ReportProvider } from "../reporting/ReportProvider.js";
-import { type ArtifactKind, errorCode, errorLogFields, type RunManagerLogger } from "./runTypes.js";
+import { type ArtifactKind, errorCode, errorLogFields } from "../lib/structuredLog.js";
+import type { RunManagerLogger } from "./runTypes.js";
 import { createStreamRedactor } from "./streamRedactor.js";
 
 export type { RunManagerLogger } from "./runTypes.js";

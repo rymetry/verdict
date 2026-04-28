@@ -1,10 +1,6 @@
 import { type RedactionResult } from "../commands/redact.js";
-import {
-  type ArtifactKind,
-  errorCode,
-  type RunManagerLogger,
-  type StreamRedactor
-} from "./runTypes.js";
+import { type ArtifactKind, errorCode } from "../lib/structuredLog.js";
+import { type RunManagerLogger, type StreamRedactor } from "./runTypes.js";
 
 export { type StreamRedactor };
 

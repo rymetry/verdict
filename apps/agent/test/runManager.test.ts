@@ -15,6 +15,7 @@ import {
   type WorkbenchEvent,
   type WorkbenchEventInput
 } from "@pwqa/shared";
+import { expectNoPathLeak } from "./helpers/leakAssertions.js";
 
 let workdir: string;
 
@@ -391,12 +392,7 @@ describe("RunManager", () => {
     expect(errors).toHaveLength(3);
     // Issue #27: ErrnoException messages embed the failing path; structured
     // logs must rely on `code` alone so absolute paths do not leak.
-    const errorsAsJson = JSON.stringify(errors);
-    expect(errorsAsJson).not.toContain("/private/stdout.log");
-    expect(errorsAsJson).not.toContain("/private/stderr.log");
-    for (const entry of errors) {
-      expect(entry).not.toHaveProperty("err");
-    }
+    expectNoPathLeak(errors, ["/private/stdout.log", "/private/stderr.log"]);
   });
 
   it("does not let stream publish validation failures escape runner callbacks", async () => {
@@ -1163,13 +1159,9 @@ process.exit(1);
     // paths. `runId` + `artifactKind` is sufficient for log correlation;
     // run-scoped paths can be reconstructed via `runPathsFor()`. `err`
     // (the message) is dropped by fail-closed default in `errorLogFields`.
-    const errorsAsJson = JSON.stringify(errors);
-    expect(errorsAsJson).not.toContain(completed.paths.playwrightJson);
-    expect(errorsAsJson).not.toContain(workdir);
-    for (const entry of errors) {
-      expect(entry).not.toHaveProperty("playwrightJsonPath");
-      expect(entry).not.toHaveProperty("err");
-    }
+    expectNoPathLeak(errors, [completed.paths.playwrightJson, workdir], {
+      forbiddenKeys: ["err", "playwrightJsonPath"]
+    });
   });
 
   it("does not claim raw Playwright JSON was removed when cleanup fails", async () => {
