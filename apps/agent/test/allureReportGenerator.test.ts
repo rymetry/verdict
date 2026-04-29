@@ -237,6 +237,57 @@ describe("generateAllureReport", () => {
     );
   });
 
+  it("appends --history-path to argv when historyPath is provided (T206)", async () => {
+    const { allureResultsDest, allureReportDir } = setupAllureBinary();
+    const { runner, spawned } = fakeRunner({
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 5
+    });
+
+    await generateAllureReport({
+      runner,
+      projectRoot: workdir,
+      allureResultsDest,
+      allureReportDir,
+      historyPath: path.join(workdir, ".playwright-workbench/reports/allure-history.jsonl")
+    });
+
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]!.spec.args).toEqual([
+      "generate",
+      ".playwright-workbench/runs/r1/allure-results",
+      "-o",
+      ".playwright-workbench/runs/r1/allure-report",
+      "--clean",
+      "--history-path",
+      ".playwright-workbench/reports/allure-history.jsonl"
+    ]);
+  });
+
+  it("omits --history-path when historyPath is undefined (back-compat)", async () => {
+    const { allureResultsDest, allureReportDir } = setupAllureBinary();
+    const { runner, spawned } = fakeRunner({
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 5
+    });
+
+    await generateAllureReport({
+      runner,
+      projectRoot: workdir,
+      allureResultsDest,
+      allureReportDir
+      // historyPath intentionally omitted
+    });
+
+    expect(spawned[0]!.spec.args).not.toContain("--history-path");
+  });
+
   it.each([
     ["EACCES"],
     ["EMFILE"],

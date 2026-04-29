@@ -530,6 +530,9 @@ export function createRunManager({
           allureResultsDir: params.allureResultsDir,
           allureResultsDest: paths.allureResultsDest,
           allureReportDir: paths.allureReportDir,
+          // T206: project-scoped history JSONL — Allure CLI accumulates
+          // cross-run trend data here on each generate invocation.
+          historyPath: workbenchPaths(params.projectRoot).allureHistoryPath,
           runId,
           allureRunner,
           logger
@@ -888,6 +891,7 @@ async function runReportGenerationStep({
   allureResultsDir,
   allureResultsDest,
   allureReportDir,
+  historyPath,
   runId,
   allureRunner,
   logger
@@ -896,6 +900,7 @@ async function runReportGenerationStep({
   allureResultsDir: string | undefined;
   allureResultsDest: string;
   allureReportDir: string;
+  historyPath: string;
   runId: string;
   allureRunner: CommandRunner | undefined;
   logger?: RunManagerLogger;
@@ -936,7 +941,8 @@ async function runReportGenerationStep({
     runner: allureRunner,
     projectRoot,
     allureResultsDest,
-    allureReportDir
+    allureReportDir,
+    historyPath
   });
   if (outcome.ok) {
     logger?.info?.(

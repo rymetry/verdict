@@ -513,3 +513,106 @@ describe("validateAllureGenerateArgs backward-compat alias", () => {
     expect(validateAllureGenerateArgs).toBe(validateAllureArgs);
   });
 });
+
+/* ---------------------------------------------------------------- */
+/* T206: --history-path flag (Allure history JSONL)                 */
+/* ---------------------------------------------------------------- */
+
+function validateAllureGen(
+  executableName: string,
+  args: ReadonlyArray<string>
+): CommandArgsValidationResult {
+  return validateAllureArgs({ executableName, args });
+}
+
+describe("Allure generate --history-path support (T206)", () => {
+  it("accepts --history-path with a project-relative path", () => {
+    const result = validateAllureGen("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--clean",
+      "--history-path",
+      ".playwright-workbench/reports/allure-history.jsonl"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts the short -h synonym", () => {
+    const result = validateAllureGen("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "-h",
+      ".playwright-workbench/reports/allure-history.jsonl"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects --history-path with absolute path", () => {
+    const result = validateAllureGen("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--history-path",
+      "/etc/history.jsonl"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("absolute-path");
+    }
+  });
+
+  it("rejects duplicate --history-path (same form)", () => {
+    const result = validateAllureGen("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--history-path",
+      "a.jsonl",
+      "--history-path",
+      "b.jsonl"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("duplicate-flag");
+    }
+  });
+
+  it("rejects mixed-form -h / --history-path duplicates (synonym collision)", () => {
+    // `canonicalAllureFlag` collapses `-h` to `--history-path` for the
+    // duplicate-detection set so mixed-form usage is caught.
+    const result = validateAllureGen("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "-h",
+      "a.jsonl",
+      "--history-path",
+      "b.jsonl"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("duplicate-flag");
+    }
+  });
+
+  it("requires a value for --history-path", () => {
+    const result = validateAllureGen("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--history-path"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("missing-flag-value");
+    }
+  });
+});
