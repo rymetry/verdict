@@ -12,7 +12,17 @@ export type CommandArgsValidationCode =
   | "decode-depth-exceeded"
   | "absolute-path"
   | "path-traversal"
-  | "flag-like-operand";
+  | "flag-like-operand"
+  // T204-2: Allure generate-specific codes. Each one is a distinct
+  // operator-actionable misconfiguration so log aggregators can
+  // pattern-match without parsing free text.
+  | "missing-subcommand"
+  | "disallowed-subcommand"
+  | "duplicate-output-flag"
+  | "duplicate-flag"
+  | "extra-positional"
+  | "missing-results-dir"
+  | "missing-output-flag";
 
 export type CommandArgsValidationResult =
   | { ok: true }
@@ -269,6 +279,191 @@ export function createDefaultCommandPolicy(cwdBoundary: string): CommandPolicy {
   return {
     allowedExecutables: DEFAULT_ALLOWED_EXECUTABLES,
     argValidator: validatePhase1PlaywrightArgs,
+    cwdBoundary: fs.realpathSync(cwdBoundary),
+    envAllowlist: DEFAULT_ENV_ALLOWLIST
+  };
+}
+
+/* ----------------------------------------------------------------- */
+/* T204-2: Allure CLI argument validation policy                     */
+/* ----------------------------------------------------------------- */
+
+/**
+ * Allowed Allure subcommands for Phase 1.2. The validator pins these
+ * exactly — adding more (`open`, `quality-gate`, `csv`, `log`) needs an
+ * explicit policy update plus dedicated tests so each new attack
+ * surface is reviewed deliberately. T205 (Quality Gate) and T207
+ * (CSV/log) extend this set when their producers land.
+ */
+const ALLOWED_ALLURE_SUBCOMMANDS = new Set(["generate"]);
+
+/**
+ * Allure flags that take a value in the next argv slot. Validated
+ * separately from positional operands so a typo like `--output` without
+ * a value cannot silently be treated as an operand.
+ */
+const ALLURE_GENERATE_VALUE_FLAGS = new Set(["-o", "--output", "--config", "--report-name"]);
+
+/**
+ * Allure flags that stand alone (boolean / behavioral toggles).
+ */
+const ALLURE_GENERATE_STANDALONE_FLAGS = new Set(["--clean"]);
+
+/**
+ * Args validator for `allure generate ...`. Phase 1.2 / T204-2.
+ *
+ * Workbench builds the entire arg vector itself (no user input flows in),
+ * so this validator is conservative — it accepts only the precise shape
+ * Workbench will emit, and rejects anything else as a defense-in-depth
+ * safeguard against future code changes that accidentally widen the
+ * surface.
+ *
+ * Accepted shape (any order, after subcommand):
+ *   `generate <results-dir> -o <report-dir> --clean`
+ *   `generate <results-dir> --output <report-dir> --clean`
+ *
+ * - subcommand must be `generate`
+ * - exactly one positional results-dir (project-relative, no traversal)
+ * - exactly one `-o <dir>` / `--output <dir>` (project-relative)
+ * - any number of standalone flags from ALLURE_GENERATE_STANDALONE_FLAGS
+ * - other value flags (`--config`, `--report-name`) are accepted but the
+ *   value must be project-relative path-safe (config) or a stable token
+ *   that's not a flag-like
+ *
+ * Anything else (other subcommands, unknown flags, multiple positionals,
+ * absolute paths, traversal, NUL bytes, oversized args) is rejected.
+ */
+export function validateAllureGenerateArgs({
+  executableName,
+  args
+}: {
+  executableName: string;
+  args: ReadonlyArray<string>;
+}): CommandArgsValidationResult {
+  if (executableName !== "allure") {
+    return argsInvalid(
+      "unsupported-executable",
+      `Executable '${executableName}' is not supported by the Allure-generate policy.`
+    );
+  }
+
+  // Reject empty, NUL, oversized at the per-arg level first.
+  for (const arg of args) {
+    const valueError = validateArgValue(arg);
+    if (!valueError.ok) return valueError;
+  }
+
+  // First positional must be the subcommand `generate`.
+  if (args.length === 0) {
+    return argsInvalid("missing-subcommand", "Allure command must specify a subcommand.");
+  }
+  const subcommand = args[0]!;
+  if (!ALLOWED_ALLURE_SUBCOMMANDS.has(subcommand)) {
+    return argsInvalid(
+      "disallowed-subcommand",
+      `Allure subcommand '${subcommand}' is not allowed by the Phase 1.2 policy.`
+    );
+  }
+
+  let positionalCount = 0;
+  let outputSeen = false;
+  // Track other value flags so duplicates fail closed. Each non-output
+  // value flag is allowed AT MOST once — duplicates would either confuse
+  // the Allure CLI (`--config` whose precedence is implementation-defined)
+  // or signal a programmer error in the argv builder. Defense-in-depth
+  // per the validator's "Workbench-only argv" doctrine.
+  const seenNonOutputValueFlags = new Set<string>();
+  let index = 1;
+  while (index < args.length) {
+    const arg = args[index]!;
+    if (ALLURE_GENERATE_STANDALONE_FLAGS.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (ALLURE_GENERATE_VALUE_FLAGS.has(arg)) {
+      const value = args[index + 1];
+      if (value === undefined || isFlagValue(value)) {
+        return argsInvalid("missing-flag-value", `${arg} must be followed by a non-flag value.`);
+      }
+      // -o / --output / --config: must look like a project-relative path.
+      // --report-name: any non-flag string is acceptable (but still
+      // path-redacted at the arg-value level).
+      if (arg === "-o" || arg === "--output" || arg === "--config") {
+        const operandResult = validateProjectRelativeOperand(value);
+        if (!operandResult.ok) return operandResult;
+      }
+      if (arg === "-o" || arg === "--output") {
+        // Both forms are synonyms — duplicate detection covers same-flag
+        // (`-o ... -o ...`) AND mixed-synonym (`-o ... --output ...`).
+        if (outputSeen) {
+          return argsInvalid(
+            "duplicate-output-flag",
+            "Allure generate must be invoked with a single output flag."
+          );
+        }
+        outputSeen = true;
+      } else {
+        // Other value flags: pin to single occurrence to keep argv shape
+        // deterministic. Allure CLI's behavior with duplicate --config /
+        // --report-name is implementation-defined, which violates the
+        // "validator accepts only the precise Workbench shape" doctrine.
+        if (seenNonOutputValueFlags.has(arg)) {
+          return argsInvalid(
+            "duplicate-flag",
+            `Flag '${arg}' must not appear more than once for the Allure-generate policy.`
+          );
+        }
+        seenNonOutputValueFlags.add(arg);
+      }
+      index += 2;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      return argsInvalid(
+        "disallowed-flag",
+        `Flag '${arg}' is not allowed by the Allure-generate policy.`
+      );
+    }
+    // Positional operand: the results-dir to read from.
+    const operandResult = validateProjectRelativeOperand(arg);
+    if (!operandResult.ok) return operandResult;
+    positionalCount += 1;
+    if (positionalCount > 1) {
+      return argsInvalid(
+        "extra-positional",
+        "Allure generate accepts only one positional results-dir argument."
+      );
+    }
+    index += 1;
+  }
+
+  if (positionalCount !== 1) {
+    return argsInvalid(
+      "missing-results-dir",
+      "Allure generate must specify a positional results-dir argument."
+    );
+  }
+  if (!outputSeen) {
+    return argsInvalid(
+      "missing-output-flag",
+      "Allure generate must specify an explicit output directory via -o or --output."
+    );
+  }
+
+  return argsValid;
+}
+
+/**
+ * Allure-specific CommandPolicy factory. T204-2.
+ * Used by T204-3 when RunManager invokes the Allure CLI subprocess for
+ * HTML report generation. Distinct from `createDefaultCommandPolicy`
+ * (Playwright policy) because the args validator surface is entirely
+ * different.
+ */
+export function createAllureCommandPolicy(cwdBoundary: string): CommandPolicy {
+  return {
+    allowedExecutables: ["allure"],
+    argValidator: validateAllureGenerateArgs,
     cwdBoundary: fs.realpathSync(cwdBoundary),
     envAllowlist: DEFAULT_ENV_ALLOWLIST
   };

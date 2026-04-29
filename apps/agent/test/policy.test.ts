@@ -3,7 +3,9 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   type CommandArgsValidationResult,
+  createAllureCommandPolicy,
   createDefaultCommandPolicy,
+  validateAllureGenerateArgs,
   validatePhase1PlaywrightArgs
 } from "../src/commands/policy.js";
 import { CommandPolicyError, createNodeCommandRunner } from "../src/commands/runner.js";
@@ -92,5 +94,280 @@ describe("default Phase 1 command policy", () => {
         cwd: cwdBoundary
       })
     ).toThrow(CommandPolicyError);
+  });
+});
+
+/* ----------------------------------------------------------------- */
+/* T204-2: Allure generate command policy                            */
+/* ----------------------------------------------------------------- */
+
+function validateAllure(
+  executableName: string,
+  args: ReadonlyArray<string>
+): CommandArgsValidationResult {
+  return validateAllureGenerateArgs({ executableName, args });
+}
+
+describe("Allure generate command policy (T204-2)", () => {
+  it("accepts the canonical generate invocation", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      ".playwright-workbench/runs/r1/allure-results",
+      "-o",
+      ".playwright-workbench/runs/r1/allure-report",
+      "--clean"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts --output as a long-form synonym", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results",
+      "--output",
+      "report"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects when subcommand is missing", () => {
+    const result = validateAllure("allure", []);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("missing-subcommand");
+    }
+  });
+
+  it("rejects subcommands other than 'generate' (defense-in-depth)", () => {
+    const result = validateAllure("allure", ["open", "results"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("disallowed-subcommand");
+    }
+  });
+
+  it("rejects unsupported executables", () => {
+    const result = validateAllure("npx", ["generate", "results", "-o", "report"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("unsupported-executable");
+    }
+  });
+
+  it("requires the explicit output flag", () => {
+    const result = validateAllure("allure", ["generate", "results"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("missing-output-flag");
+    }
+  });
+
+  it("requires exactly one positional results-dir", () => {
+    const noPositional = validateAllure("allure", ["generate", "-o", "report"]);
+    expect(noPositional.ok).toBe(false);
+    if (!noPositional.ok) {
+      expect(noPositional.code).toBe("missing-results-dir");
+    }
+    const twoPositionals = validateAllure("allure", ["generate", "a", "b", "-o", "report"]);
+    expect(twoPositionals.ok).toBe(false);
+    if (!twoPositionals.ok) {
+      expect(twoPositionals.code).toBe("extra-positional");
+    }
+  });
+
+  it("rejects absolute paths in results-dir or output-dir", () => {
+    const absoluteResults = validateAllure("allure", [
+      "generate",
+      "/tmp/results",
+      "-o",
+      "report"
+    ]);
+    expect(absoluteResults.ok).toBe(false);
+    const absoluteOutput = validateAllure("allure", [
+      "generate",
+      "results",
+      "-o",
+      "/tmp/report"
+    ]);
+    expect(absoluteOutput.ok).toBe(false);
+  });
+
+  it("rejects '..' traversal in either path", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results/../escape",
+      "-o",
+      "report"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("path-traversal");
+    }
+  });
+
+  it("rejects unknown flags", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--port",
+      "8080"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("disallowed-flag");
+    }
+  });
+
+  it("rejects duplicate output flag (same form: -o ... -o ...)", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report1",
+      "-o",
+      "report2"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("duplicate-output-flag");
+    }
+  });
+
+  it("rejects mixed-synonym output flags (-o then --output)", () => {
+    // `-o` and `--output` are synonyms; supplying both should fail just
+    // like supplying `-o` twice. Defense-in-depth against argv-builder
+    // refactors that might split the synonyms accidentally.
+    const result = validateAllure("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report1",
+      "--output",
+      "report2"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("duplicate-output-flag");
+    }
+  });
+
+  it("rejects mixed-synonym output flags (--output then -o)", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results",
+      "--output",
+      "report1",
+      "-o",
+      "report2"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("duplicate-output-flag");
+    }
+  });
+
+  it("rejects duplicate --config (other value flag)", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--config",
+      "a.mjs",
+      "--config",
+      "b.mjs"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("duplicate-flag");
+    }
+  });
+
+  it("rejects duplicate --report-name (other value flag)", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--report-name",
+      "first",
+      "--report-name",
+      "second"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("duplicate-flag");
+    }
+  });
+
+  it("rejects NUL bytes in any argument", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results nul",
+      "-o",
+      "report"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("nul-byte");
+    }
+  });
+
+  it("accepts --config with a project-relative path", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--config",
+      ".playwright-workbench/config/allurerc.mjs"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects --config with absolute path", () => {
+    const result = validateAllure("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--config",
+      "/etc/allurerc.mjs"
+    ]);
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("createAllureCommandPolicy", () => {
+  it("returns a policy that only allows the `allure` executable", async () => {
+    const fs = await import("node:fs");
+    const cwdBoundary = os.tmpdir();
+    const policy = createAllureCommandPolicy(cwdBoundary);
+    expect(policy.allowedExecutables).toEqual(["allure"]);
+    // The policy resolves the boundary via fs.realpathSync, which on
+    // macOS may translate `/var/folders/...` to `/private/var/folders/...`.
+    expect(policy.cwdBoundary).toBe(fs.realpathSync(cwdBoundary));
+  });
+
+  it("policy rejects an attempt to spawn a non-allure executable", () => {
+    const cwdBoundary = os.tmpdir();
+    const policy = createAllureCommandPolicy(cwdBoundary);
+    const result = policy.argValidator({
+      executableName: "node",
+      args: ["generate", "results", "-o", "report"]
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("policy with default validator accepts the canonical generate invocation", () => {
+    const cwdBoundary = os.tmpdir();
+    const policy = createAllureCommandPolicy(cwdBoundary);
+    const result = policy.argValidator({
+      executableName: "allure",
+      args: ["generate", "results", "-o", "report", "--clean"]
+    });
+    expect(result.ok).toBe(true);
   });
 });
