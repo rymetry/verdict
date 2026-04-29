@@ -101,7 +101,9 @@ describe("RunControls", () => {
           artifactsJson: "/runs/r1/artifacts.json",
           allureResultsDest: "/runs/r1/allure-results",
           allureReportDir: "/runs/r1/allure-report",
-          qualityGateResultPath: "/runs/r1/quality-gate-result.json"
+          qualityGateResultPath: "/runs/r1/quality-gate-result.json",
+          qmoSummaryJsonPath: "/runs/r1/qmo-summary.json",
+          qmoSummaryMarkdownPath: "/runs/r1/qmo-summary.md"
         },
         warnings: []
       }

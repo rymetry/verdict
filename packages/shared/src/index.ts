@@ -249,7 +249,20 @@ export const RunPathsSchema = z.object({
    * runs (project uses Allure + allure CLI installed + results
    * present in the run-scoped allure-results dir).
    */
-  qualityGateResultPath: z.string()
+  qualityGateResultPath: z.string(),
+  /**
+   * Phase 1.2 (T207): QMO Release Readiness Summary v0 — JSON form.
+   * Derived from RunMetadata + QualityGateResult after the QG step.
+   * Always derivable; only populated when the QMO summary lifecycle
+   * hook runs.
+   */
+  qmoSummaryJsonPath: z.string(),
+  /**
+   * Phase 1.2 (T207): QMO Release Readiness Summary v0 — Markdown form.
+   * Same data as the JSON form, formatted for human review (PR
+   * comments, release-readiness reviews).
+   */
+  qmoSummaryMarkdownPath: z.string()
 });
 export type RunPaths = z.infer<typeof RunPathsSchema>;
 
@@ -291,6 +304,46 @@ export const QualityGateResultSchema = z.object({
   warnings: z.array(z.string())
 });
 export type QualityGateResult = z.infer<typeof QualityGateResultSchema>;
+
+/**
+ * Phase 1.2 / T207: QMO Release Readiness Summary v0.
+ *
+ * `outcome` derivation (PLAN.v2 §27):
+ *   - "ready": all tests passed AND quality gate passed (or skipped
+ *     because Allure is not configured)
+ *   - "conditional": tests passed but quality gate warnings or non-fatal
+ *     errors are present (e.g. CLI binary missing, no-results)
+ *   - "not-ready": any test failed OR quality gate failed
+ *
+ * Future extensions (deferred): flaky candidate detection,
+ * known-issues integration, AI Release Readiness commentary.
+ */
+export const QmoSummaryOutcomeSchema = z.enum(["ready", "conditional", "not-ready"]);
+export type QmoSummaryOutcome = z.infer<typeof QmoSummaryOutcomeSchema>;
+
+export const QmoSummarySchema = z.object({
+  runId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  outcome: QmoSummaryOutcomeSchema,
+  testSummary: TestResultSummarySchema.optional(),
+  qualityGate: z
+    .object({
+      status: z.enum(["passed", "failed", "skipped", "error"]),
+      profile: z.string(),
+      exitCode: z.number().int().nullable(),
+      warnings: z.array(z.string())
+    })
+    .optional(),
+  warnings: z.array(z.string()),
+  reportLinks: z.object({
+    allureReportDir: z.string().optional(),
+    qualityGateResultPath: z.string().optional()
+  }),
+  runDurationMs: z.number().int().nonnegative().optional(),
+  command: CommandTemplateSchema.optional()
+});
+export type QmoSummary = z.infer<typeof QmoSummarySchema>;
 
 /* ----------------------------------------------------------------------- */
 /* WebSocket event envelope (PLAN.v2 §20)                                  */

@@ -595,6 +595,22 @@ export function createRunManager({
         };
         await artifactsStore.writeMetadata(paths.metadataJson, completed);
 
+        // Phase 1.2 QMO summary step (T207). Generate the Release
+        // Readiness Summary v0 from the completed RunMetadata + the
+        // persisted Quality Gate result (if any). Failure is
+        // NON-fatal — same rationale as copy / generate / quality-gate
+        // steps. Logs use `artifactKind: "metadata"` because the QMO
+        // summary is a derived metadata artifact (not a separate
+        // identity).
+        await runQmoSummaryStep({
+          runMetadata: completed,
+          qmoSummaryJsonPath: paths.qmoSummaryJsonPath,
+          qmoSummaryMarkdownPath: paths.qmoSummaryMarkdownPath,
+          qualityGateResultPath: paths.qualityGateResultPath,
+          runId,
+          logger
+        });
+
         // terminal event ごとに payload shape が異なるため、summary/message の混在をここで防ぐ。
         const terminalEvent: TerminalPublishInput =
           outcome.status === "cancelled"
@@ -1104,6 +1120,64 @@ async function runQualityGateStep({
     );
   }
   return outcome.warnings;
+}
+
+/**
+ * Phase 1.2 QMO summary step (T207). Generates the Release Readiness
+ * Summary v0 (JSON + Markdown) from the completed RunMetadata and the
+ * persisted Quality Gate result. Pure I/O after derivation, so the
+ * `buildQmoSummary` / `renderQmoSummaryMarkdown` derivation is unit-
+ * testable via direct calls without spinning up RunManager.
+ *
+ * Failure is NON-fatal — Playwright already finished and the metadata
+ * is persisted. Persistence failures here surface as a structured-log
+ * error + warning. FATAL_OPERATIONAL_CODES propagate (matches T205-2
+ * persist precedent).
+ */
+async function runQmoSummaryStep({
+  runMetadata,
+  qmoSummaryJsonPath,
+  qmoSummaryMarkdownPath,
+  qualityGateResultPath,
+  runId,
+  logger
+}: {
+  runMetadata: RunMetadata;
+  qmoSummaryJsonPath: string;
+  qmoSummaryMarkdownPath: string;
+  qualityGateResultPath: string;
+  runId: string;
+  logger?: RunManagerLogger;
+}): Promise<void> {
+  const { buildQmoSummary, persistQmoSummary, readPersistedQualityGate } = await import(
+    "../reporting/qmoSummary.js"
+  );
+  const qualityGateResult = await readPersistedQualityGate(qualityGateResultPath);
+  const summary = buildQmoSummary({ runMetadata, qualityGateResult });
+  try {
+    await persistQmoSummary(qmoSummaryJsonPath, qmoSummaryMarkdownPath, summary);
+    logger?.info?.(
+      {
+        runId,
+        artifactKind: "metadata" satisfies ArtifactKind,
+        outcome: summary.outcome
+      },
+      "qmo summary persisted"
+    );
+  } catch (error) {
+    const code = errorCode(error);
+    if (PERSIST_FATAL_CODES.has(code)) {
+      throw error;
+    }
+    logger?.error(
+      {
+        runId,
+        artifactKind: "metadata" satisfies ArtifactKind,
+        ...errorLogFields(error)
+      },
+      "failed to persist qmo summary"
+    );
+  }
 }
 
 async function readSummarySafely(
