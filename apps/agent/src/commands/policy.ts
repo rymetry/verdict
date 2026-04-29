@@ -66,7 +66,13 @@ export interface CommandPolicy {
 export const DEFAULT_ALLOWED_EXECUTABLES: ReadonlyArray<string> = [
   "npx",
   "pnpm",
-  "yarn"
+  "yarn",
+  // Phase 1.2 (T204): the Allure 3 CLI ships as the npm package `allure`.
+  // Workbench invokes it via the project-local `node_modules/.bin/allure`
+  // (not a global install) so the basename match against this allowlist is
+  // sufficient. The argument-validation logic for Allure subcommands lives
+  // in T204-2 (separate sub-policy from Playwright args).
+  "allure"
 ];
 
 /**

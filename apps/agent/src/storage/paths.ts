@@ -46,6 +46,12 @@ export function runPathsFor(projectRoot: string, runId: string): RunPaths {
     // `allure-results/*`. Always derivable per-run, even when the project
     // does not use Allure — the path is structurally consistent and only
     // populated when `RunArtifactsStore.copyAllureResultsDir` is called.
-    allureResultsDest: path.join(runDir, "allure-results")
+    allureResultsDest: path.join(runDir, "allure-results"),
+    // Phase 1.2 (T204-1): destination for the Allure CLI HTML report
+    // (`allure generate -o <here>`). Same convention as `allureResultsDest`:
+    // structurally derived per-run, only populated when T204-2 wires the
+    // CLI subprocess. UI/API later renders this as a `file://` link or
+    // serves it via `allure open` / static hosting.
+    allureReportDir: path.join(runDir, "allure-report")
   };
 }

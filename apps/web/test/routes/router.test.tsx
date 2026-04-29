@@ -75,6 +75,7 @@ beforeEach(() => {
       playwrightJson: "/runs/test/playwright.json",
       playwrightHtml: "/runs/test/playwright-report",
       allureResultsDest: "/runs/test/allure-results",
+      allureReportDir: "/runs/test/allure-report",
       artifactsJson: "/runs/test/artifacts.json"
     },
     warnings: []

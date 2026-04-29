@@ -99,7 +99,8 @@ describe("RunControls", () => {
           playwrightJson: "/runs/r1/playwright.json",
           playwrightHtml: "/runs/r1/playwright-report",
           artifactsJson: "/runs/r1/artifacts.json",
-          allureResultsDest: "/runs/r1/allure-results"
+          allureResultsDest: "/runs/r1/allure-results",
+          allureReportDir: "/runs/r1/allure-report"
         },
         warnings: []
       }
