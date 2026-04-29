@@ -74,6 +74,7 @@ beforeEach(() => {
       stderrLog: "/runs/test/stderr.log",
       playwrightJson: "/runs/test/playwright.json",
       playwrightHtml: "/runs/test/playwright-report",
+      allureResultsDest: "/runs/test/allure-results",
       artifactsJson: "/runs/test/artifacts.json"
     },
     warnings: []

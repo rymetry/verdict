@@ -98,7 +98,8 @@ describe("RunControls", () => {
           stderrLog: "/runs/r1/stderr.log",
           playwrightJson: "/runs/r1/playwright.json",
           playwrightHtml: "/runs/r1/playwright-report",
-          artifactsJson: "/runs/r1/artifacts.json"
+          artifactsJson: "/runs/r1/artifacts.json",
+          allureResultsDest: "/runs/r1/allure-results"
         },
         warnings: []
       }

@@ -90,3 +90,189 @@ describe("runArtifactsStore.redactPlaywrightResults", () => {
     ).rejects.toMatchObject({ code: "EISDIR" });
   });
 });
+
+/* ---------------------------------------------------------------- */
+/* T203-2: Allure detect/archive/copy lifecycle helpers              */
+/* ---------------------------------------------------------------- */
+
+describe("runArtifactsStore.archiveAllureResultsDir", () => {
+  it("returns archived=false when source dir is absent (no previous run)", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    const outcome = await runArtifactsStore.archiveAllureResultsDir(workdir, sourceAbs);
+    expect(outcome.archived).toBe(false);
+    expect(outcome.archivePath).toBeUndefined();
+    expect(outcome.warnings).toEqual([]);
+  });
+
+  it("returns archived=false when source dir is empty", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    const outcome = await runArtifactsStore.archiveAllureResultsDir(workdir, sourceAbs);
+    expect(outcome.archived).toBe(false);
+    expect(outcome.archivePath).toBeUndefined();
+    expect(outcome.warnings).toEqual([]);
+  });
+
+  it("warns when source path is a regular file rather than a directory", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.writeFileSync(sourceAbs, "not a directory");
+    const outcome = await runArtifactsStore.archiveAllureResultsDir(workdir, sourceAbs);
+    expect(outcome.archived).toBe(false);
+    expect(outcome.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining("not a directory")])
+    );
+  });
+
+  it("refuses to archive when source itself is a symlink (path-redaction policy)", async () => {
+    const sourceTarget = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-allure-target-")));
+    const sourceAbs = path.join(workdir, "allure-results");
+    try {
+      fs.symlinkSync(sourceTarget, sourceAbs);
+      const outcome = await runArtifactsStore.archiveAllureResultsDir(workdir, sourceAbs);
+      expect(outcome.archived).toBe(false);
+      expect(outcome.warnings).toEqual(
+        expect.arrayContaining([expect.stringContaining("symlink")])
+      );
+      // Target dir should not have been touched (no archive happened)
+      expect(fs.existsSync(sourceTarget)).toBe(true);
+    } finally {
+      fs.rmSync(sourceTarget, { recursive: true, force: true });
+    }
+  });
+
+  it("moves all entries from source to a fresh timestamped subdir under archiveDir", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    fs.writeFileSync(path.join(sourceAbs, "uuid-a-result.json"), "{}");
+    fs.writeFileSync(path.join(sourceAbs, "uuid-b-result.json"), "{}");
+    fs.mkdirSync(path.join(sourceAbs, "subdir"));
+    fs.writeFileSync(path.join(sourceAbs, "subdir/inner.txt"), "x");
+
+    const outcome = await runArtifactsStore.archiveAllureResultsDir(workdir, sourceAbs);
+    expect(outcome.archived).toBe(true);
+    expect(outcome.archivePath).toMatch(/\.playwright-workbench[\\/]archive[\\/]/);
+
+    // Source should now be empty (entries moved).
+    expect(fs.readdirSync(sourceAbs)).toEqual([]);
+
+    // Archive should hold the moved entries.
+    const archived = fs.readdirSync(outcome.archivePath!);
+    expect(archived.sort()).toEqual(["subdir", "uuid-a-result.json", "uuid-b-result.json"]);
+    expect(fs.readdirSync(path.join(outcome.archivePath!, "subdir"))).toEqual(["inner.txt"]);
+  });
+
+  it("skips symlink entries inside source with a warning, but moves non-symlink siblings", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    fs.writeFileSync(path.join(sourceAbs, "uuid-real-result.json"), "{}");
+    // A symlink inside source: must not be archived.
+    fs.symlinkSync("/etc/passwd", path.join(sourceAbs, "evil-link"));
+
+    const outcome = await runArtifactsStore.archiveAllureResultsDir(workdir, sourceAbs);
+    expect(outcome.archived).toBe(true);
+    expect(outcome.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining("symlink")])
+    );
+    // Real file moved; symlink still in source (not archived, not destroyed).
+    expect(fs.readdirSync(outcome.archivePath!)).toEqual(["uuid-real-result.json"]);
+    expect(fs.readdirSync(sourceAbs)).toEqual(["evil-link"]);
+  });
+
+  it("creates archiveDir parent on demand (first archive ever)", async () => {
+    // Ensure .playwright-workbench/archive does NOT exist yet.
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    fs.writeFileSync(path.join(sourceAbs, "x-result.json"), "{}");
+
+    const outcome = await runArtifactsStore.archiveAllureResultsDir(workdir, sourceAbs);
+    expect(outcome.archived).toBe(true);
+    expect(fs.existsSync(path.join(workdir, ".playwright-workbench", "archive"))).toBe(true);
+  });
+});
+
+describe("runArtifactsStore.copyAllureResultsDir", () => {
+  it("returns copied=false when source is absent", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    const destAbs = path.join(workdir, "runs", "abc", "allure-results");
+    const outcome = await runArtifactsStore.copyAllureResultsDir(sourceAbs, destAbs);
+    expect(outcome.copied).toBe(false);
+    expect(outcome.fileCount).toBe(0);
+    expect(outcome.warnings).toEqual([]);
+  });
+
+  it("returns copied=false when source is empty", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    const destAbs = path.join(workdir, "runs", "abc", "allure-results");
+    const outcome = await runArtifactsStore.copyAllureResultsDir(sourceAbs, destAbs);
+    expect(outcome.copied).toBe(false);
+    expect(outcome.fileCount).toBe(0);
+  });
+
+  it("copies regular files from source to dest (recursive), source preserved", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    fs.writeFileSync(path.join(sourceAbs, "uuid-a-result.json"), "alpha");
+    fs.mkdirSync(path.join(sourceAbs, "nested"));
+    fs.writeFileSync(path.join(sourceAbs, "nested/inner.txt"), "beta");
+
+    const destAbs = path.join(workdir, "runs", "abc", "allure-results");
+    const outcome = await runArtifactsStore.copyAllureResultsDir(sourceAbs, destAbs);
+    expect(outcome.copied).toBe(true);
+    expect(outcome.fileCount).toBe(2);
+
+    // Source untouched (copy, not move).
+    expect(fs.readFileSync(path.join(sourceAbs, "uuid-a-result.json"), "utf8")).toBe("alpha");
+    expect(fs.readFileSync(path.join(sourceAbs, "nested/inner.txt"), "utf8")).toBe("beta");
+
+    // Dest holds copies.
+    expect(fs.readFileSync(path.join(destAbs, "uuid-a-result.json"), "utf8")).toBe("alpha");
+    expect(fs.readFileSync(path.join(destAbs, "nested/inner.txt"), "utf8")).toBe("beta");
+  });
+
+  it("skips symlink entries inside source with a warning", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    fs.writeFileSync(path.join(sourceAbs, "real-result.json"), "ok");
+    fs.symlinkSync("/etc/passwd", path.join(sourceAbs, "evil-link"));
+
+    const destAbs = path.join(workdir, "runs", "abc", "allure-results");
+    const outcome = await runArtifactsStore.copyAllureResultsDir(sourceAbs, destAbs);
+    expect(outcome.copied).toBe(true);
+    expect(outcome.fileCount).toBe(1);
+    expect(outcome.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining("symlink")])
+    );
+    // Symlink should NOT have been recreated in dest.
+    expect(fs.readdirSync(destAbs)).toEqual(["real-result.json"]);
+  });
+
+  it("creates dest parent directories on demand", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    fs.writeFileSync(path.join(sourceAbs, "x-result.json"), "{}");
+
+    // Note: the dest parent (`runs/abc/`) does not exist yet.
+    const destAbs = path.join(workdir, "runs", "abc", "allure-results");
+    const outcome = await runArtifactsStore.copyAllureResultsDir(sourceAbs, destAbs);
+    expect(outcome.copied).toBe(true);
+    expect(fs.existsSync(destAbs)).toBe(true);
+  });
+
+  it("warns when source path is a symlink to a directory", async () => {
+    const sourceTarget = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-allure-cp-target-")));
+    fs.writeFileSync(path.join(sourceTarget, "x-result.json"), "{}");
+    const sourceAbs = path.join(workdir, "allure-results");
+    try {
+      fs.symlinkSync(sourceTarget, sourceAbs);
+      const destAbs = path.join(workdir, "runs", "abc", "allure-results");
+      const outcome = await runArtifactsStore.copyAllureResultsDir(sourceAbs, destAbs);
+      expect(outcome.copied).toBe(false);
+      expect(outcome.warnings).toEqual(
+        expect.arrayContaining([expect.stringContaining("symlink")])
+      );
+    } finally {
+      fs.rmSync(sourceTarget, { recursive: true, force: true });
+    }
+  });
+});
