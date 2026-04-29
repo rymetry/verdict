@@ -93,6 +93,17 @@ export const ProjectSummarySchema = z.object({
   packageManager: DetectedPackageManagerSchema,
   hasAllurePlaywright: z.boolean(),
   hasAllureCli: z.boolean(),
+  /**
+   * Project-relative `resultsDir` extracted from the `allure-playwright`
+   * reporter clause in `playwright.config.{ts,js,mjs,cjs}` (Phase 1.2 / T203).
+   * Optional: `undefined` when the reporter is absent, when its `resultsDir`
+   * option is missing/dynamic (a corresponding warning is appended to
+   * `warnings`), or when the value fails project-relative validation
+   * (absolute, traversal, NUL, Windows-drive). The run pipeline (T203-2/3)
+   * uses this to drive the detect/archive/copy lifecycle (PLAN.v2 §22),
+   * falling back to default `allure-results` or user override when absent.
+   */
+  allureResultsDir: z.string().optional(),
   warnings: z.array(z.string()),
   blockingExecution: z.boolean()
 });

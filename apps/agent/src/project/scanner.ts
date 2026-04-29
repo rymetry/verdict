@@ -102,8 +102,98 @@ function detectAllure(packageJson: PackageJsonView | undefined): {
   };
   return {
     hasAllurePlaywright: typeof deps["allure-playwright"] === "string",
-    hasAllureCli: typeof deps["allure-commandline"] === "string"
+    // Allure 3 ships the CLI under the package name `allure`; Allure 2 used
+    // `allure-commandline`. T200 (PR #34) confirmed Phase 1.2 PoC targets
+    // Allure 3, but `allure-commandline` is kept here for backward-compat
+    // signalling — either is enough at scanner stage to indicate "an Allure
+    // CLI is locally available". The exact CLI version check lives in T204
+    // when the run pipeline actually invokes `allure --version`.
+    hasAllureCli:
+      typeof deps["allure"] === "string" ||
+      typeof deps["allure-commandline"] === "string"
   };
+}
+
+/**
+ * Heuristic detector for the `allure-playwright` reporter `resultsDir` option
+ * inside a `playwright.config.{ts,js,mjs,cjs}` file. Returns the literal
+ * string when it can be statically extracted; emits a warning (returned
+ * separately) when the config likely uses Allure but the reporter clause is
+ * dynamic / non-static. Safe-by-default: any extracted path that fails
+ * validation (absolute, traversal, empty, NUL, Windows-drive) is rejected.
+ *
+ * Limitations (intentional, per T203-1 design memo):
+ *   - Text-based regex, not AST. ts-morph is deferred to Phase 5 (PLAN.v2 §24).
+ *   - Cannot evaluate environment variable references etc — regex requires a
+ *     plain quoted literal in the `resultsDir` slot.
+ *   - Relies on the reporter clause being colocated within ~one block; deeply
+ *     nested compositions may not match. False negatives are preferred over
+ *     false positives (silent miss > confidently wrong path).
+ */
+const ALLURE_REPORTER_RESULTS_DIR_PATTERN =
+  /['"]allure-playwright['"][\s\S]*?\bresultsDir\s*:\s*(['"])([^'"\\]+)\1/;
+const ALLURE_REPORTER_PRESENCE_PATTERN = /['"]allure-playwright['"]/;
+
+function detectAllureResultsDir(configText: string): {
+  resultsDir?: string;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const presence = ALLURE_REPORTER_PRESENCE_PATTERN.test(configText);
+  if (!presence) {
+    // Reporter not referenced at all — nothing to detect, no warning.
+    return { warnings };
+  }
+
+  const match = ALLURE_REPORTER_RESULTS_DIR_PATTERN.exec(configText);
+  if (!match) {
+    // Reporter is referenced but no `resultsDir: "..."` literal found. Could
+    // be a reporter without options (defaults to `allure-results`) or a
+    // dynamic value that the regex cannot evaluate. Emit a soft warning so
+    // the run pipeline (T203-2/T203-3) knows to fall back to user override
+    // or the default.
+    warnings.push(
+      "allure-playwright reporter detected but resultsDir is missing or dynamic; Workbench will rely on user override or the default 'allure-results'."
+    );
+    return { warnings };
+  }
+
+  const candidate = match[2] ?? "";
+  if (candidate.length === 0) {
+    warnings.push("allure-playwright resultsDir is empty; ignoring detection.");
+    return { warnings };
+  }
+  if (candidate.includes("\0")) {
+    warnings.push("allure-playwright resultsDir contains a NUL byte; ignoring detection.");
+    return { warnings };
+  }
+  if (candidate.includes("..")) {
+    warnings.push("allure-playwright resultsDir contains '..' (path traversal); ignoring detection.");
+    return { warnings };
+  }
+  if (path.isAbsolute(candidate)) {
+    warnings.push("allure-playwright resultsDir is an absolute path; only project-relative paths are supported.");
+    return { warnings };
+  }
+  if (/^[A-Za-z]:[\\/]/.test(candidate) || candidate.startsWith("\\\\")) {
+    warnings.push("allure-playwright resultsDir uses a Windows-drive path; only project-relative paths are supported.");
+    return { warnings };
+  }
+
+  return { resultsDir: candidate, warnings };
+}
+
+async function safeReadConfigText(configPath: string | undefined): Promise<string | undefined> {
+  if (!configPath) return undefined;
+  try {
+    return await fs.readFile(configPath, "utf8");
+  } catch {
+    // Best-effort: a config we just confirmed exists could fail to read on
+    // permission flips. Detection is non-load-bearing for run execution
+    // itself (the actual Playwright CLI handles config loading), so we
+    // swallow here and let the rest of scanProject continue.
+    return undefined;
+  }
 }
 
 function ensureWithinAllowed(rootRealpath: string, allowed?: ReadonlyArray<string>): void {
@@ -150,6 +240,14 @@ export async function scanProject(request: ScanRequest): Promise<ScanResult> {
   const hasYarnPnP = detectYarnPnP(realpath);
   const hasPlaywrightBinInNodeModules = detectPlaywrightBin(realpath);
   const { hasAllurePlaywright, hasAllureCli } = detectAllure(packageJson);
+  // Read the Playwright config text and run a heuristic Allure resultsDir
+  // detection. Non-load-bearing for run execution; T203-2 will use it for
+  // archive/copy decisions, falling back to default or user override when
+  // detection fails (warning emitted in that case).
+  const configText = await safeReadConfigText(playwrightConfigPath);
+  const allureDetection = configText
+    ? detectAllureResultsDir(configText)
+    : { resultsDir: undefined, warnings: [] };
 
   const packageManager = detectPackageManager({
     projectRoot: realpath,
@@ -169,6 +267,10 @@ export async function scanProject(request: ScanRequest): Promise<ScanResult> {
   if (!packageJson) {
     warnings.push("package.json is missing at the project root.");
   }
+  // Surface Allure detection warnings on the project summary so the GUI /
+  // run pipeline can present remediation hints (e.g. "configure resultsDir
+  // explicitly" or "supply a Workbench override").
+  warnings.push(...allureDetection.warnings);
 
   const summary: ProjectSummary = {
     id: realpath,
@@ -178,6 +280,7 @@ export async function scanProject(request: ScanRequest): Promise<ScanResult> {
     packageManager,
     hasAllurePlaywright,
     hasAllureCli,
+    allureResultsDir: allureDetection.resultsDir,
     warnings,
     blockingExecution: packageManager.blockingExecution
   };
