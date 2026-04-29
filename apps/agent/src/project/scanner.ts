@@ -120,7 +120,7 @@ function detectAllure(packageJson: PackageJsonView | undefined): {
  * string when it can be statically extracted; emits a warning (returned
  * separately) when the config likely uses Allure but the reporter clause is
  * dynamic / non-static. Safe-by-default: any extracted path that fails
- * validation (absolute, traversal, empty, NUL, Windows-drive) is rejected.
+ * validation (absolute, traversal, empty, NUL) is rejected.
  *
  * Limitations (intentional, per T203-1 design memo):
  *   - Text-based regex, not AST. ts-morph is deferred to Phase 5 (PLAN.v2 §24).
@@ -129,27 +129,47 @@ function detectAllure(packageJson: PackageJsonView | undefined): {
  *   - Relies on the reporter clause being colocated within ~one block; deeply
  *     nested compositions may not match. False negatives are preferred over
  *     false positives (silent miss > confidently wrong path).
+ *   - Comment-stripping is applied before matching so a commented-out
+ *     reporter does not produce a false-positive presence detection.
  */
 const ALLURE_REPORTER_RESULTS_DIR_PATTERN =
   /['"]allure-playwright['"][\s\S]*?\bresultsDir\s*:\s*(['"])([^'"\\]+)\1/;
 const ALLURE_REPORTER_PRESENCE_PATTERN = /['"]allure-playwright['"]/;
+
+const BLOCK_COMMENT_PATTERN = /\/\*[\s\S]*?\*\//g;
+const LINE_COMMENT_PATTERN = /\/\/.*$/gm;
+
+/**
+ * Strip both block (`/* ... *\/`) and line (`// ...`) comments. Heuristic:
+ * the regex does not understand string boundaries, so a `//` inside a
+ * regular string literal in the config (rare in playwright.config) would
+ * be over-stripped — but the only consequence for our detection is a
+ * potential false-negative (Allure presence missed), which is the safe
+ * direction per the memo's "false negative > false positive" principle.
+ */
+function stripJsComments(text: string): string {
+  return text.replace(BLOCK_COMMENT_PATTERN, "").replace(LINE_COMMENT_PATTERN, "");
+}
 
 function detectAllureResultsDir(configText: string): {
   resultsDir?: string;
   warnings: string[];
 } {
   const warnings: string[] = [];
-  const presence = ALLURE_REPORTER_PRESENCE_PATTERN.test(configText);
+  const stripped = stripJsComments(configText);
+  const presence = ALLURE_REPORTER_PRESENCE_PATTERN.test(stripped);
   if (!presence) {
-    // Reporter not referenced at all — nothing to detect, no warning.
+    // Reporter not referenced at all (or only in comments) — nothing to
+    // detect, no warning.
     return { warnings };
   }
 
-  const match = ALLURE_REPORTER_RESULTS_DIR_PATTERN.exec(configText);
+  const match = ALLURE_REPORTER_RESULTS_DIR_PATTERN.exec(stripped);
   if (!match) {
     // Reporter is referenced but no `resultsDir: "..."` literal found. Could
     // be a reporter without options (defaults to `allure-results`) or a
-    // dynamic value that the regex cannot evaluate. Emit a soft warning so
+    // dynamic value that the regex cannot evaluate (variable reference,
+    // environment lookup, escape-containing path). Emit a soft warning so
     // the run pipeline (T203-2/T203-3) knows to fall back to user override
     // or the default.
     warnings.push(
@@ -167,7 +187,14 @@ function detectAllureResultsDir(configText: string): {
     warnings.push("allure-playwright resultsDir contains a NUL byte; ignoring detection.");
     return { warnings };
   }
-  if (candidate.includes("..")) {
+  // Path-traversal check inspects the *original* segments rather than
+  // post-normalize segments: `path.normalize("results/../escape")` resolves
+  // to `"escape"`, which looks safe but the user expressed an intent to
+  // traverse. Splitting on either separator catches `..` as a real segment
+  // while leaving legitimate single-segment names like `results..backup`
+  // alone.
+  const rawSegments = candidate.split(/[\\/]/);
+  if (rawSegments.includes("..")) {
     warnings.push("allure-playwright resultsDir contains '..' (path traversal); ignoring detection.");
     return { warnings };
   }
@@ -175,25 +202,50 @@ function detectAllureResultsDir(configText: string): {
     warnings.push("allure-playwright resultsDir is an absolute path; only project-relative paths are supported.");
     return { warnings };
   }
-  if (/^[A-Za-z]:[\\/]/.test(candidate) || candidate.startsWith("\\\\")) {
-    warnings.push("allure-playwright resultsDir uses a Windows-drive path; only project-relative paths are supported.");
-    return { warnings };
-  }
+  // Note: backslash-bearing strings (e.g. Windows-style escaped paths) are
+  // pre-rejected at the regex level by `[^'"\\]+` and surface as the
+  // generic "missing or dynamic" warning above. We deliberately do not
+  // re-check `^[A-Za-z]:[\\/]` here because that branch was unreachable
+  // (regex already excluded `\`) — keeping dead code would mislead future
+  // readers about what is actually enforced.
 
   return { resultsDir: candidate, warnings };
 }
 
-async function safeReadConfigText(configPath: string | undefined): Promise<string | undefined> {
-  if (!configPath) return undefined;
+/** Cap on `playwright.config` size we are willing to scan for the Allure
+ *  reporter heuristic. A normal config is well under 5 KB; capping at 1 MiB
+ *  bounds regex work and memory if a project plants a pathologically large
+ *  file. Larger configs surface a warning so the user can supply a Workbench
+ *  override path explicitly. */
+const CONFIG_TEXT_SIZE_CAP_BYTES = 1024 * 1024;
+
+async function safeReadConfigText(configPath: string | undefined): Promise<{
+  text?: string;
+  warning?: string;
+}> {
+  if (!configPath) return {};
+  let text: string;
   try {
-    return await fs.readFile(configPath, "utf8");
-  } catch {
-    // Best-effort: a config we just confirmed exists could fail to read on
-    // permission flips. Detection is non-load-bearing for run execution
-    // itself (the actual Playwright CLI handles config loading), so we
-    // swallow here and let the rest of scanProject continue.
-    return undefined;
+    text = await fs.readFile(configPath, "utf8");
+  } catch (error) {
+    // Detection is non-load-bearing for run execution itself (the actual
+    // Playwright CLI handles config loading), but we surface a warning so
+    // a permission flip / EIO does not make Allure-related failures
+    // silently undebuggable from the project summary.
+    const code =
+      error instanceof Error && "code" in error && typeof error.code === "string"
+        ? error.code
+        : "READ_FAILED";
+    return {
+      warning: `playwright.config exists but could not be read for Allure detection. code=${code}`,
+    };
   }
+  if (text.length > CONFIG_TEXT_SIZE_CAP_BYTES) {
+    return {
+      warning: `playwright.config exceeds the Allure detection size cap (${CONFIG_TEXT_SIZE_CAP_BYTES} bytes); supply allureResultsDir via Workbench override.`,
+    };
+  }
+  return { text };
 }
 
 function ensureWithinAllowed(rootRealpath: string, allowed?: ReadonlyArray<string>): void {
@@ -243,11 +295,13 @@ export async function scanProject(request: ScanRequest): Promise<ScanResult> {
   // Read the Playwright config text and run a heuristic Allure resultsDir
   // detection. Non-load-bearing for run execution; T203-2 will use it for
   // archive/copy decisions, falling back to default or user override when
-  // detection fails (warning emitted in that case).
-  const configText = await safeReadConfigText(playwrightConfigPath);
-  const allureDetection = configText
-    ? detectAllureResultsDir(configText)
-    : { resultsDir: undefined, warnings: [] };
+  // detection fails (warning emitted in that case). A read failure or an
+  // oversized config also surfaces as a warning so the operator has a
+  // diagnostic when allureResultsDir is unexpectedly undefined.
+  const configRead = await safeReadConfigText(playwrightConfigPath);
+  const allureDetection = configRead.text
+    ? detectAllureResultsDir(configRead.text)
+    : { resultsDir: undefined, warnings: configRead.warning ? [configRead.warning] : [] };
 
   const packageManager = detectPackageManager({
     projectRoot: realpath,
