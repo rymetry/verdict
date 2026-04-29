@@ -84,4 +84,269 @@ describe("scanProject", () => {
     const { summary } = await scanProject({ rootPath: workdir });
     expect(summary.hasAllurePlaywright).toBe(true);
   });
+
+  describe("Allure CLI detection (Allure 3 + Allure 2 backward-compat)", () => {
+    it("detects Allure 3 CLI by `allure` package", async () => {
+      writeJson("package.json", {
+        devDependencies: {
+          "@playwright/test": "^1.55.0",
+          allure: "~3.6.2"
+        }
+      });
+      touch("pnpm-lock.yaml");
+      touch("node_modules/.bin/playwright");
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.hasAllureCli).toBe(true);
+    });
+
+    it("detects Allure 2 CLI by `allure-commandline` package (backward-compat)", async () => {
+      writeJson("package.json", {
+        devDependencies: {
+          "@playwright/test": "^1.55.0",
+          "allure-commandline": "^2.30.0"
+        }
+      });
+      touch("pnpm-lock.yaml");
+      touch("node_modules/.bin/playwright");
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.hasAllureCli).toBe(true);
+    });
+
+    it("returns hasAllureCli=false when neither Allure CLI is installed", async () => {
+      writeJson("package.json", {
+        devDependencies: { "@playwright/test": "^1.55.0" }
+      });
+      touch("pnpm-lock.yaml");
+      touch("node_modules/.bin/playwright");
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.hasAllureCli).toBe(false);
+    });
+  });
+
+  describe("allure-playwright resultsDir detection (T203-1)", () => {
+    function setupBasicProject(configContents: string): void {
+      writeJson("package.json", {
+        devDependencies: {
+          "@playwright/test": "^1.55.0",
+          "allure-playwright": "^3.7.1"
+        }
+      });
+      touch("pnpm-lock.yaml");
+      touch("node_modules/.bin/playwright");
+      touch("playwright.config.ts", configContents);
+    }
+
+    it("extracts resultsDir from a static double-quoted literal", async () => {
+      setupBasicProject(`
+        export default {
+          reporter: [
+            ["list"],
+            ["allure-playwright", { resultsDir: "allure-results" }]
+          ]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBe("allure-results");
+      expect(summary.warnings).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("dynamic")])
+      );
+    });
+
+    it("extracts resultsDir from a static single-quoted literal", async () => {
+      setupBasicProject(`
+        export default {
+          reporter: [
+            ['allure-playwright', { resultsDir: 'foo/bar' }]
+          ]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBe("foo/bar");
+    });
+
+    it("emits a warning when reporter is referenced but resultsDir is missing/dynamic", async () => {
+      setupBasicProject(`
+        const dir = someDynamic();
+        export default {
+          reporter: [
+            ["allure-playwright", { resultsDir: dir }]
+          ]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("dynamic"),
+        ])
+      );
+    });
+
+    it("does not warn or set resultsDir when allure-playwright is not used at all", async () => {
+      setupBasicProject(`
+        export default {
+          reporter: [["list"]]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("allure")])
+      );
+    });
+
+    it("rejects an absolute resultsDir path", async () => {
+      setupBasicProject(`
+        export default {
+          reporter: [["allure-playwright", { resultsDir: "/tmp/results" }]]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("absolute path"),
+        ])
+      );
+    });
+
+    it("rejects path traversal in resultsDir", async () => {
+      setupBasicProject(`
+        export default {
+          reporter: [["allure-playwright", { resultsDir: "../escape" }]]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("path traversal"),
+        ])
+      );
+    });
+
+    it("rejects Windows-drive path in resultsDir", async () => {
+      setupBasicProject(`
+        export default {
+          reporter: [["allure-playwright", { resultsDir: "C:\\\\results" }]]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      // Windows-drive path uses a backslash-escaped char in JS, which the
+      // regex's `[^'"\\]+` rejects entirely. The detector should NOT extract
+      // a value (regex no-match treated as "missing/dynamic" → warning).
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("dynamic"),
+        ])
+      );
+    });
+
+    it("emits a warning when reporter is referenced as a bare string (no options object)", async () => {
+      setupBasicProject(`
+        export default {
+          reporter: "allure-playwright"
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      // Bare string form has no resultsDir to extract; warning lets the
+      // run pipeline know to fall back to the default.
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("missing or dynamic"),
+        ])
+      );
+    });
+
+    it("ignores commented-out allure-playwright references (line comment)", async () => {
+      setupBasicProject(`
+        export default {
+          reporter: [
+            // ["allure-playwright", { resultsDir: "old-results" }] disabled in 2026
+            ["list"]
+          ]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      // Comment-stripped → presence regex sees no reference → no warning,
+      // no value extracted. Crucial for projects that intentionally
+      // disabled the reporter.
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("allure")])
+      );
+    });
+
+    it("ignores commented-out allure-playwright references (block comment)", async () => {
+      setupBasicProject(`
+        /*
+         * ["allure-playwright", { resultsDir: "old-results" }]
+         */
+        export default {
+          reporter: [["list"]]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("allure")])
+      );
+    });
+
+    it("does not falsely reject path segments that merely contain '..'", async () => {
+      // `results..backup` is a single segment and must NOT trip the
+      // path-traversal validator. Earlier versions used `includes('..')`
+      // which would have rejected this.
+      setupBasicProject(`
+        export default {
+          reporter: [["allure-playwright", { resultsDir: "results..backup" }]]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBe("results..backup");
+      expect(summary.warnings).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("path traversal")])
+      );
+    });
+
+    it("rejects '..' as a real path segment", async () => {
+      setupBasicProject(`
+        export default {
+          reporter: [["allure-playwright", { resultsDir: "results/../escape" }]]
+        };
+      `);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("path traversal"),
+        ])
+      );
+    });
+
+    it("emits a size-cap warning when playwright.config is unreasonably large", async () => {
+      writeJson("package.json", {
+        devDependencies: {
+          "@playwright/test": "^1.55.0",
+          "allure-playwright": "^3.7.1"
+        }
+      });
+      touch("pnpm-lock.yaml");
+      touch("node_modules/.bin/playwright");
+      // 1.5 MiB of harmless filler — well over the 1 MiB cap. The detector
+      // bails before scanning, so the user gets a diagnostic rather than
+      // silent absence of allureResultsDir.
+      const huge = "// padding\n".repeat((1024 * 1024 * 1.5) / "// padding\n".length);
+      touch("playwright.config.ts", huge);
+      const { summary } = await scanProject({ rootPath: workdir });
+      expect(summary.allureResultsDir).toBeUndefined();
+      expect(summary.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("size cap"),
+        ])
+      );
+    });
+  });
 });
