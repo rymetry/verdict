@@ -9,6 +9,14 @@ export interface WorkbenchPaths {
   configDir: string;
   reportsDir: string;
   runsDir: string;
+  /**
+   * Project-scoped archive root (Phase 1.2 / T203-2). The archive lifecycle
+   * (PLAN.v2 §22) moves the user's pre-existing `allure-results/*` here
+   * before each run so that user artifacts are preserved instead of
+   * overwritten. Each archive operation creates a timestamped subdirectory
+   * (`<archiveDir>/<ISO-timestamp>/`) so multiple runs do not collide.
+   */
+  archiveDir: string;
 }
 
 export function workbenchPaths(projectRoot: string): WorkbenchPaths {
@@ -18,7 +26,8 @@ export function workbenchPaths(projectRoot: string): WorkbenchPaths {
     workbenchDir,
     configDir: path.join(workbenchDir, "config"),
     reportsDir: path.join(workbenchDir, "reports"),
-    runsDir: path.join(workbenchDir, "runs")
+    runsDir: path.join(workbenchDir, "runs"),
+    archiveDir: path.join(workbenchDir, "archive")
   };
 }
 
@@ -32,6 +41,11 @@ export function runPathsFor(projectRoot: string, runId: string): RunPaths {
     stderrLog: path.join(runDir, "stderr.log"),
     playwrightJson: path.join(runDir, "playwright-results.json"),
     playwrightHtml: path.join(runDir, "playwright-report"),
-    artifactsJson: path.join(runDir, "artifacts.json")
+    artifactsJson: path.join(runDir, "artifacts.json"),
+    // Phase 1.2 (T203-2): destination for the post-run copy of the user's
+    // `allure-results/*`. Always derivable per-run, even when the project
+    // does not use Allure — the path is structurally consistent and only
+    // populated when `RunArtifactsStore.copyAllureResultsDir` is called.
+    allureResultsDest: path.join(runDir, "allure-results")
   };
 }

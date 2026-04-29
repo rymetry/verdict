@@ -228,7 +228,14 @@ export const RunPathsSchema = z.object({
   stderrLog: z.string(),
   playwrightJson: z.string(),
   playwrightHtml: z.string(),
-  artifactsJson: z.string()
+  artifactsJson: z.string(),
+  /**
+   * Phase 1.2 (T203-2): destination for the post-run copy of the user's
+   * `allure-results/*`. Always derivable for every run; only populated
+   * when the project uses allure-playwright and the run pipeline calls
+   * `RunArtifactsStore.copyAllureResultsDir`.
+   */
+  allureResultsDest: z.string()
 });
 export type RunPaths = z.infer<typeof RunPathsSchema>;
 
