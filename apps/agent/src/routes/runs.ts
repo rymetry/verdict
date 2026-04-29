@@ -90,7 +90,11 @@ export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
         projectId: current.summary.id,
         projectRoot: current.summary.rootPath,
         packageManager: current.packageManager,
-        request: parsed.data
+        request: parsed.data,
+        // Phase 1.2 (T203-3): wire the resultsDir detected by ProjectScanner
+        // (T203-1) so RunManager's archive/copy lifecycle activates when
+        // the project uses allure-playwright. Undefined → lifecycle no-op.
+        allureResultsDir: current.summary.allureResultsDir
       });
       return c.json({ runId: handle.runId, metadata: handle.metadata }, 202);
     } catch (error) {

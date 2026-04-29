@@ -38,6 +38,17 @@ export interface RunStartParams {
   projectRoot: string;
   packageManager: DetectedPackageManager;
   request: RunRequest;
+  /**
+   * Phase 1.2 (T203-3): the project-relative `resultsDir` extracted by
+   * ProjectScanner from the `allure-playwright` reporter clause in
+   * `playwright.config.{ts,js,mjs,cjs}` (T203-1). When defined, RunManager
+   * archives existing entries of the source dir before the run (PLAN.v2
+   * §22 detect/archive/copy) and copies post-run output into
+   * `<runDir>/allure-results/`. When undefined (no Allure reporter,
+   * dynamic config, or the value failed validation), the lifecycle is a
+   * no-op — the rest of the run flow is unaffected.
+   */
+  allureResultsDir?: string;
 }
 
 export interface ActiveRunHandle {
@@ -300,6 +311,19 @@ export function createRunManager({
     const paths = runPathsFor(params.projectRoot, runId);
     artifactsStore.ensureDirs(params.projectRoot, paths.runDir, paths.playwrightHtml);
 
+    // Phase 1.2 archive step (T203-3): protect any user-side artifacts in
+    // `allure-results/*` from the previous run by moving them aside before
+    // launching Playwright. Failure is FATAL because re-running without
+    // archive would silently overwrite user data — that violates the
+    // PLAN.v2 §22 invariant that user artifacts are preserved across runs.
+    const archiveWarnings = await runArchiveStep({
+      projectRoot: params.projectRoot,
+      allureResultsDir: params.allureResultsDir,
+      runId,
+      artifactsStore,
+      logger
+    });
+
     const { command, env } = buildPlaywrightTestCommand({
       packageManager: params.packageManager,
       request: params.request,
@@ -319,7 +343,7 @@ export function createRunManager({
       cwd: params.projectRoot,
       requested: params.request,
       paths,
-      warnings: [...params.packageManager.warnings],
+      warnings: [...params.packageManager.warnings, ...archiveWarnings],
       exitCode: null,
       signal: null
     };
@@ -454,6 +478,20 @@ export function createRunManager({
           runId,
           playwrightJsonPath: paths.playwrightJson
         });
+        // Phase 1.2 copy step (T203-3): materialize the user's post-run
+        // `allure-results/*` into `<runDir>/allure-results/` so that
+        // AllureReportProvider can read the run-scoped snapshot regardless
+        // of what the user does to the source dir afterward. Failures here
+        // are NON-fatal — Playwright already finished, so we surface a
+        // structured-log error + a warning rather than aborting the run.
+        const copyWarnings = await runCopyStep({
+          projectRoot: params.projectRoot,
+          allureResultsDir: params.allureResultsDir,
+          allureResultsDest: paths.allureResultsDest,
+          runId,
+          artifactsStore,
+          logger
+        });
         // summary は metadata と WS に流れるため、必ず scrubbed JSON から読む。
         const summary = await readSummarySafely(
           reportProvider,
@@ -467,6 +505,7 @@ export function createRunManager({
         const warnings = [
           ...runningMetadata.warnings,
           ...logWriteWarnings,
+          ...copyWarnings,
           ...streamRedactor.flush(),
           ...flushStreamPublishWarnings(),
           ...(summary?.warnings ?? [])
@@ -674,6 +713,102 @@ async function redactPlaywrightResultsSafely({
       );
       return `Playwright JSON redaction failed; raw result artifact may still contain secrets. redactionCode=${redactionCode}; removalCode=${unlinkCode}`;
     }
+  }
+}
+
+/**
+ * Phase 1.2 archive step (T203-3). Pre-run hook that protects user-side
+ * `allure-results/*` from the previous run by moving entries into a
+ * timestamped archive subdirectory before Playwright launches. No-op when
+ * `params.allureResultsDir` is undefined (project does not use Allure or
+ * the value failed validation in T203-1).
+ *
+ * Failure semantics: FATAL_OPERATIONAL_CODES from the helper propagate
+ * here and re-throw so the caller (route) returns 500 with a stable
+ * code. PLAN.v2 §22's user-data-preservation invariant takes priority
+ * over allowing the run to start.
+ */
+async function runArchiveStep({
+  projectRoot,
+  allureResultsDir,
+  runId,
+  artifactsStore,
+  logger
+}: {
+  projectRoot: string;
+  allureResultsDir: string | undefined;
+  runId: string;
+  artifactsStore: RunArtifactsStore;
+  logger?: RunManagerLogger;
+}): Promise<string[]> {
+  if (!allureResultsDir) return [];
+  const sourceAbs = path.resolve(projectRoot, allureResultsDir);
+  try {
+    const outcome = await artifactsStore.archiveAllureResultsDir(projectRoot, sourceAbs);
+    return outcome.warnings;
+  } catch (error) {
+    // Archive op identified as a "redaction" of user data into a safe
+    // location (Issue #31 axes: identity = `allure-results`,
+    // operation = `redaction`). Same shape as Playwright JSON redaction
+    // logging.
+    logger?.error(
+      {
+        runId,
+        artifactKind: "allure-results" satisfies ArtifactKind,
+        op: "redaction" satisfies ArtifactOperation,
+        ...errorLogFields(error)
+      },
+      "allure-results archive failed"
+    );
+    throw error;
+  }
+}
+
+/**
+ * Phase 1.2 copy step (T203-3). Post-run hook that materializes the
+ * user's freshly-written `allure-results/*` into `<runDir>/allure-results/`
+ * so AllureReportProvider can read a stable, run-scoped snapshot. Failures
+ * are non-fatal — the test run already finished, so we surface a structured
+ * error log + a warning rather than aborting the post-run pipeline.
+ *
+ * Returns warnings (path-redacted) for inclusion in `RunMetadata.warnings`.
+ */
+async function runCopyStep({
+  projectRoot,
+  allureResultsDir,
+  allureResultsDest,
+  runId,
+  artifactsStore,
+  logger
+}: {
+  projectRoot: string;
+  allureResultsDir: string | undefined;
+  allureResultsDest: string;
+  runId: string;
+  artifactsStore: RunArtifactsStore;
+  logger?: RunManagerLogger;
+}): Promise<string[]> {
+  if (!allureResultsDir) return [];
+  const sourceAbs = path.resolve(projectRoot, allureResultsDir);
+  try {
+    const outcome = await artifactsStore.copyAllureResultsDir(sourceAbs, allureResultsDest);
+    return outcome.warnings;
+  } catch (error) {
+    // Copy op is plain artifact materialization (no operation axis — the
+    // run-scoped allure-results directory is the artifact being created).
+    // Identity-only log keeps the operation axis available for redaction
+    // / summary-extract follow-ups (T206 / T207).
+    logger?.error(
+      {
+        runId,
+        artifactKind: "allure-results" satisfies ArtifactKind,
+        ...errorLogFields(error)
+      },
+      "allure-results copy failed"
+    );
+    return [
+      `Allure-results copy failed; run-scoped artifact may be incomplete. code=${errorCode(error)}`
+    ];
   }
 }
 
