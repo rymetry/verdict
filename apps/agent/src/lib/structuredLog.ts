@@ -51,7 +51,16 @@ export type ArtifactKind =
   | "stderr-log"
   | "metadata"
   | "runs-directory"
-  | "audit-log";
+  | "audit-log"
+  // Phase 1.2 (T203-4): identity for the Allure-playwright reporter raw
+  // output directory. Added now so T203-2 (RunArtifactsStore archive/copy
+  // helpers) and T203-3 (RunManager lifecycle hooks) can emit structured
+  // logs against this stable identity. `allure-report` (Allure CLI HTML
+  // output) and `allure-exports` (csv/log) will be added by T204 and T207
+  // respectively when their producers land — keeping additions strictly
+  // when call sites need them avoids the kind of dead union member that
+  // `playwright-html` was for Phase 1.7.
+  | "allure-results";
 
 /**
  * Closed string union for structured-log artifact **operation**. Operations
