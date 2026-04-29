@@ -166,18 +166,29 @@ describe("buildQmoSummary outcome derivation", () => {
 });
 
 describe("buildQmoSummary content", () => {
-  it("includes test summary, run command, paths, and warnings", () => {
+  it("includes test summary, run command, and warnings", () => {
     const md = makeMetadata({
       warnings: ["disk space low"],
       durationMs: 12_345
     });
-    const summary = buildQmoSummary({ runMetadata: md });
+    const qg: QualityGateResult = {
+      status: "passed",
+      profile: "local-review",
+      evaluatedAt: "2026-04-29T00:01:30Z",
+      exitCode: 0,
+      stdout: "ok",
+      stderr: "",
+      warnings: []
+    };
+    const summary = buildQmoSummary({ runMetadata: md, qualityGateResult: qg });
     expect(summary.runId).toBe("run-1");
     expect(summary.projectId).toBe("/p");
     expect(summary.testSummary?.total).toBe(2);
     expect(summary.warnings).toEqual(["disk space low"]);
     expect(summary.runDurationMs).toBe(12_345);
     expect(summary.command?.executable).toBe("npx");
+    // reportLinks are gated on actual artifact presence (T207 review fix);
+    // when no skip/failure markers are in the warnings, both links populate.
     expect(summary.reportLinks.allureReportDir).toBe("/runs/run-1/allure-report");
     expect(summary.reportLinks.qualityGateResultPath).toBe("/runs/run-1/quality-gate-result.json");
   });
@@ -266,19 +277,32 @@ describe("persistQmoSummary + readPersistedQualityGate", () => {
     expect(markdown).toContain("**Outcome**: `ready`");
   });
 
-  it("returns undefined for an absent quality-gate file", async () => {
+  it("returns kind='absent' for an absent quality-gate file (legitimate skip)", async () => {
     const result = await readPersistedQualityGate(path.join(workdir, "missing.json"));
-    expect(result).toBeUndefined();
+    expect(result.kind).toBe("absent");
   });
 
-  it("returns undefined for malformed JSON in the quality-gate file", async () => {
+  it("returns kind='unreadable' with INVALID_JSON for malformed JSON (cannot silently downgrade)", async () => {
     const target = path.join(workdir, "qg.json");
     fs.writeFileSync(target, "{ not json");
     const result = await readPersistedQualityGate(target);
-    expect(result).toBeUndefined();
+    expect(result.kind).toBe("unreadable");
+    if (result.kind === "unreadable") {
+      expect(result.code).toBe("INVALID_JSON");
+    }
   });
 
-  it("parses and returns a valid persisted QualityGateResult", async () => {
+  it("returns kind='unreadable' with SCHEMA_MISMATCH for valid JSON that fails the schema", async () => {
+    const target = path.join(workdir, "qg.json");
+    fs.writeFileSync(target, JSON.stringify({ status: "no-such-status" }));
+    const result = await readPersistedQualityGate(target);
+    expect(result.kind).toBe("unreadable");
+    if (result.kind === "unreadable") {
+      expect(result.code).toBe("SCHEMA_MISMATCH");
+    }
+  });
+
+  it("returns kind='found' with the parsed QualityGateResult on success", async () => {
     const target = path.join(workdir, "qg.json");
     const persisted: QualityGateResult = {
       status: "passed",
@@ -291,7 +315,42 @@ describe("persistQmoSummary + readPersistedQualityGate", () => {
     };
     fs.writeFileSync(target, JSON.stringify(persisted));
     const result = await readPersistedQualityGate(target);
-    expect(result?.status).toBe("passed");
-    expect(result?.profile).toBe("local-review");
+    expect(result.kind).toBe("found");
+    if (result.kind === "found") {
+      expect(result.value.status).toBe("passed");
+      expect(result.value.profile).toBe("local-review");
+    }
+  });
+});
+
+describe("buildQmoSummary reportLinks gating (T207 review fix)", () => {
+  it("omits allureReportDir when warnings indicate the report was skipped", () => {
+    const md = makeMetadata({
+      warnings: ["Allure HTML report skipped: no results in run-scoped allure-results."]
+    });
+    const summary = buildQmoSummary({ runMetadata: md });
+    expect(summary.reportLinks.allureReportDir).toBeUndefined();
+  });
+
+  it("omits allureReportDir when warnings indicate the report generation failed", () => {
+    const md = makeMetadata({
+      warnings: ["Allure HTML report generation failed. exitCode=1; signal=null"]
+    });
+    const summary = buildQmoSummary({ runMetadata: md });
+    expect(summary.reportLinks.allureReportDir).toBeUndefined();
+  });
+
+  it("populates allureReportDir when no skip/fail markers are present", () => {
+    const md = makeMetadata({ warnings: ["unrelated warning"] });
+    const summary = buildQmoSummary({ runMetadata: md });
+    expect(summary.reportLinks.allureReportDir).toBe("/runs/run-1/allure-report");
+  });
+
+  it("omits qualityGateResultPath when warnings indicate QG was skipped", () => {
+    const md = makeMetadata({
+      warnings: ["Allure quality-gate skipped: no results in run-scoped allure-results."]
+    });
+    const summary = buildQmoSummary({ runMetadata: md });
+    expect(summary.reportLinks.qualityGateResultPath).toBeUndefined();
   });
 });

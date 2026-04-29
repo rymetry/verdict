@@ -42,10 +42,45 @@ export interface BuildQmoSummaryInput {
   qualityGateResult?: QualityGateResult;
 }
 
+/**
+ * Markers in `RunMetadata.warnings` that indicate the Allure HTML
+ * report or QG result was NOT successfully produced. The QMO summary's
+ * `reportLinks` only points to artifacts that actually exist, so a PR
+ * comment / GitHub link does not 404 to a missing path.
+ *
+ * T207 review fix: previously `reportLinks.allureReportDir` was
+ * unconditionally set to the run-scoped path even when the report had
+ * been skipped (no results) or failed (CLI error). Detecting this
+ * structurally from warnings keeps the summary honest without
+ * coupling the builder to a separate "did report generation succeed"
+ * flag.
+ */
+const ALLURE_REPORT_FAILED_MARKERS = [
+  "Allure HTML report skipped",
+  "Allure HTML report generation failed",
+  "Allure HTML report generation timed out",
+  "Allure HTML report generation failed before exit",
+  "Allure CLI not found"
+];
+
+const QG_RESULT_MISSING_MARKERS = [
+  "Allure quality-gate skipped",
+  "Allure quality-gate result could not be persisted",
+  "Allure quality-gate failed before exit"
+];
+
+function hasAnyMarker(warnings: ReadonlyArray<string>, markers: ReadonlyArray<string>): boolean {
+  return markers.some((marker) => warnings.some((w) => w.includes(marker)));
+}
+
 export function buildQmoSummary(input: BuildQmoSummaryInput): QmoSummary {
   const { runMetadata, qualityGateResult } = input;
   const testSummary = runMetadata.summary;
   const outcome = deriveOutcome(testSummary, qualityGateResult);
+  const allureReportPresent = !hasAnyMarker(runMetadata.warnings, ALLURE_REPORT_FAILED_MARKERS);
+  const qgPresent =
+    qualityGateResult !== undefined &&
+    !hasAnyMarker(runMetadata.warnings, QG_RESULT_MISSING_MARKERS);
   return {
     runId: runMetadata.runId,
     projectId: runMetadata.projectId,
@@ -62,8 +97,11 @@ export function buildQmoSummary(input: BuildQmoSummaryInput): QmoSummary {
       : undefined,
     warnings: runMetadata.warnings,
     reportLinks: {
-      allureReportDir: runMetadata.paths.allureReportDir,
-      qualityGateResultPath: runMetadata.paths.qualityGateResultPath
+      // Only populate links to artifacts that actually exist on disk —
+      // otherwise PR comments / external consumers would 404 to a path
+      // declared but never written.
+      allureReportDir: allureReportPresent ? runMetadata.paths.allureReportDir : undefined,
+      qualityGateResultPath: qgPresent ? runMetadata.paths.qualityGateResultPath : undefined
     },
     runDurationMs: runMetadata.durationMs,
     command: runMetadata.command
@@ -216,27 +254,52 @@ export async function persistQmoSummary(
 }
 
 /**
- * Reads the persisted Quality Gate result, if any. Returns undefined when
- * the file is absent (project does not use Allure / QG step skipped) or
- * malformed (T205-2's persistence path itself emits warnings on write
- * errors; read errors here are non-fatal — the QMO summary degrades to
- * `qualityGateResult: undefined` rather than aborting).
+ * Result of attempting to read the persisted Quality Gate result.
+ *
+ * The shape distinguishes "legitimately absent" (file does not exist —
+ * project not Allure-configured or QG step skipped before write) from
+ * "unreadable" (permission flip, IO error, malformed JSON, schema
+ * mismatch). The QMO summary builder must NOT silently treat
+ * "unreadable" as "absent": a previous run could have successfully
+ * written a `failed` QG result, so producing `outcome: "ready"` based
+ * on tests alone would mask a real release blocker.
+ */
+export type ReadQualityGateOutcome =
+  | { kind: "found"; value: QualityGateResult }
+  | { kind: "absent" }
+  | { kind: "unreadable"; code: string };
+
+/**
+ * Reads the persisted Quality Gate result. T207 review fix:
+ * distinguishes legitimate absence (ENOENT) from unreadable conditions
+ * (EACCES / EIO / malformed JSON / schema mismatch) so the caller can
+ * surface a warning instead of silently degrading to "ready".
  */
 export async function readPersistedQualityGate(
   qualityGateResultPath: string
-): Promise<QualityGateResult | undefined> {
+): Promise<ReadQualityGateOutcome> {
   let raw: string;
   try {
     raw = await fs.readFile(qualityGateResultPath, "utf8");
-  } catch {
-    return undefined;
+  } catch (error) {
+    const code =
+      error instanceof Error && "code" in error && typeof (error as { code: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : undefined;
+    if (code === "ENOENT") {
+      return { kind: "absent" };
+    }
+    return { kind: "unreadable", code: code ?? "READ_FAILED" };
   }
   try {
     const { QualityGateResultSchema } = await import("@pwqa/shared");
     const parsed = QualityGateResultSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : undefined;
+    if (parsed.success) {
+      return { kind: "found", value: parsed.data };
+    }
+    return { kind: "unreadable", code: "SCHEMA_MISMATCH" };
   } catch {
-    return undefined;
+    return { kind: "unreadable", code: "INVALID_JSON" };
   }
 }
 
