@@ -15,7 +15,7 @@ import { AuditPersistenceError } from "../src/lib/errors.js";
 // 更新する作業が必要となり、その時点で関連する logger 呼び出し
 // (runManager.ts / streamRedactor.ts) の `satisfies` チェックが
 // コンパイルエラーで顕在化する。
-describe("ArtifactKind type-level regression (Issue #30-A / Issue #31)", () => {
+describe("ArtifactKind type-level regression (Issue #30-A / Issue #31 / T203-4)", () => {
   it("freezes the identity union member set", () => {
     expectTypeOf<ArtifactKind>().toEqualTypeOf<
       | "playwright-json"
@@ -25,6 +25,7 @@ describe("ArtifactKind type-level regression (Issue #30-A / Issue #31)", () => {
       | "metadata"
       | "runs-directory"
       | "audit-log"
+      | "allure-results"
     >();
   });
 
