@@ -72,6 +72,14 @@ interface RunManagerDeps {
   reportProvider?: ReportProvider;
   redactor?: (chunk: string) => RedactionResult;
   logger?: RunManagerLogger;
+  /**
+   * Phase 1.2 (T204-3): CommandRunner factory scoped to the Allure CLI
+   * (built with `createAllureCommandPolicy`). When provided, RunManager
+   * invokes `allure generate` after the run-scoped allure-results copy
+   * lands. Undefined → HTML generation skipped (test envs, projects
+   * without Allure CLI installed).
+   */
+  allureRunnerForProject?: (projectRoot: string) => CommandRunner;
 }
 
 function newRunId(): string {
@@ -293,7 +301,8 @@ export function createRunManager({
   artifactsStore = defaultArtifactsStore,
   reportProvider = playwrightJsonReportProvider,
   redactor = redactWithStats,
-  logger
+  logger,
+  allureRunnerForProject
 }: RunManagerDeps): RunManager {
   const active = new Map<string, ActiveRunHandle>();
 
@@ -492,6 +501,20 @@ export function createRunManager({
           artifactsStore,
           logger
         });
+        // Phase 1.2 report-generation step (T204-3): invoke
+        // `allure generate` against the run-scoped results directory to
+        // produce the HTML report. Skipped when allureRunnerForProject is
+        // unset (test envs / no CLI installed) or when the project does
+        // not use Allure. Failure is NON-fatal — same rationale as copy.
+        const reportGenerationWarnings = await runReportGenerationStep({
+          projectRoot: params.projectRoot,
+          allureResultsDir: params.allureResultsDir,
+          allureResultsDest: paths.allureResultsDest,
+          allureReportDir: paths.allureReportDir,
+          runId,
+          allureRunner: allureRunnerForProject?.(params.projectRoot),
+          logger
+        });
         // summary は metadata と WS に流れるため、必ず scrubbed JSON から読む。
         const summary = await readSummarySafely(
           reportProvider,
@@ -506,6 +529,7 @@ export function createRunManager({
           ...runningMetadata.warnings,
           ...logWriteWarnings,
           ...copyWarnings,
+          ...reportGenerationWarnings,
           ...streamRedactor.flush(),
           ...flushStreamPublishWarnings(),
           ...(summary?.warnings ?? [])
@@ -810,6 +834,73 @@ async function runCopyStep({
       `Allure-results copy failed; run-scoped artifact may be incomplete. code=${errorCode(error)}`
     ];
   }
+}
+
+/**
+ * Phase 1.2 report-generation step (T204-3). Post-copy hook that invokes
+ * `allure generate` to produce the HTML report under
+ * `<runDir>/allure-report/`. Skipped when `allureResultsDir` is undefined
+ * (project does not use Allure) or when no Allure runner is wired (test
+ * environments / CLI not installed). Failures are NON-fatal — the run
+ * already produced raw allure-results that downstream phases (T205
+ * Quality Gate, T207 QMO) can still consume.
+ *
+ * Logs structured info on success and structured error on failure, both
+ * with `artifactKind: "allure-report"` (no operation axis — generation
+ * is the artifact's identity-lifecycle event).
+ */
+async function runReportGenerationStep({
+  projectRoot,
+  allureResultsDir,
+  allureResultsDest,
+  allureReportDir,
+  runId,
+  allureRunner,
+  logger
+}: {
+  projectRoot: string;
+  allureResultsDir: string | undefined;
+  allureResultsDest: string;
+  allureReportDir: string;
+  runId: string;
+  allureRunner: CommandRunner | undefined;
+  logger?: RunManagerLogger;
+}): Promise<string[]> {
+  if (!allureResultsDir || !allureRunner) return [];
+  // Lazy import to keep the module tree shallow — generator pulls in fs
+  // existence checks that are unnecessary for runs without Allure.
+  const { generateAllureReport } = await import("./allureReportGenerator.js");
+  const outcome = await generateAllureReport({
+    runner: allureRunner,
+    projectRoot,
+    allureResultsDest,
+    allureReportDir
+  });
+  if (outcome.ok) {
+    logger?.info?.(
+      {
+        runId,
+        artifactKind: "allure-report" satisfies ArtifactKind,
+        durationMs: outcome.durationMs,
+        exitCode: outcome.exitCode ?? 0
+      },
+      "allure HTML report generated"
+    );
+  } else {
+    // Identity-only error log (no op): generation is the artifact's
+    // lifecycle event itself, not a sub-operation on an existing
+    // artifact (Issue #31 axes convention).
+    logger?.error(
+      {
+        runId,
+        artifactKind: "allure-report" satisfies ArtifactKind,
+        exitCode: outcome.exitCode,
+        durationMs: outcome.durationMs
+      },
+      "allure HTML report generation failed"
+    );
+  }
+  return outcome.warnings;
 }
 
 async function readSummarySafely(

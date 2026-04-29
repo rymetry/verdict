@@ -20,6 +20,7 @@ import {
 } from "./commands/runner.js";
 import { AuditPersistenceError } from "./lib/errors.js";
 import {
+  createAllureCommandPolicy,
   createDefaultCommandPolicy,
   type CommandPolicy
 } from "./commands/policy.js";
@@ -232,8 +233,50 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     });
   };
 
+  // Phase 1.2 (T204-3): Allure CLI runner uses a separate policy so the
+  // arg-validator surface is reviewed independently of the Playwright
+  // policy. Audit logging follows the same shape as `runnerForProject`
+  // (cwdHash + persistence + info echo).
+  const allureRunnerForProject = (projectRoot: string): CommandRunner =>
+    createNodeCommandRunner({
+      policy: createAllureCommandPolicy(projectRoot),
+      audit: (entry) => {
+        const { cwd, ...auditWithoutCwd } = entry;
+        logger.info?.(
+          { audit: { ...auditWithoutCwd, cwdHash: projectIdHash(cwd) } },
+          "command audit"
+        );
+        let auditPersistenceError: AuditPersistenceError | undefined;
+        try {
+          persistAuditEntry(projectRoot, entry);
+        } catch (error) {
+          auditPersistenceError = new AuditPersistenceError(error);
+          logger.error(
+            {
+              artifactKind: "audit-log",
+              ...errorLogFields(error)
+            },
+            "failed to persist audit log entry"
+          );
+        }
+        try {
+          options.audit?.(entry);
+        } catch (error) {
+          logger.error({ ...errorLogFields(error) }, "audit observer failed");
+        }
+        if (auditPersistenceError && env.failClosedAudit) {
+          throw auditPersistenceError;
+        }
+      }
+    });
+
   const projectStore = createProjectStore();
-  const runManager = createRunManager({ runnerForProject, bus, logger });
+  const runManager = createRunManager({
+    runnerForProject,
+    bus,
+    logger,
+    allureRunnerForProject
+  });
 
   const app = new Hono();
   attachCors(app);
