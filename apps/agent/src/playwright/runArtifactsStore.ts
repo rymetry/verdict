@@ -160,6 +160,48 @@ export const runArtifactsStore: RunArtifactsStore = {
 /* Phase 1.2 helpers (T203-2): detect/archive/copy lifecycle implementation */
 /* ------------------------------------------------------------------------ */
 
+/**
+ * Operational error codes that abort the archive/copy loop instead of being
+ * accumulated into per-entry warnings. Mirrors `allureResultsReader.ts`
+ * `FATAL_READ_CODES` precedent (extended for write-side fatals): when one
+ * of these codes fires, the next entry will fail too, and aggregating into
+ * a generic "N of M failed" warning hides the operator-action condition
+ * (disk full / permission misconfig / FD exhaustion). Single throw → caller
+ * emits one structured log with `errorLogFields(error)` + the appropriate
+ * artifactKind.
+ */
+const FATAL_OPERATIONAL_CODES = new Set([
+  // Read-side (also in allureResultsReader.ts)
+  "EMFILE",
+  "ENFILE",
+  "EACCES",
+  "EIO",
+  // Write-side (additional, since archive/copy mutate filesystem)
+  "ENOSPC", // out of disk
+  "EDQUOT", // disk quota exceeded
+  "EROFS"   // read-only filesystem
+]);
+
+function errorCodeOf(error: unknown): string | undefined {
+  return error instanceof Error && "code" in error
+    ? (error as NodeJS.ErrnoException).code
+    : undefined;
+}
+
+function rethrowIfFatal(error: unknown): void {
+  const code = errorCodeOf(error);
+  if (code && FATAL_OPERATIONAL_CODES.has(code)) {
+    throw error;
+  }
+  // Non-Error throws are programmer errors (a future code change passing
+  // a non-Error accidentally). Always re-throw — there is no operational
+  // code that can recover from `throw "string"`. Mirrors T202 review fix
+  // (PR #36) for `JSON.parse` catch narrowing.
+  if (!(error instanceof Error)) {
+    throw error;
+  }
+}
+
 function timestampSegment(): string {
   // ISO-8601 with `:` and `.` replaced for cross-platform safety. Sort
   // order in directory listings matches chronological order, which is
@@ -262,28 +304,42 @@ async function archiveAllureResultsImpl(
       movedCount += 1;
       continue;
     } catch (error) {
-      const code = error instanceof Error && "code" in error
-        ? (error as NodeJS.ErrnoException).code
-        : undefined;
-      // EXDEV (cross-device link): fall back to copy + unlink. Other
-      // errors are surfaced as partial-failure warnings without aborting
-      // the loop — moving N-1 of N entries is better than aborting at
-      // the first race.
+      // FATAL_OPERATIONAL_CODES (ENOSPC / EACCES / EIO / FD-exhaustion etc)
+      // mean the next entry will fail too. Propagate so the caller sees one
+      // actionable error rather than a flood of "N of M failed" warnings
+      // that hide the operator-action condition. Mirrors T202 reader's
+      // FATAL_READ_CODES precedent.
+      rethrowIfFatal(error);
+      const code = errorCodeOf(error);
       if (code === "EXDEV") {
-        try {
-          await fs.cp(srcEntry, destEntry, { recursive: true, dereference: false, errorOnExist: false, force: true });
-          await fs.rm(srcEntry, { recursive: true, force: true });
-          movedCount += 1;
-          continue;
-        } catch (cpError) {
-          failureCount += 1;
-          if (!firstFailureCode) {
-            firstFailureCode = cpError instanceof Error && "code" in cpError
-              ? (cpError as NodeJS.ErrnoException).code ?? "EXDEV_FALLBACK_FAILED"
-              : "EXDEV_FALLBACK_FAILED";
+        // Cross-device link: fall back to copy + unlink. Use the same
+        // walk-based copier as the run-time copy step so symlinks inside
+        // a directory subtree are skipped consistently (rather than
+        // preserved verbatim by `fs.cp` `dereference: false`).
+        const cpResult = await safeCpForArchive(srcEntry, destEntry, entry);
+        if (cpResult.ok) {
+          symlinkSkipCount += cpResult.symlinkSkipCount;
+          try {
+            await fs.rm(srcEntry, { recursive: true, force: true });
+            movedCount += 1;
+            continue;
+          } catch (rmError) {
+            // Source still has data; rollback the destination to avoid
+            // leaving a half-moved entry on operator's filesystem.
+            await fs.rm(destEntry, { recursive: true, force: true }).catch(() => undefined);
+            rethrowIfFatal(rmError);
+            failureCount += 1;
+            if (!firstFailureCode) {
+              firstFailureCode = errorCodeOf(rmError) ?? "EXDEV_RM_FAILED";
+            }
+            continue;
           }
-          continue;
         }
+        // cp failed: roll back any partial dest before recording.
+        await fs.rm(destEntry, { recursive: true, force: true }).catch(() => undefined);
+        failureCount += 1;
+        if (!firstFailureCode) firstFailureCode = cpResult.firstCode ?? "EXDEV_FALLBACK_FAILED";
+        continue;
       }
       failureCount += 1;
       if (!firstFailureCode) firstFailureCode = code ?? "ARCHIVE_RENAME_FAILED";
@@ -301,11 +357,75 @@ async function archiveAllureResultsImpl(
     );
   }
 
+  // Total-failure cleanup: if nothing was moved, the timestamped subdir is
+  // empty and would otherwise accumulate as orphaned data on every retry
+  // (1000 empty dirs after 1000 runs of a recurring failure). Best-effort
+  // rmdir; ignore errors since the failure path is already emitting a
+  // warning and we don't want to mask it.
+  if (movedCount === 0) {
+    await fs.rmdir(archiveChild).catch(() => undefined);
+  }
+
   return {
     archived: movedCount > 0,
     archivePath: movedCount > 0 ? archiveChild : undefined,
     warnings
   };
+}
+
+/**
+ * Walk-based copy for archive's EXDEV fallback. For a file entry, does
+ * `fs.copyFile`. For a directory entry, recursively walks via the same
+ * `walkAndCopy` helper used by the run-time copy step (so symlinks
+ * inside the subtree are skipped consistently rather than preserved
+ * verbatim by `fs.cp`'s `dereference: false`).
+ *
+ * Returns `{ ok: false, firstCode }` on any per-file failure (caller
+ * rolls back the partial dest) or `{ ok: true, symlinkSkipCount }`.
+ */
+async function safeCpForArchive(
+  srcEntry: string,
+  destEntry: string,
+  entry: fsSync.Dirent
+): Promise<
+  | { ok: true; symlinkSkipCount: number }
+  | { ok: false; firstCode: string | undefined }
+> {
+  if (!entry.isDirectory()) {
+    // Regular file (the archive caller already filtered out symlinks at
+    // this entry level).
+    try {
+      await fs.copyFile(srcEntry, destEntry);
+      return { ok: true, symlinkSkipCount: 0 };
+    } catch (error) {
+      rethrowIfFatal(error);
+      return { ok: false, firstCode: errorCodeOf(error) ?? "COPY_FAILED" };
+    }
+  }
+  // Directory: walk recursively so symlinks inside are skipped consistently.
+  let symlinkSkipCount = 0;
+  let firstCode: string | undefined;
+  let aborted = false;
+
+  try {
+    await fs.mkdir(destEntry, { recursive: true });
+    await walkAndCopy(srcEntry, destEntry, {
+      onFileCopied: () => undefined,
+      onSymlinkSkipped: () => { symlinkSkipCount += 1; },
+      onNonRegularSkipped: () => undefined,
+      onFailure: (code) => {
+        aborted = true;
+        if (!firstCode) firstCode = code;
+      }
+    });
+  } catch (error) {
+    rethrowIfFatal(error);
+    aborted = true;
+    if (!firstCode) firstCode = errorCodeOf(error) ?? "WALK_FAILED";
+  }
+
+  if (aborted) return { ok: false, firstCode };
+  return { ok: true, symlinkSkipCount };
 }
 
 async function copyAllureResultsImpl(
@@ -406,10 +526,10 @@ async function walkAndCopy(
       try {
         await fs.mkdir(destEntry, { recursive: true });
       } catch (error) {
-        const code = error instanceof Error && "code" in error
-          ? (error as NodeJS.ErrnoException).code ?? "MKDIR_FAILED"
-          : "MKDIR_FAILED";
-        handlers.onFailure(code);
+        // FATAL_OPERATIONAL_CODES propagate (FD exhaustion / disk full /
+        // permission denied / IO fault — next mkdir will fail too).
+        rethrowIfFatal(error);
+        handlers.onFailure(errorCodeOf(error) ?? "MKDIR_FAILED");
         continue;
       }
       await walkAndCopy(srcEntry, destEntry, handlers);
@@ -423,10 +543,10 @@ async function walkAndCopy(
       await fs.copyFile(srcEntry, destEntry);
       handlers.onFileCopied();
     } catch (error) {
-      const code = error instanceof Error && "code" in error
-        ? (error as NodeJS.ErrnoException).code ?? "COPY_FAILED"
-        : "COPY_FAILED";
-      handlers.onFailure(code);
+      // Process-level fatals propagate; per-file races (e.g. file
+      // disappeared mid-copy) become per-entry warnings.
+      rethrowIfFatal(error);
+      handlers.onFailure(errorCodeOf(error) ?? "COPY_FAILED");
     }
   }
 }

@@ -188,6 +188,51 @@ describe("runArtifactsStore.archiveAllureResultsDir", () => {
     expect(outcome.archived).toBe(true);
     expect(fs.existsSync(path.join(workdir, ".playwright-workbench", "archive"))).toBe(true);
   });
+
+  it("propagates FATAL_OPERATIONAL_CODES (EACCES) instead of swallowing into a warning", async () => {
+    // Skip on Windows / non-POSIX where chmod semantics differ.
+    if (process.platform === "win32") return;
+    // chmod 000 has no effect on root, so skip when running as root.
+    if (typeof process.getuid === "function" && process.getuid() === 0) return;
+
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    fs.writeFileSync(path.join(sourceAbs, "x-result.json"), "ok");
+
+    // Lock the archive parent so rename(src → archive/<ts>/x) fails with
+    // EACCES. This is the canonical operator-action condition that must
+    // propagate (PR #39 review CRITICAL): swallowing it into a generic
+    // "0 of 1 entries archived" warning hides the misconfiguration.
+    const archiveParent = path.join(workdir, ".playwright-workbench", "archive");
+    fs.mkdirSync(archiveParent, { recursive: true });
+    fs.chmodSync(archiveParent, 0o555); // r-x: readdir works, mkdir fails
+
+    try {
+      await expect(
+        runArtifactsStore.archiveAllureResultsDir(workdir, sourceAbs)
+      ).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      fs.chmodSync(archiveParent, 0o755);
+    }
+  });
+
+  it("does not leave an empty timestamped subdir when no entries could be moved", async () => {
+    const sourceAbs = path.join(workdir, "allure-results");
+    fs.mkdirSync(sourceAbs);
+    // A symlink-only source: every entry is skipped (symlink), so movedCount=0.
+    // The timestamped archive subdir was created (mkdir) but should be cleaned
+    // up afterwards rather than accumulating empty dirs on every retry.
+    fs.symlinkSync("/etc/passwd", path.join(sourceAbs, "evil-link"));
+
+    const outcome = await runArtifactsStore.archiveAllureResultsDir(workdir, sourceAbs);
+    expect(outcome.archived).toBe(false);
+    expect(outcome.archivePath).toBeUndefined();
+    // Verify no empty subdir remained under archive/.
+    const archiveParent = path.join(workdir, ".playwright-workbench", "archive");
+    expect(fs.existsSync(archiveParent)).toBe(true);
+    const archiveContents = fs.readdirSync(archiveParent);
+    expect(archiveContents).toEqual([]);
+  });
 });
 
 describe("runArtifactsStore.copyAllureResultsDir", () => {
