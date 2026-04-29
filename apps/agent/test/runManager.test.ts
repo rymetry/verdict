@@ -1405,4 +1405,210 @@ process.exit(1);
       fs.rmSync(brokenRoot, { recursive: true, force: true });
     }
   });
+
+  /* --------------------------------------------------------------- */
+  /* T203-3: Allure detect/archive/copy lifecycle hook integration   */
+  /* --------------------------------------------------------------- */
+
+  describe("Allure detect/archive/copy lifecycle (T203-3)", () => {
+    function setupSuccessRun(): {
+      bus: EventBus;
+      pm: DetectedPackageManager;
+      manager: ReturnType<typeof createRunManager>;
+    } {
+      const bus = createEventBus();
+      const runner = createNodeCommandRunner({
+        policy: {
+          allowedExecutables: ["node"],
+          argValidator: unsafelyAllowAnyArgsValidator,
+          cwdBoundary: workdir,
+          envAllowlist: ["PATH", "HOME"]
+        }
+      });
+      const manager = createRunManager({ runnerForProject: () => runner, bus });
+      const stubPath = writeStub("stub.js", STUB_SUCCESS_SCRIPT);
+      const pm = fakePackageManager();
+      pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+      return { bus, pm, manager };
+    }
+
+    it("is a no-op when allureResultsDir is undefined", async () => {
+      const { pm, manager } = setupSuccessRun();
+      const handle = await manager.startRun({
+        projectId: workdir,
+        projectRoot: workdir,
+        packageManager: pm,
+        request: { projectId: workdir, headed: false }
+        // allureResultsDir intentionally omitted
+      });
+      const completed = await handle.finished;
+      expect(completed.status).toBe("passed");
+      // No archive/copy artifacts should appear under .playwright-workbench
+      const archiveDir = path.join(workdir, ".playwright-workbench", "archive");
+      expect(fs.existsSync(archiveDir)).toBe(false);
+    });
+
+    it("archives existing user allure-results before run, then copies fresh ones to runDir", async () => {
+      const { pm, manager } = setupSuccessRun();
+      // Existing user allure-results that must be archived (contains old data
+      // that the next run could otherwise overwrite).
+      const userResultsDir = path.join(workdir, "allure-results");
+      fs.mkdirSync(userResultsDir);
+      fs.writeFileSync(path.join(userResultsDir, "old-uuid-result.json"), "old");
+
+      const handle = await manager.startRun({
+        projectId: workdir,
+        projectRoot: workdir,
+        packageManager: pm,
+        request: { projectId: workdir, headed: false },
+        allureResultsDir: "allure-results"
+      });
+      // After archive, source is empty (entries moved aside).
+      expect(fs.readdirSync(userResultsDir)).toEqual([]);
+
+      // Archive landed under .playwright-workbench/archive/<ts>/
+      const archiveParent = path.join(workdir, ".playwright-workbench", "archive");
+      expect(fs.existsSync(archiveParent)).toBe(true);
+      const archiveSubdirs = fs.readdirSync(archiveParent);
+      expect(archiveSubdirs).toHaveLength(1);
+      expect(
+        fs.readdirSync(path.join(archiveParent, archiveSubdirs[0]!))
+      ).toContain("old-uuid-result.json");
+
+      // Simulate Playwright writing fresh allure-results during the run.
+      // (The stub script doesn't actually write Allure output; we drop a
+      // file mid-run-flight is not deterministic, so write before finish.)
+      fs.writeFileSync(path.join(userResultsDir, "new-uuid-result.json"), "new");
+
+      const completed = await handle.finished;
+      expect(completed.status).toBe("passed");
+
+      // Copy step should have materialized the post-run user file into the
+      // run-scoped allure-results directory.
+      const runScopedDest = completed.paths.allureResultsDest;
+      expect(fs.existsSync(runScopedDest)).toBe(true);
+      expect(fs.readFileSync(path.join(runScopedDest, "new-uuid-result.json"), "utf8")).toBe("new");
+    });
+
+    it("propagates archive failure as structured log error (artifactKind allure-results, op redaction)", async () => {
+      // Simulate FATAL_OPERATIONAL_CODE by passing a custom artifactsStore
+      // whose archive throws EACCES. Verifies that the lifecycle hook logs
+      // with the documented Issue #31 axes before re-throwing.
+      const { bus, pm, manager: _ignored } = setupSuccessRun();
+      void _ignored;
+      const errors: Array<Record<string, unknown>> = [];
+      const captureLogger = {
+        error(payload: Record<string, unknown>) {
+          errors.push(payload);
+        }
+      };
+      const customRunner = createNodeCommandRunner({
+        policy: {
+          allowedExecutables: ["node"],
+          argValidator: unsafelyAllowAnyArgsValidator,
+          cwdBoundary: workdir,
+          envAllowlist: ["PATH", "HOME"]
+        }
+      });
+      const fatalArchive = Object.assign(new Error("simulated"), { code: "EACCES" });
+      const customManager = createRunManager({
+        runnerForProject: () => customRunner,
+        bus,
+        artifactsStore: {
+          ...runArtifactsStore,
+          async archiveAllureResultsDir() {
+            throw fatalArchive;
+          }
+        },
+        logger: captureLogger
+      });
+
+      // Source dir must exist for the archive call to be reached.
+      const userResultsDir = path.join(workdir, "allure-results");
+      fs.mkdirSync(userResultsDir);
+      fs.writeFileSync(path.join(userResultsDir, "x-result.json"), "{}");
+
+      await expect(
+        customManager.startRun({
+          projectId: workdir,
+          projectRoot: workdir,
+          packageManager: pm,
+          request: { projectId: workdir, headed: false },
+          allureResultsDir: "allure-results"
+        })
+      ).rejects.toMatchObject({ code: "EACCES" });
+
+      // Structured log: archive failure with the documented Issue #31 axes.
+      expect(errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            artifactKind: "allure-results",
+            op: "redaction",
+            code: "EACCES"
+          })
+        ])
+      );
+    });
+
+    it("logs copy failure as structured error (allure-results, no op) and surfaces a warning without aborting the run", async () => {
+      const errors: Array<Record<string, unknown>> = [];
+      const captureLogger = {
+        error(payload: Record<string, unknown>) {
+          errors.push(payload);
+        }
+      };
+      const customRunner = createNodeCommandRunner({
+        policy: {
+          allowedExecutables: ["node"],
+          argValidator: unsafelyAllowAnyArgsValidator,
+          cwdBoundary: workdir,
+          envAllowlist: ["PATH", "HOME"]
+        }
+      });
+      const fatalCopy = Object.assign(new Error("simulated"), { code: "ENOSPC" });
+      const customManager = createRunManager({
+        runnerForProject: () => customRunner,
+        bus: createEventBus(),
+        artifactsStore: {
+          ...runArtifactsStore,
+          async copyAllureResultsDir() {
+            throw fatalCopy;
+          }
+        },
+        logger: captureLogger
+      });
+      const stubPath = writeStub("stub.js", STUB_SUCCESS_SCRIPT);
+      const pm = fakePackageManager();
+      pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+      const userResultsDir = path.join(workdir, "allure-results");
+      fs.mkdirSync(userResultsDir);
+
+      const handle = await customManager.startRun({
+        projectId: workdir,
+        projectRoot: workdir,
+        packageManager: pm,
+        request: { projectId: workdir, headed: false },
+        allureResultsDir: "allure-results"
+      });
+      const completed = await handle.finished;
+
+      // Copy failure is non-fatal — the test run already finished.
+      expect(completed.status).toBe("passed");
+      // Structured log: identity-only (no op axis).
+      expect(errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            artifactKind: "allure-results",
+            code: "ENOSPC"
+          })
+        ])
+      );
+      // Warning is included in metadata.warnings for UI/API surfacing.
+      expect(completed.warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Allure-results copy failed"),
+        ])
+      );
+    });
+  });
 });
