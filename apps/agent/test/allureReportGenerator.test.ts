@@ -237,7 +237,15 @@ describe("generateAllureReport", () => {
     );
   });
 
-  it.each([["EACCES"], ["EMFILE"], ["ENOSPC"], ["EROFS"], ["EIO"]])(
+  it.each([
+    ["EACCES"],
+    ["EMFILE"],
+    ["ENFILE"],
+    ["ENOSPC"],
+    ["EDQUOT"],
+    ["EROFS"],
+    ["EIO"]
+  ])(
     "propagates FATAL_OPERATIONAL_CODE %s instead of swallowing into a warning",
     async (fatalCode) => {
       const { allureResultsDest, allureReportDir } = setupAllureBinary();

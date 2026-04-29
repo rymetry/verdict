@@ -33,7 +33,8 @@ export function makeRunMetadata(
       playwrightHtml: "/runs/test/playwright-report",
       artifactsJson: "/runs/test/artifacts.json",
       allureResultsDest: "/runs/test/allure-results",
-      allureReportDir: "/runs/test/allure-report"
+      allureReportDir: "/runs/test/allure-report",
+      qualityGateResultPath: "/runs/test/quality-gate-result.json"
     },
     warnings: []
   };

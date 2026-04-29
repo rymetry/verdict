@@ -1551,6 +1551,100 @@ process.exit(1);
       );
     });
 
+    it("invokes the Allure CLI quality-gate via wired allureRunnerForProject and persists JSON when a runner is provided", async () => {
+      // Integration: prove that runQualityGateStep actually flows through
+      // RunManager and writes to paths.qualityGateResultPath. T205-2
+      // review (PR #45) flagged that the production path was uncovered.
+      const customRunner = createNodeCommandRunner({
+        policy: {
+          allowedExecutables: ["node"],
+          argValidator: unsafelyAllowAnyArgsValidator,
+          cwdBoundary: workdir,
+          envAllowlist: ["PATH", "HOME"]
+        }
+      });
+      // Stub Allure runner that returns exit 0 (passed) without spawning.
+      const allureSpawned: Array<{ args: ReadonlyArray<string> }> = [];
+      const fakeAllureRunner = {
+        run(spec: { executable: string; args: ReadonlyArray<string> }) {
+          allureSpawned.push({ args: spec.args });
+          const startedAt = new Date();
+          return {
+            result: Promise.resolve({
+              exitCode: 0,
+              signal: null,
+              startedAt: startedAt.toISOString(),
+              endedAt: new Date(startedAt.getTime() + 5).toISOString(),
+              durationMs: 5,
+              stdout: "Quality gate passed",
+              stderr: "",
+              cancelled: false,
+              timedOut: false,
+              command: { executable: spec.executable, args: spec.args, cwd: workdir }
+            }),
+            cancel() {}
+          };
+        }
+      };
+      // Pre-create the binary so allureReportGenerator's existsSync passes.
+      const binDir = path.join(workdir, "node_modules", ".bin");
+      fs.mkdirSync(binDir, { recursive: true });
+      fs.writeFileSync(path.join(binDir, "allure"), "#!/bin/sh\nexit 0\n");
+      fs.chmodSync(path.join(binDir, "allure"), 0o755);
+      const customManager = createRunManager({
+        runnerForProject: () => customRunner,
+        allureRunnerForProject: () => fakeAllureRunner,
+        bus: createEventBus()
+      });
+      // Stub that simulates allure-playwright reporter writing a result
+      // file during the test run. Without this the post-run copy step
+      // would yield zero entries and the QG step would skip with
+      // "no-results" before invoking the wired runner.
+      const allureWritingStub = `
+const fs = require('node:fs');
+const path = require('node:path');
+const reportEnv = process.env.PLAYWRIGHT_JSON_OUTPUT_NAME;
+if (reportEnv) {
+  fs.mkdirSync(path.dirname(reportEnv), { recursive: true });
+  fs.writeFileSync(reportEnv, JSON.stringify({
+    stats: { expected: 1, unexpected: 0, flaky: 0, skipped: 0, duration: 5 },
+    suites: []
+  }));
+}
+fs.mkdirSync('allure-results', { recursive: true });
+fs.writeFileSync('allure-results/uuid-result.json', JSON.stringify({
+  uuid: 'x', name: 'demo', status: 'passed', start: 0, stop: 5
+}));
+process.exit(0);
+`;
+      const stubPath = writeStub("stub-allure.js", allureWritingStub);
+      const pm = fakePackageManager();
+      pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+      const handle = await customManager.startRun({
+        projectId: workdir,
+        projectRoot: workdir,
+        packageManager: pm,
+        request: { projectId: workdir, headed: false },
+        allureResultsDir: "allure-results"
+      });
+      const completed = await handle.finished;
+
+      expect(completed.status).toBe("passed");
+      // Quality-gate JSON should have been persisted at the run-scoped path.
+      expect(fs.existsSync(completed.paths.qualityGateResultPath)).toBe(true);
+      const persisted = JSON.parse(
+        fs.readFileSync(completed.paths.qualityGateResultPath, "utf8")
+      ) as { status: string; profile: string };
+      expect(persisted.status).toBe("passed");
+      expect(persisted.profile).toBe("local-review");
+      // Spawn shape: at least one allure invocation captured (generate +
+      // quality-gate). The test does not pin order to keep T204/T205
+      // ordering changes from breaking.
+      const subcommands = allureSpawned.map((s) => s.args[0]);
+      expect(subcommands).toContain("quality-gate");
+    });
+
     it("logs copy failure as structured error (allure-results, no op) and surfaces a warning without aborting the run", async () => {
       const errors: Array<Record<string, unknown>> = [];
       const captureLogger = {
