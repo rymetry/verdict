@@ -82,6 +82,24 @@ interface RunManagerDeps {
   allureRunnerForProject?: (projectRoot: string) => CommandRunner;
 }
 
+/**
+ * Operational error codes that abort the QG persistence path instead of
+ * being swallowed into a structured warning. Matches the FATAL_OPERATIONAL_CODES
+ * set in `runArtifactsStore.ts` (T203-2) and `allureReportGenerator.ts`
+ * (T204-3) — write-side fatals only since persistence mutates the
+ * filesystem. PR #45 T205-2 review found that demoting these codes
+ * silently lost the QualityGateResult source-of-truth.
+ */
+const PERSIST_FATAL_CODES = new Set([
+  "EMFILE",
+  "ENFILE",
+  "EACCES",
+  "EIO",
+  "ENOSPC",
+  "EDQUOT",
+  "EROFS"
+]);
+
 function newRunId(): string {
   return `run-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 }
@@ -1027,6 +1045,18 @@ async function runQualityGateStep({
     try {
       await persistQualityGateResult(qualityGateResultPath, outcome.persisted);
     } catch (error) {
+      // FATAL_OPERATIONAL_CODES propagate even on the persistence path:
+      // ENOSPC / EDQUOT / EROFS / EACCES / EIO during the write means
+      // the next persistence attempt will fail too, AND it means the
+      // QualityGateResult was lost (no JSON file). Demoting that to a
+      // warning silently drops the persisted source-of-truth — QMO
+      // consumers reading the missing file would see ENOENT and have
+      // no way to distinguish "Allure not configured" from "disk full".
+      // Mirrors T204-3 fatal-propagation policy on the runner half.
+      const code = errorCode(error);
+      if (PERSIST_FATAL_CODES.has(code)) {
+        throw error;
+      }
       logger?.error(
         {
           runId,
@@ -1038,7 +1068,7 @@ async function runQualityGateStep({
       );
       return [
         ...outcome.warnings,
-        `Allure quality-gate result could not be persisted. code=${errorCode(error)}`
+        `Allure quality-gate result could not be persisted. code=${code}`
       ];
     }
   }
