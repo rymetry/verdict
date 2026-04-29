@@ -1494,8 +1494,6 @@ process.exit(1);
       // Simulate FATAL_OPERATIONAL_CODE by passing a custom artifactsStore
       // whose archive throws EACCES. Verifies that the lifecycle hook logs
       // with the documented Issue #31 axes before re-throwing.
-      const { bus, pm, manager: _ignored } = setupSuccessRun();
-      void _ignored;
       const errors: Array<Record<string, unknown>> = [];
       const captureLogger = {
         error(payload: Record<string, unknown>) {
@@ -1513,7 +1511,7 @@ process.exit(1);
       const fatalArchive = Object.assign(new Error("simulated"), { code: "EACCES" });
       const customManager = createRunManager({
         runnerForProject: () => customRunner,
-        bus,
+        bus: createEventBus(),
         artifactsStore: {
           ...runArtifactsStore,
           async archiveAllureResultsDir() {
@@ -1522,6 +1520,9 @@ process.exit(1);
         },
         logger: captureLogger
       });
+      const stubPath = writeStub("stub.js", STUB_SUCCESS_SCRIPT);
+      const pm = fakePackageManager();
+      pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
 
       // Source dir must exist for the archive call to be reached.
       const userResultsDir = path.join(workdir, "allure-results");
@@ -1594,7 +1595,11 @@ process.exit(1);
 
       // Copy failure is non-fatal — the test run already finished.
       expect(completed.status).toBe("passed");
-      // Structured log: identity-only (no op axis).
+      // Structured log: identity-only (no op axis). Beyond the positive
+      // assertion below, also pin the absence of `op` so a future
+      // regression that adds it (e.g. accidentally aliasing the archive
+      // log shape) would surface as a test failure rather than silent
+      // drift in the documented Issue #31 axes contract.
       expect(errors).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1603,6 +1608,11 @@ process.exit(1);
           })
         ])
       );
+      const copyLog = errors.find(
+        (e) => e.code === "ENOSPC" && e.artifactKind === "allure-results"
+      );
+      expect(copyLog).toBeDefined();
+      expect(copyLog).not.toHaveProperty("op");
       // Warning is included in metadata.warnings for UI/API surfacing.
       expect(completed.warnings).toEqual(
         expect.arrayContaining([
