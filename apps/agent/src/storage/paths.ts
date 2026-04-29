@@ -17,17 +17,27 @@ export interface WorkbenchPaths {
    * (`<archiveDir>/<ISO-timestamp>/`) so multiple runs do not collide.
    */
   archiveDir: string;
+  /**
+   * Project-scoped Allure history file (Phase 1.2 / T206). Populated by
+   * the Allure CLI on each `generate` invocation when `--history-path`
+   * is passed. JSONL format per the T200 investigation. Cross-run
+   * trend signal (flaky candidates, regression detection) is later
+   * derived from this file by T207 QMO summary.
+   */
+  allureHistoryPath: string;
 }
 
 export function workbenchPaths(projectRoot: string): WorkbenchPaths {
   const workbenchDir = path.join(projectRoot, WORKBENCH_DIR_NAME);
+  const reportsDir = path.join(workbenchDir, "reports");
   return {
     root: projectRoot,
     workbenchDir,
     configDir: path.join(workbenchDir, "config"),
-    reportsDir: path.join(workbenchDir, "reports"),
+    reportsDir,
     runsDir: path.join(workbenchDir, "runs"),
-    archiveDir: path.join(workbenchDir, "archive")
+    archiveDir: path.join(workbenchDir, "archive"),
+    allureHistoryPath: path.join(reportsDir, "allure-history.jsonl")
   };
 }
 

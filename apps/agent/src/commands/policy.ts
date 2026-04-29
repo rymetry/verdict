@@ -312,7 +312,16 @@ const ALLOWED_ALLURE_SUBCOMMANDS = new Set(["generate", "quality-gate"]);
  *   --success-rate      : numeric percentage (CLI rejects malformed)
  *   --known-issues      : project-relative path
  */
-const ALLURE_GENERATE_VALUE_FLAGS = new Set(["-o", "--output", "--config", "--report-name"]);
+const ALLURE_GENERATE_VALUE_FLAGS = new Set([
+  "-o",
+  "--output",
+  "--config",
+  "--report-name",
+  // Phase 1.2 (T206): cross-run history JSONL. Allure CLI accepts
+  // `-h <path>` and `--history-path <path>` synonymously.
+  "-h",
+  "--history-path"
+]);
 const ALLURE_QUALITY_GATE_VALUE_FLAGS = new Set([
   "--max-failures",
   "--min-tests-count",
@@ -331,7 +340,10 @@ const ALLURE_PATH_VALUE_FLAGS = new Set([
   "-o",
   "--output",
   "--config",
-  "--known-issues"
+  "--known-issues",
+  // T206: history JSONL path is project-relative.
+  "-h",
+  "--history-path"
 ]);
 
 /** Flags whose value is treated as a free-form non-path token. */
@@ -341,6 +353,18 @@ const ALLURE_FREEFORM_VALUE_FLAGS = new Set([
   "--min-tests-count",
   "--success-rate"
 ]);
+
+/**
+ * Normalize Allure flag synonyms to a canonical token for duplicate
+ * detection. Synonym pairs (`-h` / `--history-path`) must be tracked
+ * as a single entity so mixed-form usage triggers `duplicate-flag`.
+ * `-o` / `--output` is handled separately via `outputSeen` because it
+ * also has the unique-flag-required semantics for `generate`.
+ */
+function canonicalAllureFlag(arg: string): string {
+  if (arg === "-h") return "--history-path";
+  return arg;
+}
 
 /**
  * Args validator for the Allure CLI (Phase 1.2 / T204-2 + T205-1).
@@ -444,8 +468,9 @@ export function validateAllureArgs({
           `Flag '${arg}' is not classified as path or free-form for ${subcommandLabel}.`
         );
       }
-      // Duplicate detection. `-o` / `--output` synonyms collapse into a
-      // single tracker so mixed-form duplicates are still caught.
+      // Duplicate detection. Synonym pairs collapse to a canonical key
+      // so mixed-form duplicates (e.g. `-o ... --output ...` or
+      // `-h ... --history-path ...`) are still caught.
       if (arg === "-o" || arg === "--output") {
         if (outputSeen) {
           return argsInvalid(
@@ -455,13 +480,16 @@ export function validateAllureArgs({
         }
         outputSeen = true;
       } else {
-        if (seenValueFlags.has(arg)) {
+        // Normalize known synonym pairs to a single canonical token so
+        // mixed-form duplicates trigger duplicate-flag.
+        const canonical = canonicalAllureFlag(arg);
+        if (seenValueFlags.has(canonical)) {
           return argsInvalid(
             "duplicate-flag",
             `Flag '${arg}' must not appear more than once for the ${subcommandLabel} policy.`
           );
         }
-        seenValueFlags.add(arg);
+        seenValueFlags.add(canonical);
       }
       index += 2;
       continue;
