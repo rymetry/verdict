@@ -19,6 +19,7 @@ export type CommandArgsValidationCode =
   | "missing-subcommand"
   | "disallowed-subcommand"
   | "duplicate-output-flag"
+  | "duplicate-flag"
   | "extra-positional"
   | "missing-results-dir"
   | "missing-output-flag";
@@ -366,6 +367,12 @@ export function validateAllureGenerateArgs({
 
   let positionalCount = 0;
   let outputSeen = false;
+  // Track other value flags so duplicates fail closed. Each non-output
+  // value flag is allowed AT MOST once — duplicates would either confuse
+  // the Allure CLI (`--config` whose precedence is implementation-defined)
+  // or signal a programmer error in the argv builder. Defense-in-depth
+  // per the validator's "Workbench-only argv" doctrine.
+  const seenNonOutputValueFlags = new Set<string>();
   let index = 1;
   while (index < args.length) {
     const arg = args[index]!;
@@ -384,15 +391,29 @@ export function validateAllureGenerateArgs({
       if (arg === "-o" || arg === "--output" || arg === "--config") {
         const operandResult = validateProjectRelativeOperand(value);
         if (!operandResult.ok) return operandResult;
-        if (arg === "-o" || arg === "--output") {
-          if (outputSeen) {
-            return argsInvalid(
-              "duplicate-output-flag",
-              "Allure generate must be invoked with a single output flag."
-            );
-          }
-          outputSeen = true;
+      }
+      if (arg === "-o" || arg === "--output") {
+        // Both forms are synonyms — duplicate detection covers same-flag
+        // (`-o ... -o ...`) AND mixed-synonym (`-o ... --output ...`).
+        if (outputSeen) {
+          return argsInvalid(
+            "duplicate-output-flag",
+            "Allure generate must be invoked with a single output flag."
+          );
         }
+        outputSeen = true;
+      } else {
+        // Other value flags: pin to single occurrence to keep argv shape
+        // deterministic. Allure CLI's behavior with duplicate --config /
+        // --report-name is implementation-defined, which violates the
+        // "validator accepts only the precise Workbench shape" doctrine.
+        if (seenNonOutputValueFlags.has(arg)) {
+          return argsInvalid(
+            "duplicate-flag",
+            `Flag '${arg}' must not appear more than once for the Allure-generate policy.`
+          );
+        }
+        seenNonOutputValueFlags.add(arg);
       }
       index += 2;
       continue;
