@@ -5,6 +5,7 @@ import {
   type CommandArgsValidationResult,
   createAllureCommandPolicy,
   createDefaultCommandPolicy,
+  validateAllureArgs,
   validateAllureGenerateArgs,
   validatePhase1PlaywrightArgs
 } from "../src/commands/policy.js";
@@ -369,5 +370,146 @@ describe("createAllureCommandPolicy", () => {
       args: ["generate", "results", "-o", "report", "--clean"]
     });
     expect(result.ok).toBe(true);
+  });
+});
+
+/* ---------------------------------------------------------------- */
+/* T205-1: Allure quality-gate command policy                       */
+/* ---------------------------------------------------------------- */
+
+function validateAllureQg(
+  executableName: string,
+  args: ReadonlyArray<string>
+): CommandArgsValidationResult {
+  return validateAllureArgs({ executableName, args });
+}
+
+describe("Allure quality-gate command policy (T205-1)", () => {
+  it("accepts the canonical quality-gate invocation with all numeric thresholds", () => {
+    const result = validateAllureQg("allure", [
+      "quality-gate",
+      ".playwright-workbench/runs/r1/allure-results",
+      "--max-failures",
+      "0",
+      "--success-rate",
+      "100",
+      "--min-tests-count",
+      "1"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts the bare quality-gate invocation (CLI defaults)", () => {
+    const result = validateAllureQg("allure", [
+      "quality-gate",
+      "results"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts --fast-fail standalone flag", () => {
+    const result = validateAllureQg("allure", [
+      "quality-gate",
+      "results",
+      "--fast-fail",
+      "--max-failures",
+      "0"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts --known-issues with a project-relative path", () => {
+    const result = validateAllureQg("allure", [
+      "quality-gate",
+      "results",
+      "--known-issues",
+      ".playwright-workbench/reports/known-issues.json"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects --known-issues with absolute path (path validation reuse)", () => {
+    const result = validateAllureQg("allure", [
+      "quality-gate",
+      "results",
+      "--known-issues",
+      "/etc/known-issues.json"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("absolute-path");
+    }
+  });
+
+  it("rejects generate-only flags on quality-gate (-o is generate-specific)", () => {
+    // The validator dispatches per subcommand: -o is in the generate
+    // value-flag set but not the quality-gate set, so it lands in the
+    // disallowed-flag bucket here.
+    const result = validateAllureQg("allure", [
+      "quality-gate",
+      "results",
+      "-o",
+      "report"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("disallowed-flag");
+    }
+  });
+
+  it("rejects quality-gate-only flags on generate (--fast-fail is qg-specific)", () => {
+    // Mirror image: --fast-fail is only valid for quality-gate.
+    const result = validateAllureQg("allure", [
+      "generate",
+      "results",
+      "-o",
+      "report",
+      "--fast-fail"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("disallowed-flag");
+    }
+  });
+
+  it("requires the positional results-dir for quality-gate", () => {
+    const result = validateAllureQg("allure", [
+      "quality-gate",
+      "--max-failures",
+      "0"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("missing-results-dir");
+    }
+  });
+
+  it("rejects duplicate quality-gate flags (defense-in-depth)", () => {
+    const result = validateAllureQg("allure", [
+      "quality-gate",
+      "results",
+      "--max-failures",
+      "0",
+      "--max-failures",
+      "5"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("duplicate-flag");
+    }
+  });
+
+  it("does NOT enforce missing-output-flag on quality-gate (it has no output dir)", () => {
+    // generate requires `-o`; quality-gate must not. This guards against
+    // a future refactor accidentally bundling the generate-specific
+    // post-loop check into the shared validator.
+    const result = validateAllureQg("allure", ["quality-gate", "results"]);
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("validateAllureGenerateArgs backward-compat alias", () => {
+  it("re-exports validateAllureArgs so existing T204 callers keep working", () => {
+    expect(validateAllureGenerateArgs).toBe(validateAllureArgs);
   });
 });
