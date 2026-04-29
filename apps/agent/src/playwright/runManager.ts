@@ -867,6 +867,34 @@ async function runReportGenerationStep({
   logger?: RunManagerLogger;
 }): Promise<string[]> {
   if (!allureResultsDir || !allureRunner) return [];
+  // Pre-check empty source: when the run produced zero allure-results
+  // files (e.g. tests printed nothing, or the user wiped the dir between
+  // archive and run), Allure CLI returns a misleading "Could not find
+  // any allure results" exit code. Surface this preconditional failure
+  // up front with a stable structured-log code so operators see the
+  // actual cause instead of a generic "exit code 1".
+  let entryCount = 0;
+  try {
+    const entries = await fs.readdir(allureResultsDest);
+    entryCount = entries.length;
+  } catch {
+    // ENOENT or other read failure → 0 entries. The detail is logged
+    // below via the same "no-results" path.
+    entryCount = 0;
+  }
+  if (entryCount === 0) {
+    logger?.warn?.(
+      {
+        runId,
+        artifactKind: "allure-report" satisfies ArtifactKind,
+        failureMode: "no-results"
+      },
+      "allure HTML report skipped: no results in run-scoped allure-results"
+    );
+    return [
+      "Allure HTML report skipped: no results in run-scoped allure-results."
+    ];
+  }
   // Lazy import to keep the module tree shallow — generator pulls in fs
   // existence checks that are unnecessary for runs without Allure.
   const { generateAllureReport } = await import("./allureReportGenerator.js");
@@ -889,11 +917,15 @@ async function runReportGenerationStep({
   } else {
     // Identity-only error log (no op): generation is the artifact's
     // lifecycle event itself, not a sub-operation on an existing
-    // artifact (Issue #31 axes convention).
+    // artifact (Issue #31 axes convention). `failureMode` discriminates
+    // timeout vs exit-nonzero vs spawn-error vs binary-missing so log
+    // aggregator queries can branch without parsing warning strings.
     logger?.error(
       {
         runId,
         artifactKind: "allure-report" satisfies ArtifactKind,
+        failureMode: outcome.failureMode,
+        ...(outcome.errorCode !== undefined ? { code: outcome.errorCode } : {}),
         exitCode: outcome.exitCode,
         durationMs: outcome.durationMs
       },

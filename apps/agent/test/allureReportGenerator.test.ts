@@ -96,11 +96,14 @@ describe("generateAllureReport", () => {
     });
 
     expect(outcome.ok).toBe(false);
-    expect(outcome.warnings).toEqual(
-      expect.arrayContaining([expect.stringContaining("Allure CLI not found")])
-    );
+    expect(outcome.failureMode).toBe("binary-missing");
+    // Warning text uses the literal `<projectRoot>` placeholder (not an
+    // interpolated absolute path) so log aggregators do not learn the
+    // user's filesystem layout from a missing-CLI signal.
+    expect(outcome.warnings).toEqual([
+      "Allure CLI not found at <projectRoot>/node_modules/.bin/allure; HTML report generation skipped."
+    ]);
     expect(spawned).toHaveLength(0);
-    // Ensures the early-skip path: no subprocess, no exit code.
     expect(outcome.exitCode).toBeNull();
   });
 
@@ -122,6 +125,7 @@ describe("generateAllureReport", () => {
     });
 
     expect(outcome.ok).toBe(true);
+    expect(outcome.failureMode).toBeUndefined();
     expect(outcome.exitCode).toBe(0);
     expect(outcome.reportPath).toBe(allureReportDir);
     expect(outcome.durationMs).toBe(1234);
@@ -159,14 +163,20 @@ describe("generateAllureReport", () => {
     });
 
     expect(outcome.ok).toBe(false);
+    expect(outcome.failureMode).toBe("exit-nonzero");
     expect(outcome.exitCode).toBe(1);
     expect(outcome.reportPath).toBeUndefined();
-    expect(outcome.stderr).toBe("boom");
     expect(outcome.warnings).toEqual(
       expect.arrayContaining([
         expect.stringContaining("exitCode=1")
       ])
     );
+    // Verbatim stdout/stderr are no longer surfaced via the outcome —
+    // the helper only returns path-redacted warnings + structured
+    // metadata. Future T207 (QMO summary) will re-add a redacted
+    // diagnostic channel.
+    expect(outcome).not.toHaveProperty("stdout");
+    expect(outcome).not.toHaveProperty("stderr");
   });
 
   it("surfaces a timeout warning when the subprocess timed out", async () => {
@@ -189,6 +199,7 @@ describe("generateAllureReport", () => {
     });
 
     expect(outcome.ok).toBe(false);
+    expect(outcome.failureMode).toBe("timeout");
     expect(outcome.warnings).toEqual(
       expect.arrayContaining([
         expect.stringContaining("timed out after 60000ms")
@@ -196,7 +207,7 @@ describe("generateAllureReport", () => {
     );
   });
 
-  it("returns a structured outcome (no throw) when the runner rejects (policy/spawn error)", async () => {
+  it("returns a structured outcome (no throw) when the runner rejects with a non-fatal code", async () => {
     const { allureResultsDest, allureReportDir } = setupAllureBinary();
     const { runner } = fakeRunner({
       exitCode: 0,
@@ -217,10 +228,41 @@ describe("generateAllureReport", () => {
     });
 
     expect(outcome.ok).toBe(false);
+    expect(outcome.failureMode).toBe("spawn-error");
+    expect(outcome.errorCode).toBe("POLICY_REJECTED");
     expect(outcome.warnings).toEqual(
       expect.arrayContaining([
         expect.stringContaining("code=POLICY_REJECTED")
       ])
     );
   });
+
+  it.each([["EACCES"], ["EMFILE"], ["ENOSPC"], ["EROFS"], ["EIO"]])(
+    "propagates FATAL_OPERATIONAL_CODE %s instead of swallowing into a warning",
+    async (fatalCode) => {
+      const { allureResultsDest, allureReportDir } = setupAllureBinary();
+      const { runner } = fakeRunner({
+        exitCode: 0,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        durationMs: 0,
+        rejection: Object.assign(new Error(`simulated ${fatalCode}`), {
+          code: fatalCode
+        })
+      });
+
+      // Operator-action conditions throw rather than producing an
+      // aggregated warning. Mirrors T203-2 review fix for the same
+      // anti-pattern in runArtifactsStore.ts.
+      await expect(
+        generateAllureReport({
+          runner,
+          projectRoot: workdir,
+          allureResultsDest,
+          allureReportDir
+        })
+      ).rejects.toMatchObject({ code: fatalCode });
+    }
+  );
 });

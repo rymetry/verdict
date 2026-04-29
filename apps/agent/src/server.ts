@@ -187,87 +187,63 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       logger.warn?.({ ...errorLogFields(error) }, "ws listener error")
   });
 
+  // Single shared audit handler factory — both the Playwright runner and
+  // the Allure runner emit identical audit shapes (cwdHash + persistence
+  // + info echo + failClosed semantics). Extracting it as a named factory
+  // (T204-3 review fix) prevents the two handlers from drifting silently
+  // when audit semantics change (e.g. adding a correlation ID, sampling
+  // rate, or Sentry breadcrumb).
+  const buildAuditHandler = (projectRoot: string) => (entry: AuditEntry) => {
+    // The persistent audit-trail of record is `.playwright-workbench/audit.log`
+    // (with full `cwd`/executable/args). The pino info-log echo here is
+    // duplicative observability: hash `entry.cwd` so structured logs do
+    // not leak `/Users/<name>/...` while operators can still correlate
+    // by `cwdHash` (Issue #27 follow-up). The persisted audit.log keeps
+    // the raw `cwd` for forensic identity.
+    const { cwd, ...auditWithoutCwd } = entry;
+    logger.info?.(
+      { audit: { ...auditWithoutCwd, cwdHash: projectIdHash(cwd) } },
+      "command audit"
+    );
+    let auditPersistenceError: AuditPersistenceError | undefined;
+    try {
+      persistAuditEntry(projectRoot, entry);
+    } catch (error) {
+      auditPersistenceError = new AuditPersistenceError(error);
+      logger.error(
+        {
+          artifactKind: "audit-log",
+          ...errorLogFields(error)
+        },
+        "failed to persist audit log entry"
+      );
+    }
+    try {
+      options.audit?.(entry);
+    } catch (error) {
+      logger.error({ ...errorLogFields(error) }, "audit observer failed");
+    }
+    if (auditPersistenceError && env.failClosedAudit) {
+      throw auditPersistenceError;
+    }
+  };
+
   const runnerForProject = (projectRoot: string): CommandRunner => {
     const policy = options.policyFactory?.(projectRoot) ?? createDefaultCommandPolicy(projectRoot);
     return createNodeCommandRunner({
       policy,
-      audit: (entry) => {
-        // The persistent audit-trail of record is `.playwright-workbench/audit.log`
-        // (with full `cwd`/executable/args). The pino info-log echo here is
-        // duplicative observability: hash `entry.cwd` so structured logs do
-        // not leak `/Users/<name>/...` while operators can still correlate
-        // by `cwdHash` (Issue #27 follow-up). The persisted audit.log keeps
-        // the raw `cwd` for forensic identity.
-        const { cwd, ...auditWithoutCwd } = entry;
-        logger.info?.(
-          { audit: { ...auditWithoutCwd, cwdHash: projectIdHash(cwd) } },
-          "command audit"
-        );
-        let auditPersistenceError: AuditPersistenceError | undefined;
-        try {
-          persistAuditEntry(projectRoot, entry);
-        } catch (error) {
-          auditPersistenceError = new AuditPersistenceError(error);
-          logger.error(
-            {
-              artifactKind: "audit-log",
-              ...errorLogFields(error)
-            },
-            "failed to persist audit log entry"
-          );
-        }
-        try {
-          options.audit?.(entry);
-        } catch (error) {
-          logger.error(
-            {
-              ...errorLogFields(error)
-            },
-            "audit observer failed"
-          );
-        }
-        if (auditPersistenceError && env.failClosedAudit) {
-          throw auditPersistenceError;
-        }
-      }
+      audit: buildAuditHandler(projectRoot)
     });
   };
 
   // Phase 1.2 (T204-3): Allure CLI runner uses a separate policy so the
   // arg-validator surface is reviewed independently of the Playwright
-  // policy. Audit logging follows the same shape as `runnerForProject`
-  // (cwdHash + persistence + info echo).
+  // policy. Reuses `buildAuditHandler` so audit semantics stay in lock-
+  // step with the Playwright runner.
   const allureRunnerForProject = (projectRoot: string): CommandRunner =>
     createNodeCommandRunner({
       policy: createAllureCommandPolicy(projectRoot),
-      audit: (entry) => {
-        const { cwd, ...auditWithoutCwd } = entry;
-        logger.info?.(
-          { audit: { ...auditWithoutCwd, cwdHash: projectIdHash(cwd) } },
-          "command audit"
-        );
-        let auditPersistenceError: AuditPersistenceError | undefined;
-        try {
-          persistAuditEntry(projectRoot, entry);
-        } catch (error) {
-          auditPersistenceError = new AuditPersistenceError(error);
-          logger.error(
-            {
-              artifactKind: "audit-log",
-              ...errorLogFields(error)
-            },
-            "failed to persist audit log entry"
-          );
-        }
-        try {
-          options.audit?.(entry);
-        } catch (error) {
-          logger.error({ ...errorLogFields(error) }, "audit observer failed");
-        }
-        if (auditPersistenceError && env.failClosedAudit) {
-          throw auditPersistenceError;
-        }
-      }
+      audit: buildAuditHandler(projectRoot)
     });
 
   const projectStore = createProjectStore();

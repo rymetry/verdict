@@ -207,12 +207,20 @@ export function createNodeCommandRunner({
         child.on("error", (error: NodeJS.ErrnoException) => {
           if (timeoutHandle) clearTimeout(timeoutHandle);
           if (killEscalation) clearTimeout(killEscalation);
-          // ENOENT / EACCES surface as runner errors rather than mystery exit codes.
-          reject(
+          // ENOENT / EACCES / EMFILE surface as runner errors rather than
+          // mystery exit codes. We preserve the original `.code` on the
+          // rewrapped Error so downstream callers (e.g. T204-3
+          // generateAllureReport) can pattern-match operator-action
+          // conditions against `FATAL_OPERATIONAL_CODES` without parsing
+          // the message string. Embedding `.code` in the message is kept
+          // for human readability; the property is the structured channel.
+          const wrapped = Object.assign(
             new Error(
               `Failed to spawn '${spec.executable}': ${error.message}${error.code ? ` (${error.code})` : ""}`
-            )
+            ),
+            error.code ? { code: error.code } : {}
           );
+          reject(wrapped);
         });
         child.on("close", (exitCode, signal) => {
           if (timeoutHandle) clearTimeout(timeoutHandle);
