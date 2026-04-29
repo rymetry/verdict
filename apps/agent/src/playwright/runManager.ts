@@ -506,13 +506,28 @@ export function createRunManager({
         // produce the HTML report. Skipped when allureRunnerForProject is
         // unset (test envs / no CLI installed) or when the project does
         // not use Allure. Failure is NON-fatal — same rationale as copy.
+        const allureRunner = allureRunnerForProject?.(params.projectRoot);
         const reportGenerationWarnings = await runReportGenerationStep({
           projectRoot: params.projectRoot,
           allureResultsDir: params.allureResultsDir,
           allureResultsDest: paths.allureResultsDest,
           allureReportDir: paths.allureReportDir,
           runId,
-          allureRunner: allureRunnerForProject?.(params.projectRoot),
+          allureRunner,
+          logger
+        });
+        // Phase 1.2 quality-gate step (T205-2): evaluate Allure quality
+        // gate against the run-scoped results dir. Persists the result
+        // to `<runDir>/quality-gate-result.json` per PLAN.v2 §23. Same
+        // skip conditions and non-fatal semantics as the report
+        // generation step.
+        const qualityGateWarnings = await runQualityGateStep({
+          projectRoot: params.projectRoot,
+          allureResultsDir: params.allureResultsDir,
+          allureResultsDest: paths.allureResultsDest,
+          qualityGateResultPath: paths.qualityGateResultPath,
+          runId,
+          allureRunner,
           logger
         });
         // summary は metadata と WS に流れるため、必ず scrubbed JSON から読む。
@@ -530,6 +545,7 @@ export function createRunManager({
           ...logWriteWarnings,
           ...copyWarnings,
           ...reportGenerationWarnings,
+          ...qualityGateWarnings,
           ...streamRedactor.flush(),
           ...flushStreamPublishWarnings(),
           ...(summary?.warnings ?? [])
@@ -930,6 +946,125 @@ async function runReportGenerationStep({
         durationMs: outcome.durationMs
       },
       "allure HTML report generation failed"
+    );
+  }
+  return outcome.warnings;
+}
+
+/**
+ * Phase 1.2 quality-gate step (T205-2). Evaluates Allure's
+ * `quality-gate` subcommand and persists the QualityGateResult JSON
+ * (`<runDir>/quality-gate-result.json`, conforming to
+ * `QualityGateResultSchema` in `@pwqa/shared`) for QMO consumers.
+ *
+ * Skip path: when `allureResultsDir` is undefined OR no Allure runner
+ * was wired, return early without persisting (no QG meaningful).
+ *
+ * Pre-check empty source: zero entries in the run-scoped allure-results
+ * directory mirrors the report-generation pre-check (T204-3 review). The
+ * function returns a structured "no-results" warning and skips the
+ * subprocess so the operator sees the actual cause rather than a
+ * misleading Allure CLI error code.
+ *
+ * Failures are NON-fatal — Playwright already finished. Structured logs
+ * use `artifactKind: "allure-report"` (Quality Gate is an evaluation of
+ * the same identity, so it shares the artifact axis; failureMode
+ * discriminates the path) — keeping a separate `"quality-gate"`
+ * identity is deferred to T205 follow-up if QMO query needs require it.
+ */
+async function runQualityGateStep({
+  projectRoot,
+  allureResultsDir,
+  allureResultsDest,
+  qualityGateResultPath,
+  runId,
+  allureRunner,
+  logger
+}: {
+  projectRoot: string;
+  allureResultsDir: string | undefined;
+  allureResultsDest: string;
+  qualityGateResultPath: string;
+  runId: string;
+  allureRunner: CommandRunner | undefined;
+  logger?: RunManagerLogger;
+}): Promise<string[]> {
+  if (!allureResultsDir || !allureRunner) return [];
+  // Pre-check empty source — same rationale as report-generation hook.
+  let entryCount = 0;
+  try {
+    const entries = await fs.readdir(allureResultsDest);
+    entryCount = entries.length;
+  } catch {
+    entryCount = 0;
+  }
+  if (entryCount === 0) {
+    logger?.warn?.(
+      {
+        runId,
+        artifactKind: "allure-report" satisfies ArtifactKind,
+        failureMode: "no-results"
+      },
+      "allure quality-gate skipped: no results in run-scoped allure-results"
+    );
+    return [
+      "Allure quality-gate skipped: no results in run-scoped allure-results."
+    ];
+  }
+  const { evaluateAllureQualityGate, persistQualityGateResult } = await import(
+    "./allureQualityGate.js"
+  );
+  // PoC default profile: "local-review" with no thresholds (CLI defaults
+  // = lenient). Profile-driven rule sets are deferred to a follow-up
+  // task (Phase 1.2 QMO config).
+  const outcome = await evaluateAllureQualityGate({
+    runner: allureRunner,
+    projectRoot,
+    allureResultsDest,
+    profile: "local-review"
+  });
+  if (outcome.persisted) {
+    try {
+      await persistQualityGateResult(qualityGateResultPath, outcome.persisted);
+    } catch (error) {
+      logger?.error(
+        {
+          runId,
+          artifactKind: "allure-report" satisfies ArtifactKind,
+          failureMode: "persist-error",
+          ...errorLogFields(error)
+        },
+        "failed to persist quality-gate-result.json"
+      );
+      return [
+        ...outcome.warnings,
+        `Allure quality-gate result could not be persisted. code=${errorCode(error)}`
+      ];
+    }
+  }
+  if (outcome.status === "passed") {
+    logger?.info?.(
+      {
+        runId,
+        artifactKind: "allure-report" satisfies ArtifactKind,
+        durationMs: outcome.durationMs,
+        qualityGateStatus: "passed",
+        exitCode: 0
+      },
+      "allure quality-gate passed"
+    );
+  } else {
+    logger?.error(
+      {
+        runId,
+        artifactKind: "allure-report" satisfies ArtifactKind,
+        qualityGateStatus: outcome.status,
+        failureMode: outcome.failureMode,
+        ...(outcome.errorCode !== undefined ? { code: outcome.errorCode } : {}),
+        exitCode: outcome.exitCode,
+        durationMs: outcome.durationMs
+      },
+      "allure quality-gate did not pass"
     );
   }
   return outcome.warnings;

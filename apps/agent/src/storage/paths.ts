@@ -52,6 +52,12 @@ export function runPathsFor(projectRoot: string, runId: string): RunPaths {
     // structurally derived per-run, only populated when T204-2 wires the
     // CLI subprocess. UI/API later renders this as a `file://` link or
     // serves it via `allure open` / static hosting.
-    allureReportDir: path.join(runDir, "allure-report")
+    allureReportDir: path.join(runDir, "allure-report"),
+    // Phase 1.2 (T205-2): persisted Quality Gate result JSON. Conforms
+    // to `QualityGateResultSchema` in `@pwqa/shared` and is written by
+    // RunManager's quality-gate lifecycle hook after the report
+    // generation step. UI/API surfaces the file as the source of truth
+    // for QMO release-readiness checks.
+    qualityGateResultPath: path.join(runDir, "quality-gate-result.json")
   };
 }

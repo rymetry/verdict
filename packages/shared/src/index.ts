@@ -242,7 +242,14 @@ export const RunPathsSchema = z.object({
    * only populated when T204-2's `generateAllureReport` lifecycle
    * hook successfully runs. UI later renders this as a link.
    */
-  allureReportDir: z.string()
+  allureReportDir: z.string(),
+  /**
+   * Phase 1.2 (T205-2): persisted Quality Gate result JSON. Always
+   * derivable; only written when the quality-gate lifecycle hook
+   * runs (project uses Allure + allure CLI installed + results
+   * present in the run-scoped allure-results dir).
+   */
+  qualityGateResultPath: z.string()
 });
 export type RunPaths = z.infer<typeof RunPathsSchema>;
 
