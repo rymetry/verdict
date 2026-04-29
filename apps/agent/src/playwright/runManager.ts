@@ -582,7 +582,11 @@ export function createRunManager({
           warnings.push("Run timed out before cancellation propagated.");
         }
 
-        const completed: RunMetadata = {
+        // Build a pre-final metadata snapshot for the QMO summary step.
+        // The QMO step emits its own warnings (QG-unreadable, QMO-persist
+        // failure, etc) which we merge into `warnings` BEFORE the final
+        // writeMetadata so the persisted run record reflects them.
+        const preFinalCompleted: RunMetadata = {
           ...runningMetadata,
           status: outcome.status,
           exitCode: outcome.exitCode,
@@ -592,6 +596,25 @@ export function createRunManager({
           completedAt: new Date().toISOString(),
           summary: summary?.summary,
           warnings
+        };
+        // T207 review fix: QMO step runs BEFORE final writeMetadata so
+        // its warnings (QG read failures, QMO persist failures) are
+        // captured in the persisted RunMetadata.warnings array. The
+        // step itself uses `preFinalCompleted` for the QMO summary
+        // input — the QMO file does NOT include the QMO step's own
+        // warnings (avoids self-reference; consumers see them via
+        // RunMetadata.warnings).
+        const qmoSummaryWarnings = await runQmoSummaryStep({
+          runMetadata: preFinalCompleted,
+          qmoSummaryJsonPath: paths.qmoSummaryJsonPath,
+          qmoSummaryMarkdownPath: paths.qmoSummaryMarkdownPath,
+          qualityGateResultPath: paths.qualityGateResultPath,
+          runId,
+          logger
+        });
+        const completed: RunMetadata = {
+          ...preFinalCompleted,
+          warnings: [...preFinalCompleted.warnings, ...qmoSummaryWarnings]
         };
         await artifactsStore.writeMetadata(paths.metadataJson, completed);
 
@@ -1104,6 +1127,87 @@ async function runQualityGateStep({
     );
   }
   return outcome.warnings;
+}
+
+/**
+ * Phase 1.2 QMO summary step (T207). Generates the Release Readiness
+ * Summary v0 (JSON + Markdown) from the completed RunMetadata + Quality
+ * Gate result and persists both forms. Returns warnings so the caller
+ * can merge them into `RunMetadata.warnings` BEFORE the final
+ * `writeMetadata` — otherwise QG-read failures and QMO-persist failures
+ * would have no observable trace in the persisted run record.
+ *
+ * Failure is NON-fatal for run completion: Playwright already finished.
+ * `PERSIST_FATAL_CODES` (ENOSPC / EDQUOT / EROFS / EACCES / EIO / FD
+ * exhaustion) propagate so the caller surfaces a single actionable
+ * error rather than burying it in warnings (T205-2 review precedent).
+ */
+async function runQmoSummaryStep({
+  runMetadata,
+  qmoSummaryJsonPath,
+  qmoSummaryMarkdownPath,
+  qualityGateResultPath,
+  runId,
+  logger
+}: {
+  runMetadata: RunMetadata;
+  qmoSummaryJsonPath: string;
+  qmoSummaryMarkdownPath: string;
+  qualityGateResultPath: string;
+  runId: string;
+  logger?: RunManagerLogger;
+}): Promise<string[]> {
+  const { buildQmoSummary, persistQmoSummary, readPersistedQualityGate } = await import(
+    "../reporting/qmoSummary.js"
+  );
+  const warnings: string[] = [];
+  // T207 review fix: distinguish ENOENT (legitimate skip) from
+  // unreadable conditions (EACCES / EIO / malformed JSON). An unreadable
+  // QG result that was successfully written by a prior step would
+  // otherwise silently downgrade the QMO outcome from "not-ready" to
+  // "ready" based on tests alone.
+  const qgRead = await readPersistedQualityGate(qualityGateResultPath);
+  let qualityGateResult = undefined;
+  if (qgRead.kind === "found") {
+    qualityGateResult = qgRead.value;
+  } else if (qgRead.kind === "unreadable") {
+    warnings.push(
+      `Quality-gate result was previously written but could not be read for QMO summary. code=${qgRead.code}`
+    );
+  }
+  // The QMO summary embeds `runMetadata.warnings` (excluding the
+  // about-to-be-added qmo warnings) so failures from earlier steps
+  // are reflected. The summary's own warnings flow back through the
+  // returned list to the caller's metadata.warnings merge.
+  const summary = buildQmoSummary({ runMetadata, qualityGateResult });
+  try {
+    await persistQmoSummary(qmoSummaryJsonPath, qmoSummaryMarkdownPath, summary);
+    logger?.info?.(
+      {
+        runId,
+        artifactKind: "metadata" satisfies ArtifactKind,
+        outcome: summary.outcome
+      },
+      "qmo summary persisted"
+    );
+  } catch (error) {
+    const code = errorCode(error);
+    if (PERSIST_FATAL_CODES.has(code)) {
+      throw error;
+    }
+    logger?.error(
+      {
+        runId,
+        artifactKind: "metadata" satisfies ArtifactKind,
+        ...errorLogFields(error)
+      },
+      "failed to persist qmo summary"
+    );
+    warnings.push(
+      `QMO summary could not be persisted. code=${code}`
+    );
+  }
+  return warnings;
 }
 
 async function readSummarySafely(

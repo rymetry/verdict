@@ -77,6 +77,8 @@ beforeEach(() => {
       allureResultsDest: "/runs/test/allure-results",
       allureReportDir: "/runs/test/allure-report",
       qualityGateResultPath: "/runs/test/quality-gate-result.json",
+      qmoSummaryJsonPath: "/runs/test/qmo-summary.json",
+      qmoSummaryMarkdownPath: "/runs/test/qmo-summary.md",
       artifactsJson: "/runs/test/artifacts.json"
     },
     warnings: []

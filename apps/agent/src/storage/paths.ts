@@ -68,6 +68,13 @@ export function runPathsFor(projectRoot: string, runId: string): RunPaths {
     // RunManager's quality-gate lifecycle hook after the report
     // generation step. UI/API surfaces the file as the source of truth
     // for QMO release-readiness checks.
-    qualityGateResultPath: path.join(runDir, "quality-gate-result.json")
+    qualityGateResultPath: path.join(runDir, "quality-gate-result.json"),
+    // Phase 1.2 (T207): QMO Release Readiness Summary v0. Two artifacts
+    // — JSON for programmatic consumers (CI, GitHub integration in
+    // Phase 8) and Markdown for human review (PR comments, Slack).
+    // Both are derived from existing run metadata + Quality Gate result
+    // by RunManager's qmo-summary lifecycle hook.
+    qmoSummaryJsonPath: path.join(runDir, "qmo-summary.json"),
+    qmoSummaryMarkdownPath: path.join(runDir, "qmo-summary.md")
   };
 }
