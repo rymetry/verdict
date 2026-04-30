@@ -1,18 +1,16 @@
-// Developer View Phase 1 placeholder の静的サンプルデータ。
+// Developer View 静的サンプルデータ (Phase 5+ までの placeholder)。
 //
-// **Phase 1.2 で削除されること** (silent failure 防衛):
-//  - 各 Card の Props は必須化済 (= default fallback を持たない)。本データは route component
-//    (`apps/web/src/routes/dev.tsx`) からのみ import される。
-//  - Phase 1.2 で `useQuery` 経路に切り替える際は、`dev.tsx` 内の本ファイル import を
-//    削除し API 結果を Card props に直接渡す。これにより `as ReadonlyArray<...>` cast や
-//    `data ?? SAMPLE_*` のような silent fallback を構造上書けなくする。
-//  - 全 SAMPLE_* export と本ファイル自身を Phase 1.2 で削除すること。`PHASE_1_2_PLACEHOLDER_LABEL`
-//    定数 (types.ts) は最後まで残し、grep で全 placeholder badge が外れたか確認に使う。
+// Developer View の各 sub panel (FileTree / SourceTabs / Locator /
+// Console / RunMetadata) は Phase 5+ で実データに wire 予定 (PLAN.v2
+// §24)。それまでは本ファイルの SAMPLE_* fixture を route から渡し、
+// 各 Card Props を required にすることで silent fallback を防いでいる。
 //
-// production bundle への混入リスク:
-//  - 本ファイルは route 経由で import されるため tree-shake されない。
-//  - そのため、Phase 1.2 で確実に削除されるよう、ファイル名を `placeholder-data.ts` (旧 `sample-data.ts`) に
-//    して grep 起点を明確にしている。`*sample*` は test fixture と紛らわしいため避ける。
+// Phase 5+ で実データに切り替える際の手順:
+//  - `routes/dev.tsx` から本ファイルの import を削除し、各 Card Props
+//    に hook 戻り値を直接渡す (`data ?? SAMPLE_*` の fallback は禁止)。
+//  - `DEFERRED_PLACEHOLDER_LABEL` (types.ts) を grep 起点に各 badge を
+//    検証 (wire 済 panel の badge を消し、未接続 panel は残す)。
+//  - 本ファイル自身は test fixture として残してよい (component test 用)。
 import type {
   ConsoleEntry,
   FileTreeGroup,

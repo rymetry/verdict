@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
   DEVELOPER_VIEW_LABELS,
-  PHASE_1_2_PLACEHOLDER_LABEL,
+  DEFERRED_PLACEHOLDER_LABEL,
   type ConsoleEntry,
   type LocatorRow,
   type LocatorState,
@@ -37,7 +37,7 @@ interface InspectorPanelProps {
 }
 
 function PhaseBadge(): React.ReactElement {
-  return <Badge variant="info">{PHASE_1_2_PLACEHOLDER_LABEL}</Badge>;
+  return <Badge variant="info">{DEFERRED_PLACEHOLDER_LABEL}</Badge>;
 }
 
 function LocatorCard({

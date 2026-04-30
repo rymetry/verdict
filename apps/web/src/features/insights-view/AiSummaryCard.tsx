@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import {
   INSIGHTS_VIEW_LABELS,
-  PHASE_1_2_PLACEHOLDER_LABEL,
+  DEFERRED_PLACEHOLDER_LABEL,
   type AiSummary
 } from "./types";
 
@@ -28,7 +28,7 @@ export function AiSummaryCard({ summary }: AiSummaryCardProps): React.ReactEleme
             {INSIGHTS_VIEW_LABELS.aiSummary}
           </h3>
           <Badge variant="accent">{summary.adapterLabel}</Badge>
-          <Badge variant="info">{PHASE_1_2_PLACEHOLDER_LABEL}</Badge>
+          <Badge variant="info">{DEFERRED_PLACEHOLDER_LABEL}</Badge>
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

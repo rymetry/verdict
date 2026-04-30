@@ -2,10 +2,11 @@
 //
 // pin する内容:
 //  - 4 main セクション (Hero / 3-card row / AI summary / Sidebar) が DOM に存在
-//  - Phase 1.2 で接続予定 badge 数 (badge を Phase 1.2 で外し忘れた regression を検出)
+//  - "Phase 5+ で接続予定" badge 数 (未接続 card を Phase 1.2 完了後も
+//    badge を外し忘れた / 接続済 card に badge が残ったままの regression を検出)
 //  - heading 階層: h2 (Hero "Release Readiness") + 各 card の h3
 //    (h1 は app-shell の TopBar Brand 内に存在し、本 view test の責務外)
-//  - "すべて表示" / "フルレポート" は disabled button + tooltip "Phase 1.2 で接続予定"
+//  - "すべて表示" / "フルレポート" は disabled button + tooltip "Phase 5+ で接続予定"
 //  - Hero の progress bar が aria-valuemin/valuemax/valuenow を持ち NaN/Infinity を 0 に丸める
 //  - data-verdict / data-rule-status / data-run-status / data-run-trend で test を class 文字列に couple させない
 //  - 各 Card Props を空配列で override しても crash しない (defensive rendering)
@@ -21,7 +22,7 @@ import { SidebarPanels } from "@/features/insights-view/SidebarPanels";
 import { SAMPLE_INSIGHTS } from "@/features/insights-view/placeholder-data";
 import {
   INSIGHTS_VIEW_LABELS,
-  PHASE_1_2_PLACEHOLDER_LABEL
+  DEFERRED_PLACEHOLDER_LABEL
 } from "@/features/insights-view/types";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -58,14 +59,15 @@ describe("InsightsView (composer)", () => {
     expect(h3s).toHaveLength(7);
   });
 
-  it("Phase 1.2 で接続予定 badge が 5 つ visible で存在する", () => {
-    // 内訳: Hero (1) + Critical (1) + Known (1) + Flaky (1) + AI (1) = 5。
-    // sidebar (Allure / RecentRuns) の "Phase 1.2 で接続予定" は Tooltip content として
+  it("Phase 5+ で接続予定 badge が 3 つ visible で存在する (Known / Flaky / AI のみ)", () => {
+    // §1.2 で Hero / Critical Failures は実データ wire 済のため badge 撤去。
+    // 残るのは Known Issues (1) + Top Flaky (1) + AI (1) = 3。
+    // sidebar (Allure / RecentRuns) の同 label は Tooltip content として
     // portal 経由で開いた時のみ DOM に現れるため、本 visible-only assertion からは外れる。
     // 個別の sidebar tooltip 動作は SidebarPanels describe ブロックで pin する。
     render(<InsightsView summary={SAMPLE_INSIGHTS} />);
-    const badges = screen.getAllByText(PHASE_1_2_PLACEHOLDER_LABEL);
-    expect(badges).toHaveLength(5);
+    const badges = screen.getAllByText(DEFERRED_PLACEHOLDER_LABEL);
+    expect(badges).toHaveLength(3);
   });
 });
 
@@ -239,7 +241,7 @@ describe("MainCardsRow", () => {
     // hover で tooltip が出ることを 1 件で確認
     await user.hover(screen.getByTestId("insights-critical-show-all"));
     expect(
-      await screen.findByText(PHASE_1_2_PLACEHOLDER_LABEL, {
+      await screen.findByText(DEFERRED_PLACEHOLDER_LABEL, {
         selector: "[role='tooltip']"
       })
     ).toBeInTheDocument();
@@ -337,7 +339,7 @@ describe("SidebarPanels", () => {
     expect(fullReport).toBeDisabled();
     await user.hover(fullReport);
     expect(
-      await screen.findByText(PHASE_1_2_PLACEHOLDER_LABEL, {
+      await screen.findByText(DEFERRED_PLACEHOLDER_LABEL, {
         selector: "[role='tooltip']"
       })
     ).toBeInTheDocument();
@@ -358,7 +360,7 @@ describe("SidebarPanels", () => {
     expect(showAll).toBeDisabled();
     await user.hover(showAll);
     expect(
-      await screen.findByText(PHASE_1_2_PLACEHOLDER_LABEL, {
+      await screen.findByText(DEFERRED_PLACEHOLDER_LABEL, {
         selector: "[role='tooltip']"
       })
     ).toBeInTheDocument();

@@ -17,8 +17,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import {
+  DEFERRED_PLACEHOLDER_LABEL,
   INSIGHTS_VIEW_LABELS,
-  PHASE_1_2_PLACEHOLDER_LABEL,
   type FailureItem,
   type FlakyItem,
   type KnownIssue
@@ -56,7 +56,7 @@ function ShowAllPlaceholder({ id }: { id: string }): React.ReactElement {
           </Button>
         </span>
       </TooltipTrigger>
-      <TooltipContent id={`${id}-tooltip`}>{PHASE_1_2_PLACEHOLDER_LABEL}</TooltipContent>
+      <TooltipContent id={`${id}-tooltip`}>{DEFERRED_PLACEHOLDER_LABEL}</TooltipContent>
     </Tooltip>
   );
 }
@@ -71,6 +71,13 @@ interface ListCardProps {
    */
   readonly children: React.ReactNode;
   readonly showAllId: string;
+  /**
+   * §1.2: 該当 card のデータが実データに wire 済か。
+   * - `true`: badge を表示しない (Critical Failures は §1.2 で wire 済)
+   * - `false`/未指定: 既存通り "Phase 5+ で接続予定" badge を表示
+   *   (Known Issues / Top Flaky は Phase 5+ で接続予定)。
+   */
+  readonly connected?: boolean;
 }
 
 function ListCard({
@@ -78,7 +85,8 @@ function ListCard({
   title,
   count,
   children,
-  showAllId
+  showAllId,
+  connected = false
 }: ListCardProps): React.ReactElement {
   return (
     <Card data-testid={testId} className="flex flex-col">
@@ -88,7 +96,9 @@ function ListCard({
           <Badge variant="outline">{count}</Badge>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="info">{PHASE_1_2_PLACEHOLDER_LABEL}</Badge>
+          {connected ? null : (
+            <Badge variant="info">{DEFERRED_PLACEHOLDER_LABEL}</Badge>
+          )}
           <ShowAllPlaceholder id={showAllId} />
         </div>
       </CardHeader>
@@ -147,6 +157,8 @@ export function MainCardsRow({
         title={INSIGHTS_VIEW_LABELS.criticalFailures}
         count={criticalFailures.length}
         showAllId="insights-critical-show-all"
+        // §1.2 で QmoSummary.testSummary.failedTests に wire 済。
+        connected
       >
         {criticalFailures.map((item) => (
           <FailureRow key={item.id} item={item} />
