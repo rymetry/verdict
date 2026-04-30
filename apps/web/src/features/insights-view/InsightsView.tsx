@@ -50,6 +50,7 @@ export function InsightsView({ summary }: InsightsViewProps): React.ReactElement
           <AiSummaryCard summary={summary.ai} />
         </main>
         <SidebarPanels
+          qualityGateStatus={summary.qualityGateStatus}
           qualityGate={summary.qualityGate}
           allureSummary={summary.allureSummary}
           recentRuns={summary.recentRuns}

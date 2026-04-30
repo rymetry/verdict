@@ -137,8 +137,7 @@ describe("generateAllureReport", () => {
       "generate",
       ".playwright-workbench/runs/r1/allure-results",
       "-o",
-      ".playwright-workbench/runs/r1/allure-report",
-      "--clean"
+      ".playwright-workbench/runs/r1/allure-report"
     ]);
     expect(captured.spec.cwd).toBe(workdir);
     expect(captured.spec.label).toBe("allure-generate");
@@ -237,7 +236,7 @@ describe("generateAllureReport", () => {
     );
   });
 
-  it("appends --history-path to argv when historyPath is provided (T206)", async () => {
+  it("does not pass unsupported history flags to Allure 3.6 when historyPath is provided", async () => {
     const { allureResultsDest, allureReportDir } = setupAllureBinary();
     const { runner, spawned } = fakeRunner({
       exitCode: 0,
@@ -260,10 +259,7 @@ describe("generateAllureReport", () => {
       "generate",
       ".playwright-workbench/runs/r1/allure-results",
       "-o",
-      ".playwright-workbench/runs/r1/allure-report",
-      "--clean",
-      "--history-path",
-      ".playwright-workbench/reports/allure-history.jsonl"
+      ".playwright-workbench/runs/r1/allure-report"
     ]);
   });
 

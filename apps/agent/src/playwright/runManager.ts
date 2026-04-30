@@ -58,6 +58,12 @@ export interface RunStartParams {
    * no-op — the rest of the run flow is unaffected.
    */
   allureResultsDir?: string;
+  /**
+   * True when the target project declares `allure-playwright`. In that case
+   * RunManager preserves the user's Playwright reporter config instead of
+   * injecting Workbench's CLI reporter override.
+   */
+  hasAllurePlaywright?: boolean;
 }
 
 export interface ActiveRunHandle {
@@ -123,6 +129,15 @@ const PERSIST_FATAL_CODES = new Set([
   "EDQUOT",
   "EROFS"
 ]);
+
+async function fileExists(target: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(target);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
 
 function newRunId(): string {
   return `run-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
@@ -390,6 +405,7 @@ export function createRunManager({
     const { command, env } = buildPlaywrightTestCommand({
       packageManager: params.packageManager,
       request: params.request,
+      reporterMode: params.hasAllurePlaywright ? "project-config" : "workbench-default",
       jsonOutputPath: paths.playwrightJson,
       htmlOutputDir: paths.playwrightHtml,
       projectRoot: params.projectRoot
@@ -646,6 +662,7 @@ export function createRunManager({
           qmoSummaryJsonPath: paths.qmoSummaryJsonPath,
           qmoSummaryMarkdownPath: paths.qmoSummaryMarkdownPath,
           qualityGateResultPath: paths.qualityGateResultPath,
+          allureReportDir: paths.allureReportDir,
           runId,
           logger
         });
@@ -1191,6 +1208,7 @@ async function runQmoSummaryStep({
   qmoSummaryJsonPath,
   qmoSummaryMarkdownPath,
   qualityGateResultPath,
+  allureReportDir,
   runId,
   logger
 }: {
@@ -1198,6 +1216,7 @@ async function runQmoSummaryStep({
   qmoSummaryJsonPath: string;
   qmoSummaryMarkdownPath: string;
   qualityGateResultPath: string;
+  allureReportDir: string;
   runId: string;
   logger?: RunManagerLogger;
 }): Promise<string[]> {
@@ -1223,7 +1242,14 @@ async function runQmoSummaryStep({
   // about-to-be-added qmo warnings) so failures from earlier steps
   // are reflected. The summary's own warnings flow back through the
   // returned list to the caller's metadata.warnings merge.
-  const summary = buildQmoSummary({ runMetadata, qualityGateResult });
+  const summary = buildQmoSummary({
+    runMetadata,
+    qualityGateResult,
+    artifactAvailability: {
+      allureReport: await fileExists(path.join(allureReportDir, "index.html")),
+      qualityGateResult: qgRead.kind === "found" && await fileExists(qualityGateResultPath)
+    }
+  });
   try {
     await persistQmoSummary(qmoSummaryJsonPath, qmoSummaryMarkdownPath, summary);
     logger?.info?.(

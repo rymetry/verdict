@@ -6,14 +6,38 @@
 //      (StatusBar 等から呼ぶ。`useSyncExternalStore` で React 18+ の concurrent rendering 安全)
 //
 // 接続オブジェクトは serialize 不可 + StrictMode 二重 mount と相性が悪いため Zustand store には
-// 入れず、useState の lazy initializer で hook 内に閉じ込める。
-import { useEffect, useState, useSyncExternalStore } from "react";
+// 入れず、module-level singleton として React tree の mount/unmount から分離する。
+import { useSyncExternalStore } from "react";
 
 import {
   connectWorkbenchEvents,
   type EventStream,
   type WsConnectionState
 } from "@/api/events";
+
+let singletonStream: EventStream | null = null;
+
+function getWorkbenchEventsStream(): EventStream {
+  if (!singletonStream) {
+    singletonStream = connectWorkbenchEvents();
+  }
+  return singletonStream;
+}
+
+function closeSingletonStream(): void {
+  singletonStream?.close();
+  singletonStream = null;
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    closeSingletonStream();
+  });
+}
+
+export function __resetWorkbenchEventsForTest(): void {
+  closeSingletonStream();
+}
 
 /**
  * EventStream の lifecycle を React コンポーネントに紐付ける。
@@ -22,15 +46,7 @@ import {
  * 切り直され、StatusBar の "connecting/disconnected" が常時点滅する。Phase 1 では `__root.tsx` 起点。
  */
 export function useWorkbenchEvents(): EventStream {
-  // lazy initializer: connect は副作用を起こすため初回 render 評価時にだけ走らせる
-  const [stream] = useState<EventStream>(() => connectWorkbenchEvents());
-
-  useEffect(() => {
-    // unmount で接続を確実に閉じる。reconnect timer も close() 内で停止される。
-    return () => stream.close();
-  }, [stream]);
-
-  return stream;
+  return getWorkbenchEventsStream();
 }
 
 /**

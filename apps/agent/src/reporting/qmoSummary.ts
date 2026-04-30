@@ -40,47 +40,26 @@ export interface BuildQmoSummaryInput {
    *  undefined the project either does not use Allure or the QG step
    *  was skipped (e.g. allureRunner not wired in test environments). */
   qualityGateResult?: QualityGateResult;
+  /** File-system-backed artifact availability used to avoid stale links. */
+  artifactAvailability?: {
+    allureReport?: boolean;
+    qualityGateResult?: boolean;
+  };
 }
 
 /**
- * Markers in `RunMetadata.warnings` that indicate the Allure HTML
- * report or QG result was NOT successfully produced. The QMO summary's
- * `reportLinks` only points to artifacts that actually exist, so a PR
- * comment / GitHub link does not 404 to a missing path.
- *
- * T207 review fix: previously `reportLinks.allureReportDir` was
- * unconditionally set to the run-scoped path even when the report had
- * been skipped (no results) or failed (CLI error). Detecting this
- * structurally from warnings keeps the summary honest without
- * coupling the builder to a separate "did report generation succeed"
- * flag.
+ * QMO summary generation is pure; real artifact existence is checked by
+ * RunManager and injected through `artifactAvailability`. Defaulting to
+ * false keeps test-only callers from accidentally emitting links to files
+ * that were never observed on disk.
  */
-const ALLURE_REPORT_FAILED_MARKERS = [
-  "Allure HTML report skipped",
-  "Allure HTML report generation failed",
-  "Allure HTML report generation timed out",
-  "Allure HTML report generation failed before exit",
-  "Allure CLI not found"
-];
-
-const QG_RESULT_MISSING_MARKERS = [
-  "Allure quality-gate skipped",
-  "Allure quality-gate result could not be persisted",
-  "Allure quality-gate failed before exit"
-];
-
-function hasAnyMarker(warnings: ReadonlyArray<string>, markers: ReadonlyArray<string>): boolean {
-  return markers.some((marker) => warnings.some((w) => w.includes(marker)));
-}
-
 export function buildQmoSummary(input: BuildQmoSummaryInput): QmoSummary {
-  const { runMetadata, qualityGateResult } = input;
+  const { runMetadata, qualityGateResult, artifactAvailability } = input;
   const testSummary = runMetadata.summary;
   const outcome = deriveOutcome(testSummary, qualityGateResult);
-  const allureReportPresent = !hasAnyMarker(runMetadata.warnings, ALLURE_REPORT_FAILED_MARKERS);
+  const allureReportPresent = artifactAvailability?.allureReport === true;
   const qgPresent =
-    qualityGateResult !== undefined &&
-    !hasAnyMarker(runMetadata.warnings, QG_RESULT_MISSING_MARKERS);
+    qualityGateResult !== undefined && artifactAvailability?.qualityGateResult === true;
   return {
     runId: runMetadata.runId,
     projectId: runMetadata.projectId,
@@ -97,9 +76,7 @@ export function buildQmoSummary(input: BuildQmoSummaryInput): QmoSummary {
       : undefined,
     warnings: runMetadata.warnings,
     reportLinks: {
-      // Only populate links to artifacts that actually exist on disk —
-      // otherwise PR comments / external consumers would 404 to a path
-      // declared but never written.
+      // Only populate links to artifacts that RunManager confirmed on disk.
       allureReportDir: allureReportPresent ? runMetadata.paths.allureReportDir : undefined,
       qualityGateResultPath: qgPresent ? runMetadata.paths.qualityGateResultPath : undefined
     },

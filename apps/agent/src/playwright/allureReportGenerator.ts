@@ -96,11 +96,10 @@ export interface GenerateAllureReportInput {
    *  while bounding the worst-case wait. */
   timeoutMs?: number;
   /**
-   * Phase 1.2 / T206: project-scoped Allure history JSONL path
-   * (`workbenchPaths(projectRoot).allureHistoryPath`). When provided,
-   * the generator passes `--history-path <path>` to `allure generate`
-   * so cross-run trend data accumulates in a single file. Allure CLI
-   * appends to / rewrites this file on each invocation.
+   * Phase 1.2 / T206: reserved project-scoped history path. Allure 3.6's
+   * `generate` command does not accept `--history-path`, so RunManager keeps
+   * this as an explicit input for the later history writer without passing it
+   * to the CLI.
    */
   historyPath?: string;
 }
@@ -109,7 +108,7 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const ALLURE_BIN_REL = path.join("node_modules", ".bin", "allure");
 
 /**
- * Run `allure generate <results-dir> -o <report-dir> --clean` against the
+ * Run `allure generate <results-dir> -o <report-dir>` against the
  * project's local Allure CLI. Returns a path-redacted outcome describing
  * success or the structured failure mode.
  *
@@ -148,23 +147,12 @@ export async function generateAllureReport(
   // outside the workbench dir.
   const resultsDirRel = path.relative(projectRoot, allureResultsDest);
   const reportDirRel = path.relative(projectRoot, allureReportDir);
-  const historyPathRel = input.historyPath
-    ? path.relative(projectRoot, input.historyPath)
-    : undefined;
-
   const args: string[] = [
     "generate",
     resultsDirRel,
     "-o",
-    reportDirRel,
-    "--clean"
+    reportDirRel
   ];
-  if (historyPathRel) {
-    // Append in stable order (after --clean) so test pinning stays
-    // deterministic. The validator allows `-h` / `--history-path`
-    // synonyms; we use the long form for log readability.
-    args.push("--history-path", historyPathRel);
-  }
 
   const startedAt = Date.now();
   const handle = runner.run({

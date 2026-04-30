@@ -1,12 +1,17 @@
-// useWorkbenchEvents の lifecycle (mount で connect / unmount で close) を検証する。
+// useWorkbenchEvents の lifecycle (StrictMode-safe singleton) を検証する。
 import { StrictMode } from "react";
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as events from "@/api/events";
-import { useWorkbenchEvents, useWsConnectionState } from "@/hooks/use-workbench-events";
+import {
+  __resetWorkbenchEventsForTest,
+  useWorkbenchEvents,
+  useWsConnectionState
+} from "@/hooks/use-workbench-events";
 
 afterEach(() => {
+  __resetWorkbenchEventsForTest();
   vi.restoreAllMocks();
 });
 
@@ -32,28 +37,31 @@ describe("useWorkbenchEvents()", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it("unmount で stream.close() を呼ぶ", () => {
+  it("unmount では stream.close() を呼ばない", () => {
     const { close } = mockEventsModule();
 
     const { unmount } = renderHook(() => useWorkbenchEvents());
     expect(close).not.toHaveBeenCalled();
     unmount();
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
   });
 
-  it("StrictMode 配下でも mount → unmount 後に close が必ず呼ばれる (接続漏れ防止)", () => {
-    // React 19 + StrictMode は dev で意図的にコンポーネントを double-mount する。
-    // useState lazy init は複数回走りうるが、最終 unmount で close が少なくとも 1 回
-    // 呼ばれていれば、useEffect cleanup が正しく hook 全体に紐付いていることを示す。
-    // (renderHook 環境では StrictMode の挙動が production と一致しない場合があり、
-    // 厳密な「mount 回数 == close 回数」を assert すると false negative になる)
-    const { close } = mockEventsModule();
+  it("StrictMode 配下でも singleton stream を cleanup で閉じない", () => {
+    const { close, spy } = mockEventsModule();
     const { unmount } = renderHook(() => useWorkbenchEvents(), {
       wrapper: ({ children }) => <StrictMode>{children}</StrictMode>
     });
     expect(close).not.toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledTimes(1);
     unmount();
-    expect(close.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("test reset で singleton stream を閉じる", () => {
+    const { close } = mockEventsModule();
+    renderHook(() => useWorkbenchEvents());
+    __resetWorkbenchEventsForTest();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
 

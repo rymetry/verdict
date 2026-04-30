@@ -12,8 +12,10 @@
 //
 // WebSocket は __root から WorkbenchEventsContext 経由で受け取る (δ で Root scope に singleton 化)。
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
 import { createRoute } from "@tanstack/react-router";
 
+import { fetchRun } from "@/api/client";
 import { FailureReview } from "@/features/failure-review/FailureReview";
 import { ProjectPicker } from "@/features/project-picker/ProjectPicker";
 import { RunConsole } from "@/features/run-console/RunConsole";
@@ -30,6 +32,15 @@ function QaView(): React.ReactElement {
   const eventStream = useWorkbenchEventStream();
   const currentProjectQuery = useCurrentProjectQuery();
   const project = currentProjectQuery.data ?? null;
+  const activeRunQuery = useQuery({
+    queryKey: ["runs", activeRunId],
+    queryFn: () => fetchRun(activeRunId!),
+    enabled: typeof activeRunId === "string" && activeRunId.length > 0,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "running" || status === "queued" ? 2_000 : false;
+    }
+  });
 
   if (!project) {
     return (
@@ -54,7 +65,11 @@ function QaView(): React.ReactElement {
       </div>
       <div className="flex flex-col gap-4">
         <RunControls project={project} />
-        <RunConsole eventStream={eventStream} activeRunId={activeRunId} />
+        <RunConsole
+          eventStream={eventStream}
+          activeRunId={activeRunId}
+          runSnapshot={activeRunQuery.data ?? null}
+        />
       </div>
       <div className="flex flex-col gap-4">
         <FailureReview runId={activeRunId} />

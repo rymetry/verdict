@@ -38,6 +38,21 @@ describe("buildPlaywrightTestCommand", () => {
     expect(env.PLAYWRIGHT_HTML_REPORT).toContain("playwright-report");
   });
 
+  it("preserves playwright.config reporters in project-config mode", () => {
+    const { command, env } = buildPlaywrightTestCommand({
+      packageManager: pmTemplate(),
+      request: { projectId: "/proj", headed: false },
+      reporterMode: "project-config",
+      jsonOutputPath: "/proj/.playwright-workbench/runs/1/playwright-results.json",
+      htmlOutputDir: "/proj/.playwright-workbench/runs/1/playwright-report",
+      projectRoot: "/proj"
+    });
+    expect(command.args).not.toContain("--reporter=list,json,html");
+    expect(env.PLAYWRIGHT_JSON_OUTPUT_NAME).toContain("playwright-results.json");
+    expect(env.PLAYWRIGHT_HTML_REPORT).toContain("playwright-report");
+    expect(env.PLAYWRIGHT_HTML_OPEN).toBe("never");
+  });
+
   it("collapses multiple testIds into a single --grep alternation", () => {
     const { command } = buildPlaywrightTestCommand({
       packageManager: pmTemplate(),

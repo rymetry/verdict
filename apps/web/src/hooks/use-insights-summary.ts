@@ -92,6 +92,7 @@ function buildSummary(
       body: "AI release readiness commentary is deferred to Phase 5.",
       verdictLine: ""
     },
+    qualityGateStatus: qmo?.qualityGate?.status ?? "not-evaluated",
     qualityGate: [],
     allureSummary,
     recentRuns: []

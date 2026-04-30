@@ -21,10 +21,12 @@ import {
   DEFERRED_PLACEHOLDER_LABEL,
   type AllureSummaryRow,
   type QualityGateRule,
+  type QualityGateStatus,
   type RecentRun
 } from "./types";
 
 interface SidebarPanelsProps {
+  readonly qualityGateStatus: QualityGateStatus;
   readonly qualityGate: ReadonlyArray<QualityGateRule>;
   readonly allureSummary: ReadonlyArray<AllureSummaryRow>;
   readonly recentRuns: ReadonlyArray<RecentRun>;
@@ -89,12 +91,13 @@ function RuleRow({
 }
 
 function QualityGateCard({
+  status,
   rules
 }: {
+  status: QualityGateStatus;
   rules: ReadonlyArray<QualityGateRule>;
 }): React.ReactElement {
-  // 全 rule pass なら "Passed" バッジを点ける。Phase 1.2 で部分 pass を扱うときに見直す。
-  const allPass = rules.every((rule) => rule.status === "pass");
+  const badge = qualityGateBadge(status, rules);
   return (
     <Card data-testid="insights-quality-gate-card">
       <CardHeader className="pb-2">
@@ -102,24 +105,45 @@ function QualityGateCard({
           <h3 className="text-sm font-semibold text-[var(--ink-0)]">
             {INSIGHTS_VIEW_LABELS.qualityGate}
           </h3>
-          <Badge variant={allPass ? "pass" : "fail"}>{allPass ? "Passed" : "Failed"}</Badge>
+          <Badge variant={badge.variant}>{badge.label}</Badge>
         </CardTitle>
       </CardHeader>
       <CardContent className="px-0">
-        <div className="divide-y divide-[var(--line)]">
-          {rules.map((rule) => (
-            <RuleRow
-              key={rule.name}
-              name={rule.name}
-              thresholdLabel={rule.threshold}
-              actual={rule.actual}
-              status={rule.status}
-            />
-          ))}
-        </div>
+        {rules.length > 0 ? (
+          <div className="divide-y divide-[var(--line)]">
+            {rules.map((rule) => (
+              <RuleRow
+                key={rule.name}
+                name={rule.name}
+                thresholdLabel={rule.threshold}
+                actual={rule.actual}
+                status={rule.status}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="px-3 py-3 text-xs text-[var(--ink-3)]">
+            {status === "not-evaluated"
+              ? "Quality Gate not evaluated."
+              : "Quality Gate evaluated; rule details are not available."}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
+}
+
+function qualityGateBadge(
+  status: QualityGateStatus,
+  rules: ReadonlyArray<QualityGateRule>
+): { label: string; variant: BadgeProps["variant"] } {
+  if (status === "not-evaluated") return { label: "Not evaluated", variant: "default" };
+  if (status === "passed") return { label: "Passed", variant: "pass" };
+  if (status === "failed") return { label: "Failed", variant: "fail" };
+  if (status === "error") return { label: "Error", variant: "fail" };
+  if (status === "skipped") return { label: "Skipped", variant: "skip" };
+  const failed = rules.some((rule) => rule.status === "fail");
+  return failed ? { label: "Failed", variant: "fail" } : { label: "Not evaluated", variant: "default" };
 }
 
 function AllureSummaryPanel({
@@ -231,6 +255,7 @@ function RecentRunsPanel({
 }
 
 export function SidebarPanels({
+  qualityGateStatus,
   qualityGate,
   allureSummary,
   recentRuns
@@ -241,7 +266,7 @@ export function SidebarPanels({
       data-testid="insights-sidebar"
       className="flex flex-col gap-4"
     >
-      <QualityGateCard rules={qualityGate} />
+      <QualityGateCard status={qualityGateStatus} rules={qualityGate} />
       <AllureSummaryPanel rows={allureSummary} />
       <RecentRunsPanel runs={recentRuns} />
     </aside>

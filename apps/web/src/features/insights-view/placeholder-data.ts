@@ -92,6 +92,7 @@ export const SAMPLE_INSIGHTS: InsightsSummary = {
       "前回ブロッカー (#1024 Payment gateway timeout) は新規発生していません。",
     verdictLine: "推奨: 本番昇格可能。重大な失敗 3 件を確認後、デプロイ可。"
   },
+  qualityGateStatus: "passed",
   qualityGate: [
     { name: "最低パス率", threshold: "≥ 85%", actual: "88.2%", status: "pass" },
     { name: "最大失敗数", threshold: "≤ 200", actual: "198", status: "pass" },

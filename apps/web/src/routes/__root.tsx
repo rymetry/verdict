@@ -146,6 +146,25 @@ function RootLayout(): React.ReactElement {
     }
   });
   const activeRun = activeRunQuery.data ?? null;
+  const invalidatedTerminalRunRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!activeRunId || !activeRun) return;
+    const terminal =
+      activeRun.status === "passed" ||
+      activeRun.status === "failed" ||
+      activeRun.status === "cancelled" ||
+      activeRun.status === "error";
+    if (!terminal || invalidatedTerminalRunRef.current === activeRunId) return;
+    invalidatedTerminalRunRef.current = activeRunId;
+    queryClient.invalidateQueries({ queryKey: ["runs", "list"] }).catch((error) => {
+      // eslint-disable-next-line no-console -- terminal run cache refresh failure を本番でも検出
+      console.error("[RootLayout] runs list invalidate failed", error);
+    });
+    queryClient.invalidateQueries({ queryKey: ["runs", activeRunId, "qmo-summary"] }).catch((error) => {
+      // eslint-disable-next-line no-console -- QMO summary refresh failure を本番でも検出
+      console.error("[RootLayout] qmo-summary invalidate failed", error);
+    });
+  }, [activeRunId, activeRun, queryClient]);
 
   const project = currentProjectQuery.data ?? null;
   const projectDisplayName = project ? deriveProjectDisplayName(project.rootPath) : null;

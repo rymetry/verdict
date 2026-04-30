@@ -58,6 +58,13 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
     fullPage: true,
   });
 
+  const apiBase = WORKBENCH_URL.replace(/\/$/, "");
+  const beforeRunsResponse = await page.request.get(`${apiBase}/api/runs`);
+  const beforeRuns = beforeRunsResponse.ok()
+    ? ((await beforeRunsResponse.json()) as { runs: ReadonlyArray<{ runId: string }> }).runs
+    : [];
+  const beforeRunIds = new Set(beforeRuns.map((run) => run.runId));
+
   // 4. Trigger a run via the GUI Run button.
   await page.getByRole("button", { name: /Run Playwright/ }).click();
 
@@ -66,7 +73,6 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
   //    QMO summary file is persisted (200 with outcome). This validates
   //    the actual Phase 1.2 pipeline server-side; the GUI banner check
   //    afterwards is a UI sanity-check, not the primary acceptance signal.
-  const apiBase = WORKBENCH_URL.replace(/\/$/, "");
   let latestRunId: string | undefined;
   await expect
     .poll(
@@ -77,7 +83,9 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
           runs: ReadonlyArray<{ runId: string; status: string }>;
         };
         const terminal = body.runs.find(
-          (r) => r.status === "passed" || r.status === "failed"
+          (r) =>
+            !beforeRunIds.has(r.runId) &&
+            (r.status === "passed" || r.status === "failed")
         );
         if (terminal) latestRunId = terminal.runId;
         return terminal?.status ?? "running";
@@ -87,6 +95,17 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
     .toMatch(/passed|failed/);
 
   expect(latestRunId).toBeDefined();
+  const runDir = path.join(FIXTURE, ".playwright-workbench", "runs", latestRunId!);
+  await expect
+    .poll(
+      () => ({
+        results: fs.existsSync(path.join(runDir, "allure-results")),
+        report: fs.existsSync(path.join(runDir, "allure-report", "index.html")),
+        qualityGate: fs.existsSync(path.join(runDir, "quality-gate-result.json")),
+      }),
+      { timeout: 30_000, intervals: [1_000] }
+    )
+    .toEqual({ results: true, report: true, qualityGate: true });
   // QMO summary persistence happens inside the same post-run lifecycle
   // that flips status, but the file may briefly be unreadable (write
   // before flush) or schema validation may fail mid-write — both

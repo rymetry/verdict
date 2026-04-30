@@ -122,6 +122,40 @@ describe("RunManager", () => {
     expect(fs.existsSync(path.join(runDir, "playwright-results.json"))).toBe(true);
   });
 
+  it("does not pass CLI reporter override when project uses allure-playwright", async () => {
+    const bus = createEventBus();
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        argValidator: unsafelyAllowAnyArgsValidator,
+        cwdBoundary: workdir,
+        envAllowlist: [
+          "PATH",
+          "HOME",
+          "PLAYWRIGHT_JSON_OUTPUT_NAME",
+          "PLAYWRIGHT_HTML_REPORT",
+          "PLAYWRIGHT_HTML_OPEN"
+        ]
+      }
+    });
+    const manager = createRunManager({ runnerForProject: () => runner, bus });
+    const stubPath = writeStub("stub-allure.js", STUB_SUCCESS_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false },
+      hasAllurePlaywright: true
+    });
+    const completed = await handle.finished;
+
+    expect(completed.status).toBe("passed");
+    expect(completed.command.args).not.toContain("--reporter=list,json,html");
+  });
+
   it("publishes run.completed with status 'failed' on non-zero exit", async () => {
     const bus = createEventBus();
     const runner = createNodeCommandRunner({
