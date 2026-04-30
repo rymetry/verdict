@@ -210,17 +210,16 @@ describe("各 persona route の直接アクセス", () => {
     expect(screen.getByRole("tab", { name: "Developer", selected: true })).toBeInTheDocument();
   });
 
-  it("`/qmo` を直接開くと Insights View placeholder が 2-col grid で描画される", async () => {
-    // ζ (Issue #13) で /qmo は Hero / 3-card row / AI summary / Sidebar の 2-col placeholder を表示。
-    // section の aria-label "Insights View" と各セクションの testid で pin する。view 内の visible heading は
-    // h2 "Release Readiness" (Hero) で、view 名 "Insights" は heading ではなく aria-label で AT に伝える設計。
+  it("`/qmo` を直接開くと Insights View が描画される (no run data 時は empty placeholder)", async () => {
+    // §1.2 で SAMPLE_INSIGHTS の static fallback を撤去したため、router-only テスト
+    // (= no run data の状態) では `insights-view-empty` のテキスト placeholder が
+    // 表示される。Insights view 本体の Hero / cards / sidebar の細部は
+    // `apps/web/test/features/insights-view.test.tsx` の component test で pin。
+    // ここでは route が正しく hit して section が出ること + empty 状態で
+    // crash しないことだけ assert する。
     renderWithRouter({ initialPath: "/qmo" });
     expect(await screen.findByTestId("qmo-view")).toHaveAttribute("aria-label", "Insights View");
-    expect(screen.getByTestId("insights-view-grid")).toBeInTheDocument();
-    expect(screen.getByTestId("insights-hero")).toBeInTheDocument();
-    expect(screen.getByTestId("insights-main-cards")).toBeInTheDocument();
-    expect(screen.getByTestId("insights-ai-card")).toBeInTheDocument();
-    expect(screen.getByTestId("insights-sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("insights-view-empty")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Insights", selected: true })).toBeInTheDocument();
   });
 });
