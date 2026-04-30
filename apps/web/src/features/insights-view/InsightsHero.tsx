@@ -13,7 +13,6 @@ import { cn } from "@/lib/utils";
 
 import {
   INSIGHTS_VIEW_LABELS,
-  PHASE_1_2_PLACEHOLDER_LABEL,
   type ReleaseReadiness,
   type ReleaseVerdict,
   type RunStat
@@ -71,7 +70,8 @@ export function InsightsHero({
             <h2 className="text-2xl font-semibold tracking-tight text-[var(--ink-0)]">
               {INSIGHTS_VIEW_LABELS.hero}
             </h2>
-            <Badge variant="info">{PHASE_1_2_PLACEHOLDER_LABEL}</Badge>
+            {/* §1.2 で readiness/score/verdict が実データに wire 済。
+                旧 placeholder badge は除去 (UI が mock であるかのような誤解を防止)。 */}
           </div>
 
           <div className="flex items-baseline gap-2">

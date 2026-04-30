@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 
 import {
   INSIGHTS_VIEW_LABELS,
-  PHASE_1_2_PLACEHOLDER_LABEL,
+  DEFERRED_PLACEHOLDER_LABEL,
   type AllureSummaryRow,
   type QualityGateRule,
   type RecentRun
@@ -149,7 +149,7 @@ function AllureSummaryPanel({
               </span>
             </TooltipTrigger>
             <TooltipContent id="insights-allure-full-report-tooltip">
-              {PHASE_1_2_PLACEHOLDER_LABEL}
+              {DEFERRED_PLACEHOLDER_LABEL}
             </TooltipContent>
           </Tooltip>
         </CardTitle>
@@ -198,7 +198,7 @@ function RecentRunsPanel({
               </span>
             </TooltipTrigger>
             <TooltipContent id="insights-recent-runs-show-all-tooltip">
-              {PHASE_1_2_PLACEHOLDER_LABEL}
+              {DEFERRED_PLACEHOLDER_LABEL}
             </TooltipContent>
           </Tooltip>
         </CardTitle>

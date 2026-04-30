@@ -68,14 +68,17 @@ export interface ConsoleEntry {
 export type RunMetadataRow = readonly [string, string];
 
 /**
- * Phase 1.2 接続予定 badge の文言。
- * 実データに切り替えた際に必ず削除すべき UI 文字列を 1 箇所に集約し、
- * 全 badge が外れたかを grep で確認できるようにするための定数。
+ * 未接続セクションの placeholder badge 文言。
  *
- * Phase 1.2 で sample data を削除する際もこの const は最後まで残し、
- * 全 placeholder badge が外れたことを確認してから削除する。
+ * Developer View の Locator / Console / Run metadata は Phase 5+ で
+ * 実データに wire 予定 (ts-morph による Locator 解析、browser console
+ * filter、metadata viewer)。それまでは static placeholder データを
+ * 表示するため、UI 上に「mock であること」を明示する。
+ *
+ * 旧名 `PHASE_1_2_PLACEHOLDER_LABEL` ("Phase 1.2 で接続予定") は §1.2
+ * 完了で意味が破綻したため改名 + 改文。
  */
-export const PHASE_1_2_PLACEHOLDER_LABEL = "Phase 1.2 で接続予定";
+export const DEFERRED_PLACEHOLDER_LABEL = "Phase 5+ で接続予定";
 
 /**
  * Developer View 内で使用する UI 文言。文言を変える際の grep 起点として 1 箇所に集約する。

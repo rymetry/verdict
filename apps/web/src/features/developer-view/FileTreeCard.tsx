@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
   DEVELOPER_VIEW_LABELS,
-  PHASE_1_2_PLACEHOLDER_LABEL,
+  DEFERRED_PLACEHOLDER_LABEL,
   type FileTreeGroup
 } from "./types";
 
@@ -38,7 +38,7 @@ export function FileTreeCard({ groups }: FileTreeCardProps): React.ReactElement 
           <span>{DEVELOPER_VIEW_LABELS.fileTree}</span>
           <span className="flex items-center gap-2">
             <span className="text-xs font-medium text-[var(--ink-3)]">{total}</span>
-            <Badge variant="info">{PHASE_1_2_PLACEHOLDER_LABEL}</Badge>
+            <Badge variant="info">{DEFERRED_PLACEHOLDER_LABEL}</Badge>
           </span>
         </CardTitle>
       </CardHeader>

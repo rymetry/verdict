@@ -128,11 +128,17 @@ export interface InsightsSummary {
 }
 
 /**
- * Phase 1.2 接続予定 badge / tooltip の文言。
- * 全 placeholder badge を Phase 1.2 で外したことを grep で確認するための定数。
- * Phase 1.2 で sample data を削除する際もこの const は最後まで残す。
+ * 未接続セクションの placeholder badge / tooltip 文言。
+ *
+ * 旧名 `PHASE_1_2_PLACEHOLDER_LABEL` ("Phase 1.2 で接続予定") は §1.2
+ * 完了で意味が破綻したため、Phase 5+ で接続予定の項目向けに改名 + 改文。
+ * 該当する未接続項目: AI summary / Known Issues / Top Flaky /
+ * Quality Gate rules / Recent Runs / Developer View 各 panel。
+ *
+ * Hero / Critical Failures / Allure Summary は §1.1 / §1.2 / §1.3 で
+ * 実データに wire 済のため、badge は使用箇所ごと除去している。
  */
-export const PHASE_1_2_PLACEHOLDER_LABEL = "Phase 1.2 で接続予定";
+export const DEFERRED_PLACEHOLDER_LABEL = "Phase 5+ で接続予定";
 
 /**
  * Insights View の UI 文言。Card title など複数箇所から参照される文字列を集約し、

@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
   DEVELOPER_VIEW_LABELS,
-  PHASE_1_2_PLACEHOLDER_LABEL,
+  DEFERRED_PLACEHOLDER_LABEL,
   type SourceLine
 } from "./types";
 
@@ -77,7 +77,7 @@ export function SourceTabsCard({
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span>{DEVELOPER_VIEW_LABELS.sourceTabs}</span>
-          <Badge variant="info">{PHASE_1_2_PLACEHOLDER_LABEL}</Badge>
+          <Badge variant="info">{DEFERRED_PLACEHOLDER_LABEL}</Badge>
         </CardTitle>
       </CardHeader>
       <CardContent>

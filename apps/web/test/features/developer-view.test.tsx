@@ -28,7 +28,7 @@ import {
 } from "@/features/developer-view/placeholder-data";
 import {
   DEVELOPER_VIEW_LABELS,
-  PHASE_1_2_PLACEHOLDER_LABEL
+  DEFERRED_PLACEHOLDER_LABEL
 } from "@/features/developer-view/types";
 
 afterEach(() => {
@@ -60,12 +60,14 @@ describe("DeveloperView (3-col composer)", () => {
     expect(screen.getByTestId("dev-inspector-panel")).toBeInTheDocument();
   });
 
-  it("Phase 1.2 で接続予定 badge が 5 つ存在する (FileTree + SourceTabs + Locator + Console + RunMetadata)", () => {
-    // バッジ数を pin することで「Phase 1.2 で実データ化した時に外し忘れた」regression を検出できる。
+  it("Phase 5+ で接続予定 badge が 5 つ存在する (FileTree + SourceTabs + Locator + Console + RunMetadata)", () => {
+    // バッジ数を pin することで「実データに wire した時に外し忘れた」regression を検出できる。
+    // Developer View の 5 サブパネルはすべて Phase 5+ で wire 予定 (ts-morph 由来 Locator,
+    // browser console filter 等)、現状はすべて static placeholder のまま。
     // 内訳: FileTree (1) + SourceTabs (1) + Locator (1) + Console (1) + RunMetadata (1) = 5。
     // Inspector panel root には badge は付かない。
     renderDeveloperViewWithSample();
-    const badges = screen.getAllByText(PHASE_1_2_PLACEHOLDER_LABEL);
+    const badges = screen.getAllByText(DEFERRED_PLACEHOLDER_LABEL);
     expect(badges).toHaveLength(5);
   });
 });

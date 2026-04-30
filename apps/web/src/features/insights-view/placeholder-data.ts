@@ -1,16 +1,15 @@
-// Insights View Phase 1 placeholder の静的サンプルデータ。
+// Insights View component-test fixture (旧称 Phase 1 placeholder)。
 //
-// **Phase 1.2 で削除されること** (silent failure 防衛):
-//  - 全 Card の Props は required (default fallback なし)。本データは route component
-//    (`apps/web/src/routes/qmo.tsx`) からのみ import される。
-//  - Phase 1.2 で `useInsightsSummary()` hook (TanStack Query 5 秒 polling) に切り替える際は
-//    本ファイルの import を qmo.tsx から削除し、hook の戻り値を直接 props に渡す。
-//    各 Card Props が required のため `data ?? MOCK_*` のような silent fallback は構造上書けない。
-//  - 全 SAMPLE_* export と本ファイル自身を Phase 1.2 で削除すること。`PHASE_1_2_PLACEHOLDER_LABEL`
-//    定数 (types.ts) は最後まで残し、grep で全 placeholder badge が外れたか確認に使う。
+// 状態 (§1.2 完了後):
+//  - production code (`routes/qmo.tsx`) は既にこのファイルを import せず、
+//    `useInsightsSummary()` 経由で実データを描画している。
+//  - 本 `SAMPLE_INSIGHTS` は `apps/web/test/features/insights-view.test.tsx`
+//    で各 Card の rendering を pin するためのテスト固定データとして残存。
 //
-// 参考: ε (Issue #12) と同じ pattern を踏襲。詳細は
-// `apps/web/src/features/developer-view/placeholder-data.ts` のコメント参照。
+// Phase 5+ で Known Issues / Top Flaky / AI summary 等が wire される際:
+//  - test fixture は引き続き必要 (component test の input)
+//  - 各 Card の `connected` 判定 / placeholder badge 文言は
+//    `DEFERRED_PLACEHOLDER_LABEL` (types.ts) を起点に変更する。
 import type { InsightsSummary } from "./types";
 
 export const SAMPLE_INSIGHTS: InsightsSummary = {
