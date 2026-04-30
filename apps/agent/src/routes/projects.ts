@@ -1,10 +1,17 @@
 import { Hono } from "hono";
-import { ProjectOpenRequestSchema, type TestInventory } from "@pwqa/shared";
+import {
+  AllureHistoryResponseSchema,
+  ProjectOpenRequestSchema,
+  type AllureHistoryResponse,
+  type TestInventory
+} from "@pwqa/shared";
 import { scanProject, ProjectScanError } from "../project/scanner.js";
 import { buildInventory } from "../project/inventory.js";
 import type { ProjectStore } from "../project/store.js";
 import type { CommandRunner } from "../commands/runner.js";
 import { apiError } from "../lib/apiError.js";
+import { readAllureHistory } from "../reporting/allureHistoryReader.js";
+import { workbenchPaths } from "../storage/paths.js";
 
 interface Deps {
   projectStore: ProjectStore;
@@ -54,6 +61,32 @@ export function projectsRoutes({ projectStore, runnerForProject, allowedRoots }:
       return apiError(c, "NO_PROJECT", "No project is currently open.", 404);
     }
     return c.json(current.summary);
+  });
+
+  router.get("/projects/:projectId/allure-history", async (c) => {
+    const projectId = c.req.param("projectId");
+    const current = projectStore.getById(projectId);
+    if (!current) {
+      return apiError(c, "NO_PROJECT", "Project is not open.", 404);
+    }
+    const { allureHistoryPath } = workbenchPaths(current.summary.rootPath);
+    try {
+      const { entries, warnings } = await readAllureHistory(allureHistoryPath);
+      const response: AllureHistoryResponse = { entries, warnings };
+      // Validate before returning so a future contract drift surfaces
+      // here as a 500 instead of letting clients see an undocumented
+      // shape.
+      return c.json(AllureHistoryResponseSchema.parse(response));
+    } catch (error) {
+      // FATAL_OPERATIONAL_CODES (EACCES / EIO / ...) propagate; we
+      // surface them as 500 rather than swallowing into an empty list.
+      return apiError(
+        c,
+        "ALLURE_HISTORY_READ_FAILED",
+        error instanceof Error ? error.message : "Failed to read allure history",
+        500
+      );
+    }
   });
 
   router.get("/projects/:projectId/inventory", async (c) => {
