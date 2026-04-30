@@ -6,7 +6,7 @@ tests through the official CLI, captures stdout/stderr/JSON results, and (in
 later phases) integrates Allure Report 3, AI failure analysis, and QMO release
 summaries.
 
-The current slice implements **Phase 1** of `PLAN.v2.md`:
+The current slice implements **Phase 1 + Phase 1.2** of `PLAN.v2.md`:
 
 - `apps/web` — Vite + React 19 GUI with TanStack Query and a native WebSocket
   console.
@@ -29,8 +29,34 @@ Implemented Phase 1 capabilities:
   Playwright JSON / HTML / logs under `.playwright-workbench/runs/<runId>/`,
   and surfaces a `failedTests` array for the failure-review panel.
 
-Allure Report 3 (Phase 1.2) and the Bun feasibility spike (Phase 1.5) are not
-yet implemented.
+Implemented Phase 1.2 capabilities:
+
+- ProjectScanner heuristic detects `allure-playwright` `resultsDir` from
+  `playwright.config.{ts,js,mjs,cjs}` (T203-1).
+- detect/archive/copy lifecycle in RunManager preserves prior `allure-results/*`
+  to `.playwright-workbench/archive/<timestamp>/` and copies post-run output to
+  `<runDir>/allure-results/` (T203-2 / T203-3).
+- `allure generate` subprocess produces the HTML report at
+  `<runDir>/allure-report/` with cross-run history JSONL accumulated at
+  `.playwright-workbench/reports/allure-history.jsonl` (T204 + T206).
+- `allure quality-gate` evaluation persists the structured outcome at
+  `<runDir>/quality-gate-result.json` per `QualityGateResultSchema` (T205).
+- QMO Release Readiness Summary v0 (Markdown + JSON) at
+  `<runDir>/qmo-summary.{json,md}` derived from RunMetadata + Quality Gate
+  result (T207).
+- HTTP API endpoints `GET /runs/:runId/qmo-summary` and `qmo-summary.md` plus
+  a live banner on the `/qmo` route (T208).
+
+Bun feasibility spike (Phase 1.5) and Phase 2 onwards remain future work.
+
+📚 **Detailed PoC documentation**:
+
+- [`docs/operations/poc-guide.md`](./docs/operations/poc-guide.md) —
+  step-by-step usage manual (setup → run → Allure HTML → QMO summary)
+- [`docs/operations/poc-remaining-work.md`](./docs/operations/poc-remaining-work.md)
+  — gaps and future work sized by priority
+- [`IMPLEMENTATION_REPORT.md`](./IMPLEMENTATION_REPORT.md) — Phase 1.2 session
+  report (19 PRs, 725 tests, security review summary)
 
 ## Requirements
 
