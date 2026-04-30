@@ -236,34 +236,7 @@ describe("generateAllureReport", () => {
     );
   });
 
-  it("does not pass unsupported history flags to Allure 3.6 when historyPath is provided", async () => {
-    const { allureResultsDest, allureReportDir } = setupAllureBinary();
-    const { runner, spawned } = fakeRunner({
-      exitCode: 0,
-      signal: null,
-      stdout: "",
-      stderr: "",
-      durationMs: 5
-    });
-
-    await generateAllureReport({
-      runner,
-      projectRoot: workdir,
-      allureResultsDest,
-      allureReportDir,
-      historyPath: path.join(workdir, ".playwright-workbench/reports/allure-history.jsonl")
-    });
-
-    expect(spawned).toHaveLength(1);
-    expect(spawned[0]!.spec.args).toEqual([
-      "generate",
-      ".playwright-workbench/runs/r1/allure-results",
-      "-o",
-      ".playwright-workbench/runs/r1/allure-report"
-    ]);
-  });
-
-  it("omits --history-path when historyPath is undefined (back-compat)", async () => {
+  it("does not pass unsupported history flags to Allure 3.6", async () => {
     const { allureResultsDest, allureReportDir } = setupAllureBinary();
     const { runner, spawned } = fakeRunner({
       exitCode: 0,
@@ -278,7 +251,32 @@ describe("generateAllureReport", () => {
       projectRoot: workdir,
       allureResultsDest,
       allureReportDir
-      // historyPath intentionally omitted
+    });
+
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]!.spec.args).toEqual([
+      "generate",
+      ".playwright-workbench/runs/r1/allure-results",
+      "-o",
+      ".playwright-workbench/runs/r1/allure-report"
+    ]);
+  });
+
+  it("omits --history-path from generate argv", async () => {
+    const { allureResultsDest, allureReportDir } = setupAllureBinary();
+    const { runner, spawned } = fakeRunner({
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 5
+    });
+
+    await generateAllureReport({
+      runner,
+      projectRoot: workdir,
+      allureResultsDest,
+      allureReportDir
     });
 
     expect(spawned[0]!.spec.args).not.toContain("--history-path");

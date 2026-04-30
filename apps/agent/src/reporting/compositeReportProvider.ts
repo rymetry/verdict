@@ -62,7 +62,7 @@ export function mergeReadSummaryResults(
   };
 
   const multi = inputs.filter((c) => c.result || c.failureWarning).length > 1;
-  const warnings = inputs.flatMap((c) => collectWarnings(c, multi));
+  const warnings = inputs.flatMap((c) => collectWarnings(c, multi, true));
 
   return { summary, warnings };
 }
@@ -80,9 +80,17 @@ function emptySummary(): TestResultSummary {
 
 function collectWarnings(
   captured: MergeInput,
-  prefixForMulti: boolean
+  prefixForMulti: boolean,
+  suppressMissingFailures = false
 ): string[] {
-  const fromFailure = captured.failureWarning ? [captured.failureWarning] : [];
+  const suppressFailure =
+    suppressMissingFailures &&
+    captured.provider === "playwright-json" &&
+    captured.failureWarning?.includes("code=ENOENT") === true;
+  const fromFailure =
+    captured.failureWarning && !suppressFailure
+      ? [captured.failureWarning]
+      : [];
   const fromProvider = captured.result?.warnings ?? [];
   if (!prefixForMulti) return [...fromFailure, ...fromProvider];
   return [

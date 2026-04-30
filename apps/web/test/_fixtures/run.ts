@@ -35,6 +35,9 @@ export function makeRunMetadata(
       allureResultsDest: "/runs/test/allure-results",
       allureReportDir: "/runs/test/allure-report",
       qualityGateResultPath: "/runs/test/quality-gate-result.json",
+      allureExportsDir: "/runs/test/allure-exports",
+      allureCsvPath: "/runs/test/allure-exports/results.csv",
+      allureLogPath: "/runs/test/allure-exports/results.log",
       qmoSummaryJsonPath: "/runs/test/qmo-summary.json",
       qmoSummaryMarkdownPath: "/runs/test/qmo-summary.md"
     },

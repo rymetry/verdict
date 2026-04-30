@@ -1602,6 +1602,24 @@ process.exit(1);
       const fakeAllureRunner = {
         run(spec: { executable: string; args: ReadonlyArray<string> }) {
           allureSpawned.push({ args: spec.args });
+          const subcommand = spec.args[0];
+          const outputFlagIndex = spec.args.findIndex((arg) => arg === "-o" || arg === "--output");
+          const historyFlagIndex = spec.args.findIndex((arg) => arg === "-h" || arg === "--history-path");
+          if (subcommand === "generate" && outputFlagIndex >= 0) {
+            const out = path.join(workdir, spec.args[outputFlagIndex + 1] ?? "");
+            fs.mkdirSync(out, { recursive: true });
+            fs.writeFileSync(path.join(out, "index.html"), "<!doctype html>");
+          }
+          if (subcommand === "history" && historyFlagIndex >= 0) {
+            const out = path.join(workdir, spec.args[historyFlagIndex + 1] ?? "");
+            fs.mkdirSync(path.dirname(out), { recursive: true });
+            fs.appendFileSync(out, JSON.stringify({ generatedAt: "2026-04-30T00:00:00Z" }) + "\n");
+          }
+          if ((subcommand === "csv" || subcommand === "known-issue") && outputFlagIndex >= 0) {
+            const out = path.join(workdir, spec.args[outputFlagIndex + 1] ?? "");
+            fs.mkdirSync(path.dirname(out), { recursive: true });
+            fs.writeFileSync(out, subcommand === "csv" ? "name,status\n" : "[]");
+          }
           const startedAt = new Date();
           return {
             result: Promise.resolve({
@@ -1610,7 +1628,7 @@ process.exit(1);
               startedAt: startedAt.toISOString(),
               endedAt: new Date(startedAt.getTime() + 5).toISOString(),
               durationMs: 5,
-              stdout: "Quality gate passed",
+              stdout: subcommand === "log" ? "Allure log output" : "Quality gate passed",
               stderr: "",
               cancelled: false,
               timedOut: false,
@@ -1677,6 +1695,13 @@ process.exit(0);
       // ordering changes from breaking.
       const subcommands = allureSpawned.map((s) => s.args[0]);
       expect(subcommands).toContain("quality-gate");
+      expect(subcommands).toEqual(
+        expect.arrayContaining(["generate", "history", "csv", "log", "known-issue", "quality-gate"])
+      );
+      expect(fs.existsSync(path.join(workdir, ".playwright-workbench", "latest-report", "index.html"))).toBe(true);
+      expect(fs.existsSync(path.join(workdir, ".playwright-workbench", "reports", "allure-history.jsonl"))).toBe(true);
+      expect(fs.existsSync(completed.paths.allureCsvPath)).toBe(true);
+      expect(fs.readFileSync(completed.paths.allureLogPath, "utf8")).toContain("Allure log output");
     });
 
     it("logs copy failure as structured error (allure-results, no op) and surfaces a warning without aborting the run", async () => {

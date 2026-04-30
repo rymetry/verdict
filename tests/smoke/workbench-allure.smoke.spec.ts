@@ -102,10 +102,22 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
         results: fs.existsSync(path.join(runDir, "allure-results")),
         report: fs.existsSync(path.join(runDir, "allure-report", "index.html")),
         qualityGate: fs.existsSync(path.join(runDir, "quality-gate-result.json")),
+        history: fs.existsSync(path.join(FIXTURE, ".playwright-workbench", "reports", "allure-history.jsonl")),
+        csv: fs.existsSync(path.join(runDir, "allure-exports", "results.csv")),
+        log: fs.existsSync(path.join(runDir, "allure-exports", "results.log")),
+        latestReport: fs.existsSync(path.join(FIXTURE, ".playwright-workbench", "latest-report", "index.html")),
       }),
       { timeout: 30_000, intervals: [1_000] }
     )
-    .toEqual({ results: true, report: true, qualityGate: true });
+    .toEqual({
+      results: true,
+      report: true,
+      qualityGate: true,
+      history: true,
+      csv: true,
+      log: true,
+      latestReport: true,
+    });
   // QMO summary persistence happens inside the same post-run lifecycle
   // that flips status, but the file may briefly be unreadable (write
   // before flush) or schema validation may fail mid-write — both
@@ -152,6 +164,7 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
   const outcome = page.getByTestId("qmo-summary-banner-outcome");
   await expect(outcome).toBeVisible({ timeout: 30_000 });
   await expect(outcome).toHaveText(/Not Ready/);
+  await expect(page.getByTestId("qmo-summary-banner-allure-report-link")).toBeVisible();
   await page.screenshot({
     path: path.join(ARTIFACT_DIR, "allure-smoke-after-run.png"),
     fullPage: true,

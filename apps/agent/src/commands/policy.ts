@@ -22,7 +22,8 @@ export type CommandArgsValidationCode =
   | "duplicate-flag"
   | "extra-positional"
   | "missing-results-dir"
-  | "missing-output-flag";
+  | "missing-output-flag"
+  | "missing-history-path-flag";
 
 export type CommandArgsValidationResult =
   | { ok: true }
@@ -290,11 +291,18 @@ export function createDefaultCommandPolicy(cwdBoundary: string): CommandPolicy {
 
 /**
  * Allowed Allure subcommands for Phase 1.2. The validator pins these
- * exactly — adding more (`open`, `csv`, `log`) needs an explicit policy
- * update plus dedicated tests so each new attack surface is reviewed
- * deliberately. T207 (CSV/log) extends this set when its producer lands.
+ * exactly — adding more (notably `open`, which can start a server)
+ * needs an explicit policy update plus dedicated tests so each new
+ * attack surface is reviewed deliberately.
  */
-const ALLOWED_ALLURE_SUBCOMMANDS = new Set(["generate", "quality-gate"]);
+const ALLOWED_ALLURE_SUBCOMMANDS = new Set([
+  "generate",
+  "quality-gate",
+  "history",
+  "csv",
+  "log",
+  "known-issue"
+]);
 
 /**
  * Per-subcommand value flag sets. Validated separately from positional
@@ -305,6 +313,24 @@ const ALLOWED_ALLURE_SUBCOMMANDS = new Set(["generate", "quality-gate"]);
  *   -o / --output  : project-relative output dir
  *   --config       : project-relative path
  *   --report-name  : free-form name (no path validation)
+ *
+ * `history` flags:
+ *   -h / --history-path : project-relative JSONL path
+ *   --history-limit     : numeric
+ *   --report-name       : free-form name
+ *
+ * `csv` flags:
+ *   -o / --output   : project-relative output file
+ *   --config        : project-relative path
+ *   --separator     : free-form separator
+ *   --known-issues  : project-relative path
+ *
+ * `log` flags:
+ *   --config        : project-relative path
+ *   --group-by      : free-form grouping token
+ *
+ * `known-issue` flags:
+ *   -o / --output   : project-relative output file
  *
  * `quality-gate` flags (T205-1):
  *   --max-failures      : numeric (CLI rejects malformed)
@@ -317,10 +343,7 @@ const ALLURE_GENERATE_VALUE_FLAGS = new Set([
   "--output",
   "--config",
   "--report-name",
-  // Phase 1.2 (T206): cross-run history JSONL. Allure CLI accepts
-  // `-h <path>` and `--history-path <path>` synonymously.
-  "-h",
-  "--history-path"
+  "--name"
 ]);
 const ALLURE_QUALITY_GATE_VALUE_FLAGS = new Set([
   "--max-failures",
@@ -328,12 +351,38 @@ const ALLURE_QUALITY_GATE_VALUE_FLAGS = new Set([
   "--success-rate",
   "--known-issues"
 ]);
+const ALLURE_HISTORY_VALUE_FLAGS = new Set([
+  "-h",
+  "--history-path",
+  "--history-limit",
+  "--report-name",
+  "--name"
+]);
+const ALLURE_CSV_VALUE_FLAGS = new Set([
+  "-o",
+  "--output",
+  "--config",
+  "--separator",
+  "--known-issues"
+]);
+const ALLURE_LOG_VALUE_FLAGS = new Set([
+  "--config",
+  "--group-by"
+]);
+const ALLURE_KNOWN_ISSUE_VALUE_FLAGS = new Set([
+  "-o",
+  "--output"
+]);
 
 /**
  * Per-subcommand standalone flag sets (boolean / behavioral toggles).
  */
-const ALLURE_GENERATE_STANDALONE_FLAGS = new Set(["--clean"]);
+const ALLURE_GENERATE_STANDALONE_FLAGS = new Set<string>();
 const ALLURE_QUALITY_GATE_STANDALONE_FLAGS = new Set(["--fast-fail"]);
+const ALLURE_HISTORY_STANDALONE_FLAGS = new Set<string>();
+const ALLURE_CSV_STANDALONE_FLAGS = new Set(["--disable-headers"]);
+const ALLURE_LOG_STANDALONE_FLAGS = new Set(["--all-steps", "--with-trace"]);
+const ALLURE_KNOWN_ISSUE_STANDALONE_FLAGS = new Set<string>();
 
 /** Flags whose value is a project-relative path (need traversal/absolute checks). */
 const ALLURE_PATH_VALUE_FLAGS = new Set([
@@ -349,9 +398,13 @@ const ALLURE_PATH_VALUE_FLAGS = new Set([
 /** Flags whose value is treated as a free-form non-path token. */
 const ALLURE_FREEFORM_VALUE_FLAGS = new Set([
   "--report-name",
+  "--name",
   "--max-failures",
   "--min-tests-count",
-  "--success-rate"
+  "--success-rate",
+  "--history-limit",
+  "--separator",
+  "--group-by"
 ]);
 
 /**
@@ -363,7 +416,46 @@ const ALLURE_FREEFORM_VALUE_FLAGS = new Set([
  */
 function canonicalAllureFlag(arg: string): string {
   if (arg === "-h") return "--history-path";
+  if (arg === "--name") return "--report-name";
   return arg;
+}
+
+function allureValueFlagsFor(subcommand: string): ReadonlySet<string> {
+  switch (subcommand) {
+    case "generate":
+      return ALLURE_GENERATE_VALUE_FLAGS;
+    case "quality-gate":
+      return ALLURE_QUALITY_GATE_VALUE_FLAGS;
+    case "history":
+      return ALLURE_HISTORY_VALUE_FLAGS;
+    case "csv":
+      return ALLURE_CSV_VALUE_FLAGS;
+    case "log":
+      return ALLURE_LOG_VALUE_FLAGS;
+    case "known-issue":
+      return ALLURE_KNOWN_ISSUE_VALUE_FLAGS;
+    default:
+      return new Set();
+  }
+}
+
+function allureStandaloneFlagsFor(subcommand: string): ReadonlySet<string> {
+  switch (subcommand) {
+    case "generate":
+      return ALLURE_GENERATE_STANDALONE_FLAGS;
+    case "quality-gate":
+      return ALLURE_QUALITY_GATE_STANDALONE_FLAGS;
+    case "history":
+      return ALLURE_HISTORY_STANDALONE_FLAGS;
+    case "csv":
+      return ALLURE_CSV_STANDALONE_FLAGS;
+    case "log":
+      return ALLURE_LOG_STANDALONE_FLAGS;
+    case "known-issue":
+      return ALLURE_KNOWN_ISSUE_STANDALONE_FLAGS;
+    default:
+      return new Set();
+  }
 }
 
 /**
@@ -378,7 +470,7 @@ function canonicalAllureFlag(arg: string): string {
  * Accepted subcommands and shapes:
  *
  * `generate` (T204):
- *   `generate <results-dir> {-o|--output} <report-dir> [--clean]
+ *   `generate <results-dir> {-o|--output} <report-dir>
  *                            [--config <path>] [--report-name <name>]`
  *   - exactly one positional results-dir (project-relative)
  *   - required output flag (`-o`/`--output`), single occurrence
@@ -389,6 +481,21 @@ function canonicalAllureFlag(arg: string): string {
  *                                [--known-issues <path>]`
  *   - exactly one positional results-dir (project-relative)
  *   - all flags optional (omitted ones use Allure CLI defaults)
+ *
+ * `history` (T206):
+ *   `history {-h|--history-path} <jsonl> <results-dir> [--history-limit <n>]`
+ *   - exactly one positional results-dir (project-relative)
+ *   - required history path flag, single occurrence
+ *
+ * `csv` (T207):
+ *   `csv <results-dir> {-o|--output} <csv-file> [--disable-headers]
+ *        [--separator <s>] [--known-issues <path>]`
+ *
+ * `log` (T207):
+ *   `log <results-dir> [--group-by <field>] [--all-steps] [--with-trace]`
+ *
+ * `known-issue` (T207):
+ *   `known-issue <results-dir> {-o|--output} <json-file>`
  *
  * Anything else (unknown subcommands, unknown flags, multiple positionals,
  * absolute paths, traversal, NUL bytes, oversized args, duplicate flags)
@@ -429,19 +536,14 @@ export function validateAllureArgs({
     );
   }
 
-  // Per-subcommand argument-shape rules. Branch up-front so the loop body
-  // can use a single combined flag set without conditional logic for
-  // subcommand-specific rules (output-required, etc).
-  const valueFlags =
-    subcommand === "generate" ? ALLURE_GENERATE_VALUE_FLAGS : ALLURE_QUALITY_GATE_VALUE_FLAGS;
-  const standaloneFlags =
-    subcommand === "generate"
-      ? ALLURE_GENERATE_STANDALONE_FLAGS
-      : ALLURE_QUALITY_GATE_STANDALONE_FLAGS;
+  // Per-subcommand argument-shape rules.
+  const valueFlags = allureValueFlagsFor(subcommand);
+  const standaloneFlags = allureStandaloneFlagsFor(subcommand);
   const subcommandLabel = `Allure ${subcommand}`;
 
   let positionalCount = 0;
-  let outputSeen = false; // generate-only
+  let outputSeen = false;
+  let historyPathSeen = false;
   const seenValueFlags = new Set<string>();
   let index = 1;
   while (index < args.length) {
@@ -479,6 +581,14 @@ export function validateAllureArgs({
           );
         }
         outputSeen = true;
+      } else if (arg === "-h" || arg === "--history-path") {
+        if (historyPathSeen) {
+          return argsInvalid(
+            "duplicate-flag",
+            `Flag '${arg}' must not appear more than once for the ${subcommandLabel} policy.`
+          );
+        }
+        historyPathSeen = true;
       } else {
         // Normalize known synonym pairs to a single canonical token so
         // mixed-form duplicates trigger duplicate-flag.
@@ -519,10 +629,16 @@ export function validateAllureArgs({
       `${subcommandLabel} must specify a positional results-dir argument.`
     );
   }
-  if (subcommand === "generate" && !outputSeen) {
+  if ((subcommand === "generate" || subcommand === "csv" || subcommand === "known-issue") && !outputSeen) {
     return argsInvalid(
       "missing-output-flag",
-      "Allure generate must specify an explicit output directory via -o or --output."
+      `${subcommandLabel} must specify an explicit output path via -o or --output.`
+    );
+  }
+  if (subcommand === "history" && !historyPathSeen) {
+    return argsInvalid(
+      "missing-history-path-flag",
+      "Allure history must specify an explicit history path via -h or --history-path."
     );
   }
 

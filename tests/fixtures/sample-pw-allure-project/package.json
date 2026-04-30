@@ -7,7 +7,7 @@
   "scripts": {
     "list": "playwright test --list --reporter=json",
     "test:allure": "playwright test --reporter=allure-playwright",
-    "allure:generate": "allure generate ./allure-results -o ./allure-report --clean",
+    "allure:generate": "allure generate ./allure-results -o ./allure-report",
     "allure:quality-gate": "allure quality-gate ./allure-results"
   },
   "devDependencies": {

@@ -115,8 +115,7 @@ describe("Allure generate command policy (T204-2)", () => {
       "generate",
       ".playwright-workbench/runs/r1/allure-results",
       "-o",
-      ".playwright-workbench/runs/r1/allure-report",
-      "--clean"
+      ".playwright-workbench/runs/r1/allure-report"
     ]);
     expect(result.ok).toBe(true);
   });
@@ -367,7 +366,7 @@ describe("createAllureCommandPolicy", () => {
     const policy = createAllureCommandPolicy(cwdBoundary);
     const result = policy.argValidator({
       executableName: "allure",
-      args: ["generate", "results", "-o", "report", "--clean"]
+      args: ["generate", "results", "-o", "report"]
     });
     expect(result.ok).toBe(true);
   });
@@ -515,7 +514,7 @@ describe("validateAllureGenerateArgs backward-compat alias", () => {
 });
 
 /* ---------------------------------------------------------------- */
-/* T206: --history-path flag (Allure history JSONL)                 */
+/* T206/T207: Allure supplemental artifacts                         */
 /* ---------------------------------------------------------------- */
 
 function validateAllureGen(
@@ -525,40 +524,58 @@ function validateAllureGen(
   return validateAllureArgs({ executableName, args });
 }
 
-describe("Allure generate --history-path support (T206)", () => {
-  it("accepts --history-path with a project-relative path", () => {
+describe("Allure supplemental command policy (T206/T207)", () => {
+  it("rejects removed generate-only --clean flag for Allure 3.6 compatibility", () => {
     const result = validateAllureGen("allure", [
       "generate",
       "results",
       "-o",
       "report",
-      "--clean",
+      "--clean"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("disallowed-flag");
+    }
+  });
+
+  it("accepts history --history-path with a project-relative path", () => {
+    const result = validateAllureGen("allure", [
+      "history",
       "--history-path",
-      ".playwright-workbench/reports/allure-history.jsonl"
+      ".playwright-workbench/reports/allure-history.jsonl",
+      "results"
     ]);
     expect(result.ok).toBe(true);
   });
 
-  it("accepts the short -h synonym", () => {
+  it("accepts the history short -h synonym", () => {
     const result = validateAllureGen("allure", [
-      "generate",
-      "results",
-      "-o",
-      "report",
+      "history",
       "-h",
-      ".playwright-workbench/reports/allure-history.jsonl"
+      ".playwright-workbench/reports/allure-history.jsonl",
+      "results"
     ]);
     expect(result.ok).toBe(true);
   });
 
-  it("rejects --history-path with absolute path", () => {
+  it("requires history path for history command", () => {
     const result = validateAllureGen("allure", [
-      "generate",
-      "results",
-      "-o",
-      "report",
+      "history",
+      "results"
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("missing-history-path-flag");
+    }
+  });
+
+  it("rejects history --history-path with absolute path", () => {
+    const result = validateAllureGen("allure", [
+      "history",
       "--history-path",
-      "/etc/history.jsonl"
+      "/etc/history.jsonl",
+      "results",
     ]);
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -566,16 +583,14 @@ describe("Allure generate --history-path support (T206)", () => {
     }
   });
 
-  it("rejects duplicate --history-path (same form)", () => {
+  it("rejects duplicate history --history-path (same form)", () => {
     const result = validateAllureGen("allure", [
-      "generate",
-      "results",
-      "-o",
-      "report",
+      "history",
       "--history-path",
       "a.jsonl",
       "--history-path",
-      "b.jsonl"
+      "b.jsonl",
+      "results"
     ]);
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -583,18 +598,16 @@ describe("Allure generate --history-path support (T206)", () => {
     }
   });
 
-  it("rejects mixed-form -h / --history-path duplicates (synonym collision)", () => {
+  it("rejects mixed-form history -h / --history-path duplicates (synonym collision)", () => {
     // `canonicalAllureFlag` collapses `-h` to `--history-path` for the
     // duplicate-detection set so mixed-form usage is caught.
     const result = validateAllureGen("allure", [
-      "generate",
-      "results",
-      "-o",
-      "report",
+      "history",
       "-h",
       "a.jsonl",
       "--history-path",
-      "b.jsonl"
+      "b.jsonl",
+      "results"
     ]);
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -604,15 +617,52 @@ describe("Allure generate --history-path support (T206)", () => {
 
   it("requires a value for --history-path", () => {
     const result = validateAllureGen("allure", [
-      "generate",
-      "results",
-      "-o",
-      "report",
+      "history",
       "--history-path"
     ]);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("missing-flag-value");
     }
+  });
+
+  it("accepts csv with explicit output", () => {
+    const result = validateAllureGen("allure", [
+      "csv",
+      "results",
+      "-o",
+      ".playwright-workbench/runs/r1/allure-exports/results.csv"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("requires csv output", () => {
+    const result = validateAllureGen("allure", ["csv", "results"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("missing-output-flag");
+    }
+  });
+
+  it("accepts log with optional display flags and no output flag", () => {
+    const result = validateAllureGen("allure", [
+      "log",
+      "results",
+      "--group-by",
+      "suite",
+      "--all-steps",
+      "--with-trace"
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts known-issue with explicit output", () => {
+    const result = validateAllureGen("allure", [
+      "known-issue",
+      "results",
+      "-o",
+      ".playwright-workbench/reports/known-issues.json"
+    ]);
+    expect(result.ok).toBe(true);
   });
 });

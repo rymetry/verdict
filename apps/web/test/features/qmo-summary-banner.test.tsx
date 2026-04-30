@@ -168,4 +168,21 @@ describe("QmoSummaryBanner", () => {
     render(<QmoSummaryBanner summary={summary} isError={false} isEmpty={false} />);
     expect(screen.queryByTestId("qmo-summary-banner-duration")).not.toBeInTheDocument();
   });
+
+  it("renders artifact links when QMO summary exposes verified report links", () => {
+    render(<QmoSummaryBanner summary={makeSummary()} isError={false} isEmpty={false} />);
+    const allure = screen.getByTestId("qmo-summary-banner-allure-report-link");
+    const qg = screen.getByTestId("qmo-summary-banner-quality-gate-link");
+    expect(allure).toHaveTextContent("Allure report");
+    expect(allure).toHaveAttribute("href", "file:///runs/run-1/allure-report/index.html");
+    expect(qg).toHaveTextContent("Quality Gate JSON");
+    expect(qg).toHaveAttribute("href", "file:///runs/run-1/quality-gate-result.json");
+  });
+
+  it("omits artifact links when QMO summary has no verified links", () => {
+    const summary = makeSummary({ reportLinks: {} });
+    render(<QmoSummaryBanner summary={summary} isError={false} isEmpty={false} />);
+    expect(screen.queryByTestId("qmo-summary-banner-allure-report-link")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("qmo-summary-banner-quality-gate-link")).not.toBeInTheDocument();
+  });
 });

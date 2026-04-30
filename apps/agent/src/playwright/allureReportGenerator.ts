@@ -95,13 +95,6 @@ export interface GenerateAllureReportInput {
    *  typically a few seconds; 60s gives slack for very large suites
    *  while bounding the worst-case wait. */
   timeoutMs?: number;
-  /**
-   * Phase 1.2 / T206: reserved project-scoped history path. Allure 3.6's
-   * `generate` command does not accept `--history-path`, so RunManager keeps
-   * this as an explicit input for the later history writer without passing it
-   * to the CLI.
-   */
-  historyPath?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;

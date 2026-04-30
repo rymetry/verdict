@@ -121,7 +121,7 @@ export async function readAllureHistory(
       );
       continue;
     }
-    const result = AllureHistoryEntrySchema.safeParse(parsed);
+    const result = AllureHistoryEntrySchema.safeParse(normalizeAllureHistoryEntry(parsed));
     if (!result.success) {
       warnings.push(
         `Allure history line ${lineIndex + 1} did not match schema; skipped. issues=${result.error.issues
@@ -134,4 +134,54 @@ export async function readAllureHistory(
   }
 
   return { entries, warnings };
+}
+
+function normalizeAllureHistoryEntry(parsed: unknown): unknown {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return parsed;
+  }
+  const entry = { ...(parsed as Record<string, unknown>) };
+  if (entry.generatedAt === undefined) {
+    const timestamp = entry.timestamp;
+    if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+      entry.generatedAt = new Date(timestamp).toISOString();
+    } else if (typeof timestamp === "string" && timestamp.length > 0) {
+      const millis = Number(timestamp);
+      entry.generatedAt = Number.isFinite(millis)
+        ? new Date(millis).toISOString()
+        : timestamp;
+    }
+  }
+
+  if (
+    entry.testResults &&
+    typeof entry.testResults === "object" &&
+    !Array.isArray(entry.testResults)
+  ) {
+    const results = Object.values(entry.testResults as Record<string, unknown>);
+    let passed = 0;
+    let failed = 0;
+    let broken = 0;
+    let skipped = 0;
+    let unknown = 0;
+    for (const result of results) {
+      const status =
+        result && typeof result === "object" && "status" in result
+          ? (result as { status?: unknown }).status
+          : undefined;
+      if (status === "passed") passed += 1;
+      else if (status === "failed") failed += 1;
+      else if (status === "broken") broken += 1;
+      else if (status === "skipped") skipped += 1;
+      else unknown += 1;
+    }
+    entry.total ??= results.length;
+    entry.passed ??= passed;
+    entry.failed ??= failed + broken;
+    entry.broken ??= broken;
+    entry.skipped ??= skipped;
+    entry.unknown ??= unknown;
+  }
+
+  return entry;
 }

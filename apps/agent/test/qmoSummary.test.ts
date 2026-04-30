@@ -49,6 +49,9 @@ function makeMetadata(overrides: Partial<RunMetadata> = {}): RunMetadata {
       allureResultsDest: "/runs/run-1/allure-results",
       allureReportDir: "/runs/run-1/allure-report",
       qualityGateResultPath: "/runs/run-1/quality-gate-result.json",
+      allureExportsDir: "/runs/run-1/allure-exports",
+      allureCsvPath: "/runs/run-1/allure-exports/results.csv",
+      allureLogPath: "/runs/run-1/allure-exports/results.log",
       qmoSummaryJsonPath: "/runs/run-1/qmo-summary.json",
       qmoSummaryMarkdownPath: "/runs/run-1/qmo-summary.md"
     },

@@ -934,6 +934,9 @@ describe("HTTP API surface", () => {
             allureResultsDest: path.join(runDir, "allure-results"),
             allureReportDir: path.join(runDir, "allure-report"),
             qualityGateResultPath: path.join(runDir, "quality-gate-result.json"),
+            allureExportsDir: path.join(runDir, "allure-exports"),
+            allureCsvPath: path.join(runDir, "allure-exports", "results.csv"),
+            allureLogPath: path.join(runDir, "allure-exports", "results.log"),
             qmoSummaryJsonPath: path.join(runDir, "qmo-summary.json"),
             qmoSummaryMarkdownPath: path.join(runDir, "qmo-summary.md")
           },

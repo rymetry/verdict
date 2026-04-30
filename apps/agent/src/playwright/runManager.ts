@@ -577,14 +577,31 @@ export function createRunManager({
         // unset (test envs / no CLI installed) or when the project does
         // not use Allure. Failure is NON-fatal — same rationale as copy.
         const allureRunner = allureRunnerForProject?.(params.projectRoot);
+        const projectWorkbenchPaths = workbenchPaths(params.projectRoot);
         const reportGenerationWarnings = await runReportGenerationStep({
           projectRoot: params.projectRoot,
           allureResultsDir: params.allureResultsDir,
           allureResultsDest: paths.allureResultsDest,
           allureReportDir: paths.allureReportDir,
-          // T206: project-scoped history JSONL — Allure CLI accumulates
-          // cross-run trend data here on each generate invocation.
-          historyPath: workbenchPaths(params.projectRoot).allureHistoryPath,
+          runId,
+          allureRunner,
+          logger
+        });
+        const latestReportWarnings = await runLatestReportStep({
+          allureResultsDir: params.allureResultsDir,
+          allureReportDir: paths.allureReportDir,
+          latestReportDir: projectWorkbenchPaths.latestReportDir,
+          runId,
+          logger
+        });
+        const supplementalAllureWarnings = await runSupplementalAllureArtifactsStep({
+          projectRoot: params.projectRoot,
+          allureResultsDir: params.allureResultsDir,
+          allureResultsDest: paths.allureResultsDest,
+          allureCsvPath: paths.allureCsvPath,
+          allureLogPath: paths.allureLogPath,
+          allureHistoryPath: projectWorkbenchPaths.allureHistoryPath,
+          knownIssuesPath: projectWorkbenchPaths.knownIssuesPath,
           runId,
           allureRunner,
           logger
@@ -619,6 +636,8 @@ export function createRunManager({
           ...logWriteWarnings,
           ...copyWarnings,
           ...reportGenerationWarnings,
+          ...latestReportWarnings,
+          ...supplementalAllureWarnings,
           ...qualityGateWarnings,
           ...streamRedactor.flush(),
           ...flushStreamPublishWarnings(),
@@ -968,7 +987,6 @@ async function runReportGenerationStep({
   allureResultsDir,
   allureResultsDest,
   allureReportDir,
-  historyPath,
   runId,
   allureRunner,
   logger
@@ -977,7 +995,6 @@ async function runReportGenerationStep({
   allureResultsDir: string | undefined;
   allureResultsDest: string;
   allureReportDir: string;
-  historyPath: string;
   runId: string;
   allureRunner: CommandRunner | undefined;
   logger?: RunManagerLogger;
@@ -1018,8 +1035,7 @@ async function runReportGenerationStep({
     runner: allureRunner,
     projectRoot,
     allureResultsDest,
-    allureReportDir,
-    historyPath
+    allureReportDir
   });
   if (outcome.ok) {
     logger?.info?.(
@@ -1050,6 +1066,187 @@ async function runReportGenerationStep({
     );
   }
   return outcome.warnings;
+}
+
+async function runLatestReportStep({
+  allureResultsDir,
+  allureReportDir,
+  latestReportDir,
+  runId,
+  logger
+}: {
+  allureResultsDir: string | undefined;
+  allureReportDir: string;
+  latestReportDir: string;
+  runId: string;
+  logger?: RunManagerLogger;
+}): Promise<string[]> {
+  if (!allureResultsDir) return [];
+  if (!(await fileExists(path.join(allureReportDir, "index.html")))) {
+    return [];
+  }
+  try {
+    await fs.rm(latestReportDir, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(latestReportDir), { recursive: true });
+    await fs.cp(allureReportDir, latestReportDir, { recursive: true });
+    logger?.info?.(
+      {
+        runId,
+        artifactKind: "allure-report" satisfies ArtifactKind
+      },
+      "latest allure report updated"
+    );
+    return [];
+  } catch (error) {
+    const code = errorCode(error);
+    if (PERSIST_FATAL_CODES.has(code)) {
+      throw error;
+    }
+    logger?.error(
+      {
+        runId,
+        artifactKind: "allure-report" satisfies ArtifactKind,
+        failureMode: "latest-report-copy",
+        ...errorLogFields(error)
+      },
+      "latest allure report update failed"
+    );
+    return [
+      `Latest Allure report could not be updated. code=${code}`
+    ];
+  }
+}
+
+async function runSupplementalAllureArtifactsStep({
+  projectRoot,
+  allureResultsDir,
+  allureResultsDest,
+  allureCsvPath,
+  allureLogPath,
+  allureHistoryPath,
+  knownIssuesPath,
+  runId,
+  allureRunner,
+  logger
+}: {
+  projectRoot: string;
+  allureResultsDir: string | undefined;
+  allureResultsDest: string;
+  allureCsvPath: string;
+  allureLogPath: string;
+  allureHistoryPath: string;
+  knownIssuesPath: string;
+  runId: string;
+  allureRunner: CommandRunner | undefined;
+  logger?: RunManagerLogger;
+}): Promise<string[]> {
+  if (!allureResultsDir || !allureRunner) return [];
+  let entryCount = 0;
+  try {
+    entryCount = (await fs.readdir(allureResultsDest)).length;
+  } catch {
+    entryCount = 0;
+  }
+  if (entryCount === 0) {
+    logger?.warn?.(
+      {
+        runId,
+        artifactKind: "allure-exports" satisfies ArtifactKind,
+        failureMode: "no-results"
+      },
+      "allure supplemental exports skipped: no results in run-scoped allure-results"
+    );
+    return [
+      "Allure supplemental exports skipped: no results in run-scoped allure-results."
+    ];
+  }
+
+  const {
+    exportAllureCsv,
+    exportAllureLog,
+    generateAllureHistory,
+    generateKnownIssues
+  } = await import("./allureSupplementalArtifacts.js");
+  const warnings: string[] = [];
+  const steps = [
+    {
+      artifactKind: "allure-history" as const,
+      successMessage: "allure history exported",
+      failureMessage: "allure history export failed",
+      run: () =>
+        generateAllureHistory({
+          runner: allureRunner,
+          projectRoot,
+          allureResultsDest,
+          historyPath: allureHistoryPath
+        })
+    },
+    {
+      artifactKind: "allure-exports" as const,
+      successMessage: "allure CSV exported",
+      failureMessage: "allure CSV export failed",
+      run: () =>
+        exportAllureCsv({
+          runner: allureRunner,
+          projectRoot,
+          allureResultsDest,
+          csvPath: allureCsvPath
+        })
+    },
+    {
+      artifactKind: "allure-exports" as const,
+      successMessage: "allure log exported",
+      failureMessage: "allure log export failed",
+      run: () =>
+        exportAllureLog({
+          runner: allureRunner,
+          projectRoot,
+          allureResultsDest,
+          logPath: allureLogPath
+        })
+    },
+    {
+      artifactKind: "allure-exports" as const,
+      successMessage: "allure known-issues exported",
+      failureMessage: "allure known-issues export failed",
+      run: () =>
+        generateKnownIssues({
+          runner: allureRunner,
+          projectRoot,
+          allureResultsDest,
+          knownIssuesPath
+        })
+    }
+  ];
+
+  for (const step of steps) {
+    const outcome = await step.run();
+    warnings.push(...outcome.warnings);
+    if (outcome.ok) {
+      logger?.info?.(
+        {
+          runId,
+          artifactKind: step.artifactKind satisfies ArtifactKind,
+          durationMs: outcome.durationMs,
+          exitCode: outcome.exitCode ?? 0
+        },
+        step.successMessage
+      );
+    } else {
+      logger?.error(
+        {
+          runId,
+          artifactKind: step.artifactKind satisfies ArtifactKind,
+          failureMode: outcome.failureMode,
+          ...(outcome.errorCode !== undefined ? { code: outcome.errorCode } : {}),
+          exitCode: outcome.exitCode,
+          durationMs: outcome.durationMs
+        },
+        step.failureMessage
+      );
+    }
+  }
+  return warnings;
 }
 
 /**
