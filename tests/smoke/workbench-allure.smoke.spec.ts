@@ -61,17 +61,37 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
   // 4. Trigger a run via the GUI Run button.
   await page.getByRole("button", { name: /Run Playwright/ }).click();
 
-  // 5. Wait for terminal status. The fixture has 1 intentional failure,
-  //    so the run completes with status=failed. The QMO banner is
-  //    rendered when the QMO summary lifecycle finishes — that is the
-  //    end of the §1.2 pipeline.
-  //
-  //    The banner emits `data-testid="qmo-summary-banner-outcome"` once
-  //    a real summary is loaded; we wait up to 90s to allow the run +
-  //    `allure generate` + `allure quality-gate` + QMO persist
-  //    sequence to complete in CI containers.
+  // 5. Poll the agent /api/runs directly until a terminal run status
+  //    arrives. The QMO banner only refetches its `runs` list on a
+  //    re-mount, so polling server-side first is more deterministic
+  //    than waiting for a UI re-render. The Allure pipeline (allure
+  //    generate + quality-gate + QMO persist) takes ~30-60s in CI
+  //    runners; we cap at 150s to absorb GitHub Actions cold starts.
+  const apiBase = WORKBENCH_URL.replace(/\/$/, "");
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(`${apiBase}/api/runs`);
+        if (!response.ok()) return "unreachable";
+        const body = (await response.json()) as {
+          runs: ReadonlyArray<{ status: string }>;
+        };
+        return (
+          body.runs.find((r) => r.status === "passed" || r.status === "failed")
+            ?.status ?? "running"
+        );
+      },
+      { timeout: 150_000, intervals: [1_000] }
+    )
+    .toMatch(/passed|failed/);
+
+  // 6. Force the QMO banner to re-fetch by reloading the page. By now
+  //    the QMO summary file is persisted, so a fresh `useLatestQmoSummary`
+  //    will read it via `/api/runs/<runId>/qmo-summary`.
+  await page.reload();
+  await expect(page.getByText(/Agent v/)).toBeVisible({ timeout: 15_000 });
   const outcome = page.getByTestId("qmo-summary-banner-outcome");
-  await expect(outcome).toBeVisible({ timeout: 120_000 });
+  await expect(outcome).toBeVisible({ timeout: 30_000 });
   // The fixture has 1 failing test so the outcome must be Not Ready.
   await expect(outcome).toHaveText(/Not Ready/);
   await page.screenshot({
@@ -79,7 +99,7 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
     fullPage: true,
   });
 
-  // 6. QG row should be visible because Allure CLI is installed in the
+  // 7. QG row should be visible because Allure CLI is installed in the
   //    fixture; status will be "failed" (max-failures violation).
   const qg = page.getByTestId("qmo-summary-banner-qg");
   await expect(qg).toBeVisible();
