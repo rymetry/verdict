@@ -157,7 +157,14 @@ function aggregateAllureResults(
     failed,
     skipped,
     flaky: 0, // Allure 単一 run の result file には flaky 判定なし。T206 で history を読んで補う
-    durationMs: totalDurationMs > 0 ? totalDurationMs : undefined,
+    // `TestResultSummarySchema.durationMs` is `z.number().int()`. Allure
+    // CLI can emit fractional millisecond timestamps in some
+    // environments (Date.now() backed by microsecond clocks, or
+    // accumulated FP rounding when summing), so we defensively round
+    // before emitting. Without this, downstream QMO summary persistence
+    // fails schema validation (observed in CI: "qmo-summary failed
+    // schema validation; issues=testSummary.durationMs").
+    durationMs: totalDurationMs > 0 ? Math.round(totalDurationMs) : undefined,
     failedTests,
   };
 }
@@ -222,7 +229,9 @@ function toFailedTest(
     line: undefined,
     column: undefined,
     status: result.status,
-    durationMs,
+    // FailedTestSchema.durationMs is z.number().int() — same defensive
+    // rounding rationale as the aggregate summary above.
+    durationMs: durationMs !== undefined ? Math.round(durationMs) : undefined,
     message: result.statusDetails?.message,
     stack: result.statusDetails?.trace,
     // Allure attachments の `source` は relative filename (allure-results 内)。
