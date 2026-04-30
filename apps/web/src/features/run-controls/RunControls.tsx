@@ -22,9 +22,35 @@ interface RunControlsProps {
   project: ProjectSummary | null;
 }
 
+type QualityGateProfile = "local-review" | "release-smoke" | "full-regression";
+
+const QUALITY_GATE_PROFILE_OPTIONS: ReadonlyArray<{
+  value: QualityGateProfile;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: "local-review",
+    label: "local-review",
+    hint: "lenient (CLI defaults; ad-hoc dev)",
+  },
+  {
+    value: "release-smoke",
+    label: "release-smoke",
+    hint: "zero failures, 100% pass, fast-fail",
+  },
+  {
+    value: "full-regression",
+    label: "full-regression",
+    hint: "≥95% pass, fail-soft",
+  },
+];
+
 export function RunControls({ project }: RunControlsProps): React.ReactElement {
   const [specPath, setSpecPath] = React.useState("");
   const [grep, setGrep] = React.useState("");
+  const [qualityGateProfile, setQualityGateProfile] =
+    React.useState<QualityGateProfile>("local-review");
 
   // useStartRunMutation は呼び出し毎に独立した React Query mutation instance を作る (別の error /
   // pending state を持つ)。__root の rerun mutation と本コンポーネントの form submit mutation が
@@ -71,7 +97,13 @@ export function RunControls({ project }: RunControlsProps): React.ReactElement {
       projectId: project.id,
       specPath: specPath.trim() || undefined,
       grep: grep.trim() || undefined,
-      headed: false
+      headed: false,
+      // Only include the profile when it deviates from the agent default
+      // ("local-review"). Sending the default explicitly is harmless but the
+      // field is conceptually "override default", so omitting it keeps the
+      // request shape minimal in the common case.
+      qualityGateProfile:
+        qualityGateProfile === "local-review" ? undefined : qualityGateProfile
     };
     startMutation.mutate(request);
   }
@@ -110,6 +142,25 @@ export function RunControls({ project }: RunControlsProps): React.ReactElement {
               autoComplete="off"
               spellCheck={false}
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="quality-gate-profile">Quality Gate profile</Label>
+            <select
+              id="quality-gate-profile"
+              data-testid="run-controls-quality-gate-profile"
+              className="h-9 rounded border border-[var(--border-1)] bg-[var(--surface-1)] px-2 text-sm text-[var(--ink-1)] focus-visible:border-[var(--accent-1)] focus-visible:outline-none"
+              value={qualityGateProfile}
+              onChange={(event) => {
+                setQualityGateProfile(event.target.value as QualityGateProfile);
+                clearErrorOnEdit();
+              }}
+            >
+              {QUALITY_GATE_PROFILE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label} — {option.hint}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="flex justify-end pt-1">
             <Button type="submit" disabled={blocked || startMutation.isPending}>

@@ -174,7 +174,17 @@ export const RunRequestSchema = z.object({
   projectNames: z
     .array(z.string().refine(noFlagInjection, "projectName must not start with '-'"))
     .optional(),
-  headed: z.boolean().optional().default(false)
+  headed: z.boolean().optional().default(false),
+  /**
+   * §1.4 Profile-driven Quality Gate rules. Default `"local-review"`
+   * (lenient — Allure CLI defaults). Operators can choose `"release-smoke"`
+   * or `"full-regression"` to apply stricter built-in thresholds, or
+   * override the rules via
+   * `<projectRoot>/.playwright-workbench/config/quality-gate-profiles.json`.
+   */
+  qualityGateProfile: z
+    .enum(["local-review", "release-smoke", "full-regression"])
+    .optional()
 });
 export type RunRequest = z.infer<typeof RunRequestSchema>;
 

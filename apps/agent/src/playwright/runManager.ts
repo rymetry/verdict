@@ -547,6 +547,7 @@ export function createRunManager({
           allureResultsDir: params.allureResultsDir,
           allureResultsDest: paths.allureResultsDest,
           qualityGateResultPath: paths.qualityGateResultPath,
+          profile: params.request.qualityGateProfile ?? "local-review",
           runId,
           allureRunner,
           logger
@@ -1024,6 +1025,7 @@ async function runQualityGateStep({
   allureResultsDir,
   allureResultsDest,
   qualityGateResultPath,
+  profile,
   runId,
   allureRunner,
   logger
@@ -1032,6 +1034,7 @@ async function runQualityGateStep({
   allureResultsDir: string | undefined;
   allureResultsDest: string;
   qualityGateResultPath: string;
+  profile: import("@pwqa/shared").QualityGateProfile;
   runId: string;
   allureRunner: CommandRunner | undefined;
   logger?: RunManagerLogger;
@@ -1061,14 +1064,18 @@ async function runQualityGateStep({
   const { evaluateAllureQualityGate, persistQualityGateResult } = await import(
     "./allureQualityGate.js"
   );
-  // PoC default profile: "local-review" with no thresholds (CLI defaults
-  // = lenient). Profile-driven rule sets are deferred to a follow-up
-  // task (Phase 1.2 QMO config).
+  const { resolveQualityGateRules } = await import("./qualityGateProfiles.js");
+  // §1.4: Resolve effective rules from the project's optional override file
+  // (`.playwright-workbench/config/quality-gate-profiles.json`) merged on
+  // top of built-in defaults. Override-load failures degrade to a warning
+  // but do NOT block the QG run — the built-in defaults still apply.
+  const resolved = await resolveQualityGateRules(projectRoot, profile);
   const outcome = await evaluateAllureQualityGate({
     runner: allureRunner,
     projectRoot,
     allureResultsDest,
-    profile: "local-review"
+    profile: resolved.profile,
+    rules: resolved.rules
   });
   if (outcome.persisted) {
     try {
@@ -1096,6 +1103,7 @@ async function runQualityGateStep({
         "failed to persist quality-gate-result.json"
       );
       return [
+        ...resolved.warnings,
         ...outcome.warnings,
         `Allure quality-gate result could not be persisted. code=${code}`
       ];
@@ -1126,7 +1134,7 @@ async function runQualityGateStep({
       "allure quality-gate did not pass"
     );
   }
-  return outcome.warnings;
+  return [...resolved.warnings, ...outcome.warnings];
 }
 
 /**
