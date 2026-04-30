@@ -85,10 +85,11 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
     )
     .toMatch(/passed|failed/);
 
-  // 6. Force the QMO banner to re-fetch by reloading the page. By now
+  // 6. Force the QMO banner to re-fetch by navigating directly to the
+  //    /qmo route (the QMO banner only lives there, not on /qa). By now
   //    the QMO summary file is persisted, so a fresh `useLatestQmoSummary`
   //    will read it via `/api/runs/<runId>/qmo-summary`.
-  await page.reload();
+  await page.goto(`${WORKBENCH_URL}/qmo`);
   await expect(page.getByText(/Agent v/)).toBeVisible({ timeout: 15_000 });
   const outcome = page.getByTestId("qmo-summary-banner-outcome");
   await expect(outcome).toBeVisible({ timeout: 30_000 });
