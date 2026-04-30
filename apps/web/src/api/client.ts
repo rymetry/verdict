@@ -1,12 +1,14 @@
 import {
   HealthResponseSchema,
   ProjectSummarySchema,
+  QmoSummarySchema,
   RunListResponseSchema,
   RunMetadataSchema,
   TestInventorySchema,
   type ApiError,
   type HealthResponse,
   type ProjectSummary,
+  type QmoSummary,
   type RunListResponse,
   type RunMetadata,
   type RunRequest,
@@ -94,4 +96,19 @@ export async function cancelRun(runId: string): Promise<void> {
     method: "POST"
   });
   await parseJson<unknown>(response);
+}
+
+/**
+ * Phase 1.2 / T208-2: fetch the persisted QMO Release Readiness Summary
+ * for a run. Returns `null` when the agent reports `409 NO_QMO_SUMMARY`
+ * (file not yet generated — the dominant case during a run-in-progress
+ * or for non-Allure projects). All other failure paths throw a
+ * `WorkbenchApiError` so the UI's error boundary / toast can surface
+ * them.
+ */
+export async function fetchQmoSummary(runId: string): Promise<QmoSummary | null> {
+  const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/qmo-summary`);
+  if (response.status === 409) return null;
+  const body = await parseJson<unknown>(response);
+  return QmoSummarySchema.parse(body);
 }
