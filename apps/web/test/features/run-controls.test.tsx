@@ -143,6 +143,85 @@ describe("RunControls", () => {
     });
   });
 
+  it("Quality Gate profile はデフォルトが local-review、選択した値が request に乗る", async () => {
+    vi.mocked(startRun).mockResolvedValue({
+      runId: "r2",
+      metadata: {
+        runId: "r2",
+        projectId: "p1",
+        projectRoot: "/p",
+        status: "queued",
+        startedAt: "2026-04-30T00:00:00Z",
+        command: { executable: "pnpm", args: [] },
+        cwd: "/p",
+        requested: { projectId: "p1", headed: false },
+        paths: {
+          runDir: "/runs/r2",
+          metadataJson: "/runs/r2/metadata.json",
+          stdoutLog: "/runs/r2/stdout.log",
+          stderrLog: "/runs/r2/stderr.log",
+          playwrightJson: "/runs/r2/playwright.json",
+          playwrightHtml: "/runs/r2/playwright-report",
+          artifactsJson: "/runs/r2/artifacts.json",
+          allureResultsDest: "/runs/r2/allure-results",
+          allureReportDir: "/runs/r2/allure-report",
+          qualityGateResultPath: "/runs/r2/quality-gate-result.json",
+          qmoSummaryJsonPath: "/runs/r2/qmo-summary.json",
+          qmoSummaryMarkdownPath: "/runs/r2/qmo-summary.md"
+        },
+        warnings: []
+      }
+    });
+    const { user } = renderControls(makeProject());
+    const select = screen.getByTestId("run-controls-quality-gate-profile") as HTMLSelectElement;
+    expect(select.value).toBe("local-review");
+    await user.selectOptions(select, "release-smoke");
+    await user.click(screen.getByRole("button", { name: /Run Playwright/ }));
+    await waitFor(() => {
+      expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
+    });
+    expect(vi.mocked(startRun).mock.calls[0]?.[0]).toMatchObject({
+      qualityGateProfile: "release-smoke"
+    });
+  });
+
+  it("local-review が選ばれた状態では qualityGateProfile は request に含めない (default == omit)", async () => {
+    vi.mocked(startRun).mockResolvedValue({
+      runId: "r3",
+      metadata: {
+        runId: "r3",
+        projectId: "p1",
+        projectRoot: "/p",
+        status: "queued",
+        startedAt: "2026-04-30T00:00:00Z",
+        command: { executable: "pnpm", args: [] },
+        cwd: "/p",
+        requested: { projectId: "p1", headed: false },
+        paths: {
+          runDir: "/runs/r3",
+          metadataJson: "/runs/r3/metadata.json",
+          stdoutLog: "/runs/r3/stdout.log",
+          stderrLog: "/runs/r3/stderr.log",
+          playwrightJson: "/runs/r3/playwright.json",
+          playwrightHtml: "/runs/r3/playwright-report",
+          artifactsJson: "/runs/r3/artifacts.json",
+          allureResultsDest: "/runs/r3/allure-results",
+          allureReportDir: "/runs/r3/allure-report",
+          qualityGateResultPath: "/runs/r3/quality-gate-result.json",
+          qmoSummaryJsonPath: "/runs/r3/qmo-summary.json",
+          qmoSummaryMarkdownPath: "/runs/r3/qmo-summary.md"
+        },
+        warnings: []
+      }
+    });
+    const { user } = renderControls(makeProject());
+    await user.click(screen.getByRole("button", { name: /Run Playwright/ }));
+    await waitFor(() => {
+      expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
+    });
+    expect(vi.mocked(startRun).mock.calls[0]?.[0]?.qualityGateProfile).toBeUndefined();
+  });
+
   it("pending 中の連続 click は startRun を 1 回しか呼ばない (multi-run 防止)", async () => {
     // never-resolve Promise で submit を pending 状態に固定し、button disabled が
     // mutate の重複呼び出しを実際に防ぐことを pin (`disabled={... || isPending}` の有効性)。
