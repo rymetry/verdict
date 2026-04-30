@@ -19,12 +19,23 @@ export interface WorkbenchPaths {
   archiveDir: string;
   /**
    * Project-scoped Allure history file (Phase 1.2 / T206). Populated by
-   * the Allure CLI on each `generate` invocation when `--history-path`
-   * is passed. JSONL format per the T200 investigation. Cross-run
-   * trend signal (flaky candidates, regression detection) is later
-   * derived from this file by T207 QMO summary.
+   * the Allure CLI's `history --history-path` command. JSONL format per
+   * the T200 investigation. Cross-run trend signal (flaky candidates,
+   * regression detection) is later derived from this file by T207 QMO summary.
    */
   allureHistoryPath: string;
+  /**
+   * Project-scoped known-issues file generated from the latest run's
+   * Allure results. Quality Gate can consume this in later phases without
+   * relying on Allure's default report directory side effects.
+   */
+  knownIssuesPath: string;
+  /**
+   * Project-scoped pointer to the latest generated HTML report. The
+   * run-scoped report remains source of truth; this directory is a
+   * convenience copy for operators who want a stable location.
+   */
+  latestReportDir: string;
 }
 
 export function workbenchPaths(projectRoot: string): WorkbenchPaths {
@@ -37,7 +48,9 @@ export function workbenchPaths(projectRoot: string): WorkbenchPaths {
     reportsDir,
     runsDir: path.join(workbenchDir, "runs"),
     archiveDir: path.join(workbenchDir, "archive"),
-    allureHistoryPath: path.join(reportsDir, "allure-history.jsonl")
+    allureHistoryPath: path.join(reportsDir, "allure-history.jsonl"),
+    knownIssuesPath: path.join(reportsDir, "known-issues.json"),
+    latestReportDir: path.join(workbenchDir, "latest-report")
   };
 }
 
@@ -69,6 +82,12 @@ export function runPathsFor(projectRoot: string, runId: string): RunPaths {
     // generation step. UI/API surfaces the file as the source of truth
     // for QMO release-readiness checks.
     qualityGateResultPath: path.join(runDir, "quality-gate-result.json"),
+    // Phase 1.2 (T207): run-scoped exports from Allure 3 CLI.
+    // `allure csv` writes the CSV directly; `allure log` prints to stdout,
+    // which RunManager captures and persists here for review/debugging.
+    allureExportsDir: path.join(runDir, "allure-exports"),
+    allureCsvPath: path.join(runDir, "allure-exports", "results.csv"),
+    allureLogPath: path.join(runDir, "allure-exports", "results.log"),
     // Phase 1.2 (T207): QMO Release Readiness Summary v0. Two artifacts
     // — JSON for programmatic consumers (CI, GitHub integration in
     // Phase 8) and Markdown for human review (PR comments, Slack).

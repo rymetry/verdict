@@ -27,6 +27,8 @@ describe("ArtifactKind type-level regression (Issue #30-A / Issue #31 / T203-4)"
       | "audit-log"
       | "allure-results"
       | "allure-report"
+      | "allure-history"
+      | "allure-exports"
     >();
   });
 

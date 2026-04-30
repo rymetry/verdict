@@ -7,8 +7,8 @@ import { type QualityGateProfile } from "@pwqa/shared";
  * §1.4 Profile-driven Quality Gate rules.
  *
  * Three built-in profiles (PLAN.v2 §23):
- *   - `local-review`: lenient (no thresholds — Allure CLI defaults). Default
- *     for ad-hoc runs.
+ *   - `local-review`: lenient (requires at least one test so Allure CLI treats
+ *     the gate as configured). Default for ad-hoc runs.
  *   - `release-smoke`: zero tolerance — `maxFailures=0`, `successRate=100`,
  *     `fastFail=true`. Used when validating a release candidate.
  *   - `full-regression`: ≥95% pass rate, fail soft (no fast-fail). Used
@@ -49,7 +49,9 @@ export type QualityGateProfileConfig = z.infer<
 >;
 
 const BUILT_IN_DEFAULTS: Record<QualityGateProfile, QualityGateRules> = {
-  "local-review": {},
+  "local-review": {
+    minTestsCount: 1,
+  },
   "release-smoke": {
     maxFailures: 0,
     successRate: 100,

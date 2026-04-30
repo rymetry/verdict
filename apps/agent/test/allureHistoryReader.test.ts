@@ -72,6 +72,29 @@ describe("readAllureHistory", () => {
     expect(result.warnings[0]).toMatch(/did not match schema/);
   });
 
+  it("normalizes Allure 3.6 timestamp/testResults history entries", async () => {
+    fs.writeFileSync(
+      historyPath,
+      JSON.stringify({
+        timestamp: 1777550091866,
+        testResults: {
+          a: { status: "passed" },
+          b: { status: "failed" },
+          c: { status: "broken" },
+          d: { status: "skipped" }
+        }
+      }) + "\n"
+    );
+    const result = await readAllureHistory(historyPath);
+    expect(result.warnings).toEqual([]);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]?.generatedAt).toBe("2026-04-30T11:54:51.866Z");
+    expect(result.entries[0]?.total).toBe(4);
+    expect(result.entries[0]?.passed).toBe(1);
+    expect(result.entries[0]?.failed).toBe(2);
+    expect(result.entries[0]?.skipped).toBe(1);
+  });
+
   it("preserves additional fields via passthrough", async () => {
     fs.writeFileSync(
       historyPath,

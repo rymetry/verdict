@@ -19,6 +19,7 @@ import {
   isTerminalEventType,
   terminalStatusMatchesEvent,
   type RunCancellationReason,
+  type RunMetadata,
   type RunTerminalPayload,
   type WorkbenchEvent
 } from "@pwqa/shared";
@@ -32,6 +33,7 @@ import { RunWarningsAlert } from "./RunWarningsAlert";
 interface RunConsoleProps {
   eventStream: EventStream;
   activeRunId: string | null;
+  runSnapshot?: RunMetadata | null;
 }
 
 export interface RunConsoleState {
@@ -134,7 +136,11 @@ function cancelReasonLabel(reason: RunCancellationReason): string {
   }
 }
 
-export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React.ReactElement {
+export function RunConsole({
+  eventStream,
+  activeRunId,
+  runSnapshot = null
+}: RunConsoleProps): React.ReactElement {
   const [state, setState] = React.useState<RunConsoleState>(initialRunConsoleState);
   const stdoutRef = React.useRef<HTMLPreElement>(null);
 
@@ -155,6 +161,11 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React
       unsubscribe();
     };
   }, [eventStream, activeRunId]);
+
+  React.useEffect(() => {
+    if (!activeRunId || !runSnapshot || runSnapshot.runId !== activeRunId) return;
+    setState((current) => mergeRunSnapshot(current, runSnapshot));
+  }, [activeRunId, runSnapshot]);
 
   React.useEffect(() => {
     if (stdoutRef.current) {
@@ -222,6 +233,31 @@ export function RunConsole({ eventStream, activeRunId }: RunConsoleProps): React
       </CardContent>
     </Card>
   );
+}
+
+function mergeRunSnapshot(
+  state: RunConsoleState,
+  run: RunMetadata
+): RunConsoleState {
+  const status: RunConsoleState["status"] =
+    run.status === "queued" || run.status === "running" ? "running" : run.status;
+  return {
+    ...state,
+    status,
+    exitCode: run.exitCode ?? null,
+    cancelReason: run.cancelReason,
+    durationMs: run.durationMs ?? state.durationMs,
+    warnings: run.warnings,
+    summary: run.summary
+      ? {
+          total: run.summary.total,
+          passed: run.summary.passed,
+          failed: run.summary.failed,
+          skipped: run.summary.skipped,
+          flaky: run.summary.flaky
+        }
+      : state.summary
+  };
 }
 
 function RunStatusBadge({ status }: { status: RunConsoleState["status"] }): React.ReactElement | null {

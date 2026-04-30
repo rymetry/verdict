@@ -38,8 +38,7 @@ args: [
   "generate",
   ".playwright-workbench/runs/<runId>/allure-results",  // results-dir (project-relative)
   "-o",
-  ".playwright-workbench/runs/<runId>/allure-report",   // report-dir (project-relative)
-  "--clean"
+  ".playwright-workbench/runs/<runId>/allure-report"    // report-dir (project-relative)
 ]
 cwd: projectRoot
 timeout: 60s (HTML 生成は数秒で済むはず。多くの test 結果で長くなっても 1 分以内)

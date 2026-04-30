@@ -269,6 +269,13 @@ export const RunPathsSchema = z.object({
    */
   qualityGateResultPath: z.string(),
   /**
+   * Phase 1.2 (T207): run-scoped Allure CLI exports. CSV is produced
+   * by `allure csv`; log is captured from `allure log` stdout.
+   */
+  allureExportsDir: z.string(),
+  allureCsvPath: z.string(),
+  allureLogPath: z.string(),
+  /**
    * Phase 1.2 (T207): QMO Release Readiness Summary v0 — JSON form.
    * Derived from RunMetadata + QualityGateResult after the QG step.
    * Always derivable; only populated when the QMO summary lifecycle
@@ -367,7 +374,7 @@ export type QmoSummary = z.infer<typeof QmoSummarySchema>;
  * §1.3 Allure history JSONL entry (Phase 1.2 / T206).
  *
  * `<projectRoot>/.playwright-workbench/reports/allure-history.jsonl` is
- * appended by the Allure CLI on each `allure generate --history-path`
+ * appended by the Allure CLI on each `allure history --history-path`
  * invocation. Each line is one JSON object describing the run's
  * aggregate report; the precise field set varies between Allure
  * versions. We pin the fields the GUI trend card needs and pass

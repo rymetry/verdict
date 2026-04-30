@@ -275,6 +275,7 @@ describe("SidebarPanels", () => {
   it("Quality Gate / Allure サマリ / 最近の Run の 3 panel を描画する", () => {
     renderWithTooltip(
       <SidebarPanels
+        qualityGateStatus={SAMPLE_INSIGHTS.qualityGateStatus}
         qualityGate={SAMPLE_INSIGHTS.qualityGate}
         allureSummary={SAMPLE_INSIGHTS.allureSummary}
         recentRuns={SAMPLE_INSIGHTS.recentRuns}
@@ -288,6 +289,7 @@ describe("SidebarPanels", () => {
   it("Quality Gate の rule 行は data-rule-status 属性で識別される", () => {
     renderWithTooltip(
       <SidebarPanels
+        qualityGateStatus={SAMPLE_INSIGHTS.qualityGateStatus}
         qualityGate={SAMPLE_INSIGHTS.qualityGate}
         allureSummary={SAMPLE_INSIGHTS.allureSummary}
         recentRuns={SAMPLE_INSIGHTS.recentRuns}
@@ -302,6 +304,7 @@ describe("SidebarPanels", () => {
   it("全 rule pass のとき header に Passed badge が出る", () => {
     renderWithTooltip(
       <SidebarPanels
+        qualityGateStatus={SAMPLE_INSIGHTS.qualityGateStatus}
         qualityGate={SAMPLE_INSIGHTS.qualityGate}
         allureSummary={SAMPLE_INSIGHTS.allureSummary}
         recentRuns={SAMPLE_INSIGHTS.recentRuns}
@@ -314,6 +317,7 @@ describe("SidebarPanels", () => {
   it("1 件でも fail があると Failed badge に切り替わる", () => {
     renderWithTooltip(
       <SidebarPanels
+        qualityGateStatus="failed"
         qualityGate={[
           ...SAMPLE_INSIGHTS.qualityGate,
           { name: "テストルール", threshold: "n/a", actual: "n/a", status: "fail" }
@@ -326,10 +330,43 @@ describe("SidebarPanels", () => {
     expect(within(card).getByText("Failed")).toBeInTheDocument();
   });
 
+  it("未評価で rule が空のとき Passed を表示しない", () => {
+    renderWithTooltip(
+      <SidebarPanels
+        qualityGateStatus="not-evaluated"
+        qualityGate={[]}
+        allureSummary={SAMPLE_INSIGHTS.allureSummary}
+        recentRuns={SAMPLE_INSIGHTS.recentRuns}
+      />
+    );
+    const card = screen.getByTestId("insights-quality-gate-card");
+    expect(within(card).getByText("Not evaluated")).toBeInTheDocument();
+    expect(within(card).getByText("Quality Gate not evaluated.")).toBeInTheDocument();
+    expect(within(card).queryByText("Passed")).not.toBeInTheDocument();
+  });
+
+  it("評価済みで rule 明細が空のとき未評価とは表示しない", () => {
+    renderWithTooltip(
+      <SidebarPanels
+        qualityGateStatus="passed"
+        qualityGate={[]}
+        allureSummary={SAMPLE_INSIGHTS.allureSummary}
+        recentRuns={SAMPLE_INSIGHTS.recentRuns}
+      />
+    );
+    const card = screen.getByTestId("insights-quality-gate-card");
+    expect(within(card).getByText("Passed")).toBeInTheDocument();
+    expect(
+      within(card).getByText("Quality Gate evaluated; rule details are not available.")
+    ).toBeInTheDocument();
+    expect(within(card).queryByText("Quality Gate not evaluated.")).not.toBeInTheDocument();
+  });
+
   it("Allure フルレポート button は disabled で Phase 1.2 接続予定 tooltip を持つ", async () => {
     const user = userEvent.setup();
     renderWithTooltip(
       <SidebarPanels
+        qualityGateStatus={SAMPLE_INSIGHTS.qualityGateStatus}
         qualityGate={SAMPLE_INSIGHTS.qualityGate}
         allureSummary={SAMPLE_INSIGHTS.allureSummary}
         recentRuns={SAMPLE_INSIGHTS.recentRuns}
@@ -351,6 +388,7 @@ describe("SidebarPanels", () => {
     const user = userEvent.setup();
     renderWithTooltip(
       <SidebarPanels
+        qualityGateStatus={SAMPLE_INSIGHTS.qualityGateStatus}
         qualityGate={SAMPLE_INSIGHTS.qualityGate}
         allureSummary={SAMPLE_INSIGHTS.allureSummary}
         recentRuns={SAMPLE_INSIGHTS.recentRuns}
@@ -369,6 +407,7 @@ describe("SidebarPanels", () => {
   it("最近の Run は data-run-status / data-run-trend で識別される", () => {
     renderWithTooltip(
       <SidebarPanels
+        qualityGateStatus={SAMPLE_INSIGHTS.qualityGateStatus}
         qualityGate={SAMPLE_INSIGHTS.qualityGate}
         allureSummary={SAMPLE_INSIGHTS.allureSummary}
         recentRuns={SAMPLE_INSIGHTS.recentRuns}

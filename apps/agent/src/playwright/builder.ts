@@ -8,6 +8,8 @@ import {
 export interface PlaywrightCommandInput {
   packageManager: DetectedPackageManager;
   request: RunRequest;
+  /** Reporter policy. Workbench default injects list/json/html; project-config preserves user config. */
+  reporterMode?: "workbench-default" | "project-config";
   /** Absolute path of the JSON output file, relative to the project root. */
   jsonOutputPath: string;
   /** Absolute path of the HTML report directory. */
@@ -32,8 +34,13 @@ export function buildPlaywrightTestCommand(input: PlaywrightCommandInput): {
   const base = input.packageManager.commandTemplates.playwrightTest;
   const args = [...base.args];
 
-  // 追加 reporter は専用 adapter policy で許可し、既定の reporter セットは広げない。
-  args.push(`--reporter=${REPORTERS.join(",")}`);
+  // Allure project は playwright.config の reporter option (resultsDir 等) が source of truth。
+  // CLI reporter を渡すと config 側 reporter が Playwright に上書きされるため、PoC の
+  // allure-results 生成経路では project-config mode を使う。
+  if ((input.reporterMode ?? "workbench-default") === "workbench-default") {
+    // 追加 reporter は専用 adapter policy で許可し、既定の reporter セットは広げない。
+    args.push(`--reporter=${REPORTERS.join(",")}`);
+  }
 
   if (input.request.headed) {
     args.push("--headed");

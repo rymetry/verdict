@@ -10,10 +10,8 @@
 // effect で console.error する。production でも痕跡を残し、PR review で indirection
 // が増えても original signal が消えないようにする。
 //
-// polling: Phase 1.2 PoC では QMO summary は run 完了の単発 artifact なので
-// polling 不要。`runId` が確定 (run started) してから一度 fetch すれば十分。
-// Run 中に GUI が「QMO 生成待ち」と「生成済み」を区別したい場合は WS event
-// (`run.completed` 等) で invalidate する設計にするが、本 hook は読み取り専用。
+// polling: 409 NO_QMO_SUMMARY は一時状態として扱う。`data === null` の間だけ
+// 短周期 polling し、200 の QMO summary を取得したら止める。
 
 import { useEffect } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
@@ -35,7 +33,8 @@ export function useQmoSummaryQuery(
   const query = useQuery({
     queryKey: ["runs", runId, "qmo-summary"],
     queryFn: () => fetchQmoSummary(runId!),
-    enabled: typeof runId === "string" && runId.length > 0
+    enabled: typeof runId === "string" && runId.length > 0,
+    refetchInterval: (query) => (query.state.data === null ? 1_000 : false)
   });
 
   useEffect(() => {

@@ -468,9 +468,11 @@ allure-results ライフサイクル（1 run あたり）:
 1. **Archive**: テスト実行前に、検出された `resultsDir` 内の既存ファイルを `.playwright-workbench/archive/<timestamp>/` へ移動する（ユーザー成果物の保護）。ディレクトリが空であればスキップ。
 2. **テスト実行**: allure-playwrightが `resultsDir` に結果を出力する（ユーザー設定に従う）。
 3. **Post-copy**: テスト完了後、`resultsDir` の内容を `.playwright-workbench/runs/<runId>/allure-results/` にコピーする。
-4. **Report生成**: Allure CLIでコピー先の `runs/<runId>/allure-results/` からHTMLレポートを生成し、`.playwright-workbench/runs/<runId>/allure-report/` に出力する。`--output`, `--history-path` のCLI overrideを使う。
-5. **Quality Gate**: `allure quality-gate` を実行し、結果を `.playwright-workbench/runs/<runId>/quality-gate-result.json` に保存する。
-6. **次回run前**: 1に戻る。
+4. **Report生成**: Allure CLIでコピー先の `runs/<runId>/allure-results/` からHTMLレポートを生成し、`.playwright-workbench/runs/<runId>/allure-report/` に出力する。Allure 3.6では `allure generate <resultsDir> -o <reportDir>` を使い、`--clean` / `--history-path` は渡さない。
+5. **Latest report更新**: HTML report生成に成功した場合だけ `.playwright-workbench/latest-report/` を最新runのreportコピーで更新する。run単位保存は維持し、latestは表示用の便宜パスに限定する。
+6. **History / 補助export**: `allure history --history-path <reports/allure-history.jsonl> <resultsDir>`、`allure csv <resultsDir> -o <runDir/allure-exports/results.csv>`、`allure log <resultsDir>` stdout保存、`allure known-issue <resultsDir> -o <reports/known-issues.json>` を実行する。
+7. **Quality Gate**: `allure quality-gate` を実行し、結果を `.playwright-workbench/runs/<runId>/quality-gate-result.json` に保存する。
+8. **次回run前**: 1に戻る。
 
 env var (`ALLURE_RESULTS_DIR`) によるrun単位ディレクトリ直接出力が可能かは実装時に公式docsで確認する。可能であればarchive/copyの代替として採用検討する。
 
@@ -774,6 +776,7 @@ Phase 1.2:
 - Allure report linkがGUIに出る。
 - Quality Gate結果が保存・表示される。
 - history JSONLが継続保存される。
+- CSV/log exportとlatest-reportが生成される。
 - QMO summary v0が生成される。
 
 Phase 2:

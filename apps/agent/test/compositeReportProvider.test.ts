@@ -97,6 +97,15 @@ describe("mergeReadSummaryResults", () => {
     expect(result?.summary.total).toBe(2);
   });
 
+  it("suppresses expected missing Playwright JSON warnings when Allure fallback produced a summary", () => {
+    const result = mergeReadSummaryResults([
+      failed("playwright-json", "playwright-json report read failed; summary unavailable. code=ENOENT"),
+      ok("allure", { total: 2, passed: 1, failed: 1 }),
+    ]);
+    expect(result?.summary.total).toBe(2);
+    expect(result?.warnings).toEqual([]);
+  });
+
   it("propagates failureWarning even when no summary was produced (degrade gracefully)", () => {
     const result = mergeReadSummaryResults([
       failed("playwright-json", "playwright-json report read failed; summary unavailable. code=ENOENT"),

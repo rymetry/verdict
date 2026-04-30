@@ -155,7 +155,45 @@ describe("useInsightsSummary", () => {
       { label: "Skipped", value: "0" },
     ]);
     expect(summary.criticalFailures).toEqual([]);
+    expect(summary.qualityGateStatus).toBe("not-evaluated");
     expect(summary.allureSummary).toEqual([]);
+  });
+
+  it("derives qualityGateStatus from QMO qualityGate", async () => {
+    vi.mocked(fetchCurrentProject).mockResolvedValue(fakeProject() as never);
+    vi.mocked(fetchRuns).mockResolvedValue({
+      runs: [
+        {
+          runId: "run-qg",
+          projectId: "p1",
+          status: "failed",
+          startedAt: "2026-04-30T12:00:00Z",
+          warnings: [],
+        },
+      ],
+    });
+    vi.mocked(fetchQmoSummary).mockResolvedValue({
+      runId: "run-qg",
+      projectId: "p1",
+      generatedAt: "2026-04-30T12:00:00Z",
+      outcome: "not-ready",
+      qualityGate: {
+        status: "failed",
+        profile: "release-smoke",
+        exitCode: 1,
+        warnings: [],
+      },
+      warnings: [],
+      reportLinks: {},
+      command: { executable: "pnpm", args: [] },
+    });
+    vi.mocked(fetchAllureHistory).mockResolvedValue({ entries: [], warnings: [] });
+
+    const { Wrapper } = wrapper();
+    const { result } = renderHook(() => useInsightsSummary(), { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(result.current.summary?.qualityGateStatus).toBe("failed");
+    });
   });
 
   it("populates AllureSummary rows from history when present", async () => {

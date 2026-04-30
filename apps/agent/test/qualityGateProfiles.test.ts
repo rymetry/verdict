@@ -25,8 +25,8 @@ function writeConfig(contents: string): void {
 }
 
 describe("defaultRulesForProfile", () => {
-  it("local-review has no thresholds (lenient)", () => {
-    expect(defaultRulesForProfile("local-review")).toEqual({});
+  it("local-review only requires a configured minimum test count (lenient)", () => {
+    expect(defaultRulesForProfile("local-review")).toEqual({ minTestsCount: 1 });
   });
 
   it("release-smoke is zero-tolerance + fast-fail", () => {
@@ -114,7 +114,7 @@ describe("resolveQualityGateRules", () => {
   it("propagates parse warnings while still returning built-in defaults", async () => {
     writeConfig("not json");
     const resolved = await resolveQualityGateRules(workdir, "local-review");
-    expect(resolved.rules).toEqual({});
+    expect(resolved.rules).toEqual({ minTestsCount: 1 });
     expect(resolved.warnings[0]).toMatch(/not valid JSON/);
   });
 });

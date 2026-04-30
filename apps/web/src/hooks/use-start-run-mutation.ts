@@ -20,7 +20,7 @@
 //   `error instanceof WorkbenchApiError` で runtime narrow する (`formatMutationError` がその
 //   runtime narrow を担当する)。
 import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
-import type { RunMetadata, RunRequest } from "@pwqa/shared";
+import type { RunListResponse, RunMetadata, RunRequest } from "@pwqa/shared";
 
 import { startRun } from "@/api/client";
 import { useRunStore } from "@/store/run-store";
@@ -40,6 +40,15 @@ export function useStartRunMutation(): StartRunMutation {
     onSuccess: (response, request) => {
       startTracking(response.runId, request);
       queryClient.setQueryData(["runs", response.runId], response.metadata);
+      queryClient.setQueryData<RunListResponse>(["runs", "list"], (current) => {
+        const existing = current?.runs ?? [];
+        return {
+          runs: [
+            response.metadata,
+            ...existing.filter((run) => run.runId !== response.runId)
+          ]
+        };
+      });
       // invalidate は副作用的だが、同じ queryKey を購読しているコンポーネントの refetch 漏れを
       // 防ぐため、rejection は log だけ残して握りつぶさない。本フックの呼び出し成功 (run 起動成功)
       // 自体は完了しており、UI 状態は startTracking で先に確定しているため、ここで例外を上に

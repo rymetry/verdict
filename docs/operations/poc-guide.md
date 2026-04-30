@@ -211,7 +211,7 @@ export default defineConfig({
 
 ### 6.2 (任意) `.allurerc.mjs` 設定
 
-Workbench は CLI に `--history-path` / `-o` を直接渡すため `.allurerc.mjs` 必須ではありませんが、ユーザー固有のレポート名・plugin を入れたい場合は project root に設置:
+Workbench は HTML生成時に CLI の `-o` を渡し、履歴は別ステップの `allure history --history-path` で生成します。`.allurerc.mjs` は必須ではありませんが、ユーザー固有のレポート名・plugin を入れたい場合は project root に設置:
 
 ```js
 // .allurerc.mjs
@@ -220,7 +220,7 @@ import { defineConfig } from "allure";
 export default defineConfig({
   name: "My Project Report",
   output: "./allure-report",   // CLI の -o で上書きされる
-  historyPath: "./allure-history.jsonl", // CLI の --history-path で上書きされる
+  historyPath: "./allure-history.jsonl",
   plugins: {
     log: { options: {} },
     csv: { options: { separator: "," } }
@@ -238,9 +238,11 @@ export default defineConfig({
 - Run 完了後の post-run hook で順番に:
   1. `redactPlaywrightResults` (Phase 1 既存)
   2. `copyAllureResultsDir` → `<runDir>/allure-results/`
-  3. `generateAllureReport` (subprocess で `allure generate ./<runDir-relative>/allure-results -o <runDir-relative>/allure-report --clean --history-path .playwright-workbench/reports/allure-history.jsonl`)
-  4. `evaluateAllureQualityGate` (subprocess で `allure quality-gate ./<runDir-relative>/allure-results`) + 結果を `quality-gate-result.json` に persist
-  5. `runQmoSummaryStep` で `qmo-summary.json` + `qmo-summary.md` を生成
+  3. `generateAllureReport` (subprocess で `allure generate ./<runDir-relative>/allure-results -o <runDir-relative>/allure-report`)
+  4. `latest-report/` を最新HTML reportのコピーで更新
+  5. `allure history` / `allure csv` / `allure log` / `allure known-issue` で履歴と補助exportを生成
+  6. `evaluateAllureQualityGate` (subprocess で `allure quality-gate ./<runDir-relative>/allure-results`) + 結果を `quality-gate-result.json` に persist
+  7. `runQmoSummaryStep` で `qmo-summary.json` + `qmo-summary.md` を生成
 
 ### 6.4 結果の場所
 

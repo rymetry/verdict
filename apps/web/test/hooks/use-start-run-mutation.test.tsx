@@ -78,6 +78,29 @@ describe("useStartRunMutation", () => {
     expect(client.getQueryData(["runs", "r-cache"])).toEqual(metadata);
   });
 
+  it("成功時に ['runs', 'list'] cache へ新 run を先頭追加する", async () => {
+    const metadata = makeQueuedMetadata("r-new");
+    vi.mocked(startRun).mockResolvedValue({ runId: "r-new", metadata });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["runs", "list"], {
+      runs: [
+        makeRunMetadata("r-old", {
+          status: "passed",
+          startedAt: "2026-04-29T00:00:00.000Z"
+        })
+      ]
+    });
+
+    const { result } = renderHook(() => useStartRunMutation(), { wrapper: wrapper(client) });
+    result.current.mutate(makeRunRequest());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(client.getQueryData<{ runs: Array<{ runId: string }> }>(["runs", "list"])?.runs.map((run) => run.runId)).toEqual([
+      "r-new",
+      "r-old"
+    ]);
+  });
+
   it("startRun が reject した場合 mutation は error を保持する", async () => {
     vi.mocked(startRun).mockRejectedValue(new Error("upstream 503"));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

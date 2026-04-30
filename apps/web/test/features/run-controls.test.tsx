@@ -102,6 +102,9 @@ describe("RunControls", () => {
           allureResultsDest: "/runs/r1/allure-results",
           allureReportDir: "/runs/r1/allure-report",
           qualityGateResultPath: "/runs/r1/quality-gate-result.json",
+          allureExportsDir: "/runs/r1/allure-exports",
+          allureCsvPath: "/runs/r1/allure-exports/results.csv",
+          allureLogPath: "/runs/r1/allure-exports/results.log",
           qmoSummaryJsonPath: "/runs/r1/qmo-summary.json",
           qmoSummaryMarkdownPath: "/runs/r1/qmo-summary.md"
         },
@@ -166,6 +169,9 @@ describe("RunControls", () => {
           allureResultsDest: "/runs/r2/allure-results",
           allureReportDir: "/runs/r2/allure-report",
           qualityGateResultPath: "/runs/r2/quality-gate-result.json",
+          allureExportsDir: "/runs/r2/allure-exports",
+          allureCsvPath: "/runs/r2/allure-exports/results.csv",
+          allureLogPath: "/runs/r2/allure-exports/results.log",
           qmoSummaryJsonPath: "/runs/r2/qmo-summary.json",
           qmoSummaryMarkdownPath: "/runs/r2/qmo-summary.md"
         },
@@ -208,6 +214,9 @@ describe("RunControls", () => {
           allureResultsDest: "/runs/r3/allure-results",
           allureReportDir: "/runs/r3/allure-report",
           qualityGateResultPath: "/runs/r3/quality-gate-result.json",
+          allureExportsDir: "/runs/r3/allure-exports",
+          allureCsvPath: "/runs/r3/allure-exports/results.csv",
+          allureLogPath: "/runs/r3/allure-exports/results.log",
           qmoSummaryJsonPath: "/runs/r3/qmo-summary.json",
           qmoSummaryMarkdownPath: "/runs/r3/qmo-summary.md"
         },

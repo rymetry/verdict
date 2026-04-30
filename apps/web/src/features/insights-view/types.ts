@@ -75,6 +75,13 @@ export interface QualityGateRule {
   readonly status: "pass" | "fail";
 }
 
+export type QualityGateStatus =
+  | "passed"
+  | "failed"
+  | "skipped"
+  | "error"
+  | "not-evaluated";
+
 /**
  * Allure サマリ rule 1 行 (Quality Gate と同じ shape だが意味は trend なので別 type で意図分離)。
  */
@@ -122,6 +129,7 @@ export interface InsightsSummary {
   readonly knownIssues: ReadonlyArray<KnownIssue>;
   readonly topFlaky: ReadonlyArray<FlakyItem>;
   readonly ai: AiSummary;
+  readonly qualityGateStatus: QualityGateStatus;
   readonly qualityGate: ReadonlyArray<QualityGateRule>;
   readonly allureSummary: ReadonlyArray<AllureSummaryRow>;
   readonly recentRuns: ReadonlyArray<RecentRun>;

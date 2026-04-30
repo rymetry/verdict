@@ -141,6 +141,33 @@ function QmoSummaryBannerLoaded({ summary }: { summary: QmoSummary }): React.Rea
           {Math.round(summary.runDurationMs / 1000)}s
         </span>
       )}
+      {summary.reportLinks.allureReportDir && (
+        <a
+          data-testid="qmo-summary-banner-allure-report-link"
+          className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+          href={toFileHref(`${summary.reportLinks.allureReportDir}/index.html`)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Allure report
+        </a>
+      )}
+      {summary.reportLinks.qualityGateResultPath && (
+        <a
+          data-testid="qmo-summary-banner-quality-gate-link"
+          className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+          href={toFileHref(summary.reportLinks.qualityGateResultPath)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Quality Gate JSON
+        </a>
+      )}
     </div>
   );
+}
+
+function toFileHref(filePath: string): string {
+  const normalized = filePath.startsWith("/") ? filePath : `/${filePath}`;
+  return `file://${normalized.split("/").map(encodeURIComponent).join("/")}`;
 }
