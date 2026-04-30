@@ -21,7 +21,16 @@ import {
 } from "./runArtifactsStore.js";
 import { deriveOutcome } from "./runOutcome.js";
 import { playwrightJsonReportProvider } from "../reporting/PlaywrightJsonReportProvider.js";
-import type { ReportProvider } from "../reporting/ReportProvider.js";
+import { allureReportProvider } from "../reporting/AllureReportProvider.js";
+import {
+  mergeReadSummaryResults,
+  type MergeInput
+} from "../reporting/compositeReportProvider.js";
+import type {
+  ReadSummaryResult,
+  ReportProvider,
+  ReportProviderInput
+} from "../reporting/ReportProvider.js";
 import {
   type ArtifactKind,
   type ArtifactOperation,
@@ -69,7 +78,22 @@ interface RunManagerDeps {
   bus: EventBus;
   /** Optional injection points (defaults wired for production). */
   artifactsStore?: RunArtifactsStore;
+  /**
+   * Legacy single-provider override (Phase 1). When supplied, the §1.1
+   * default chain is replaced by exactly this provider — no Allure
+   * augmentation. Kept for tests that need to pin a deterministic
+   * provider with no fallback. Use `reportProviders` for multi-provider
+   * setups.
+   */
   reportProvider?: ReportProvider;
+  /**
+   * Override the default report provider chain. When omitted, runManager
+   * uses `[playwrightJsonReportProvider, allureReportProvider]` (§1.1) —
+   * Playwright JSON is authoritative for counters; Allure augments
+   * `failedTests[].attachments` and surfaces broken/unknown warnings.
+   * Mutually exclusive with `reportProvider`.
+   */
+  reportProviders?: ReadonlyArray<ReportProvider>;
   redactor?: (chunk: string) => RedactionResult;
   logger?: RunManagerLogger;
   /**
@@ -317,11 +341,23 @@ export function createRunManager({
   runnerForProject,
   bus,
   artifactsStore = defaultArtifactsStore,
-  reportProvider = playwrightJsonReportProvider,
+  reportProvider,
+  reportProviders,
   redactor = redactWithStats,
   logger,
   allureRunnerForProject
 }: RunManagerDeps): RunManager {
+  // §1.1 default chain: Playwright JSON is authoritative for counters;
+  // Allure augments `failedTests[].attachments` and surfaces broken /
+  // unknown / timing warnings. Allure-only projects (no JSON reporter)
+  // fall back to Allure as the primary because Playwright JSON read
+  // returns undefined.
+  const effectiveProviders: ReadonlyArray<ReportProvider> =
+    reportProviders && reportProviders.length > 0
+      ? reportProviders
+      : reportProvider
+      ? [reportProvider]
+      : [playwrightJsonReportProvider, allureReportProvider];
   const active = new Map<string, ActiveRunHandle>();
 
   async function startRun(params: RunStartParams): Promise<ActiveRunHandle> {
@@ -552,8 +588,8 @@ export function createRunManager({
           logger
         });
         // summary は metadata と WS に流れるため、必ず scrubbed JSON から読む。
-        const summary = await readSummarySafely(
-          reportProvider,
+        const summary = await readSummariesSafely(
+          effectiveProviders,
           {
             projectRoot: params.projectRoot,
             runDir: paths.runDir,
@@ -1210,30 +1246,39 @@ async function runQmoSummaryStep({
   return warnings;
 }
 
-async function readSummarySafely(
-  provider: ReportProvider,
-  input: { projectRoot: string; runDir: string; playwrightJsonPath: string },
+async function readSummariesSafely(
+  providers: ReadonlyArray<ReportProvider>,
+  input: ReportProviderInput,
   context: { logger?: RunManagerLogger; runId: string }
 ): Promise<{ summary?: TestResultSummary; warnings: string[] } | undefined> {
-  try {
-    const result = await provider.readSummary(input);
-    return result;
-  } catch (error) {
-    const code = errorCode(error);
-    context.logger?.error(
-      {
-        runId: context.runId,
-        provider: provider.name,
-        artifactKind: "playwright-json" satisfies ArtifactKind,
-        op: "summary-extract" satisfies ArtifactOperation,
-        ...errorLogFields(error)
-      },
-      "report summary read failed"
-    );
-    return {
-      warnings: [`${provider.name} report read failed; summary unavailable. code=${code}`]
-    };
+  // Walk each provider, capture either the produced summary or a sanitized
+  // failure descriptor (code only, never raw error.message — Issue #27
+  // path-redaction). The structured `logger.error` is emitted here once
+  // per failed provider, carrying the run-scoped context that the merger
+  // utility intentionally does not see.
+  const captured: MergeInput[] = [];
+  for (const provider of providers) {
+    let result: ReadSummaryResult | undefined;
+    let failureWarning: string | undefined;
+    try {
+      result = await provider.readSummary(input);
+    } catch (error) {
+      const code = errorCode(error);
+      context.logger?.error(
+        {
+          runId: context.runId,
+          provider: provider.name,
+          artifactKind: "playwright-json" satisfies ArtifactKind,
+          op: "summary-extract" satisfies ArtifactOperation,
+          ...errorLogFields(error)
+        },
+        "report summary read failed"
+      );
+      failureWarning = `${provider.name} report read failed; summary unavailable. code=${code}`;
+    }
+    captured.push({ provider: provider.name, result, failureWarning });
   }
+  return mergeReadSummaryResults(captured);
 }
 
 /**
