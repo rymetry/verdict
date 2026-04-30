@@ -58,7 +58,23 @@ export const allureReportProvider: ReportProvider = {
     input: ReportProviderInput
   ): Promise<ReadSummaryResult | undefined> {
     const allureResultsDir = path.join(input.runDir, "allure-results");
-    const { results, warnings } = await readAllureResults(allureResultsDir);
+    let read: Awaited<ReturnType<typeof readAllureResults>>;
+    try {
+      read = await readAllureResults(allureResultsDir);
+    } catch (error) {
+      // Missing `<runDir>/allure-results/` directory means the project did
+      // not use Allure for this run. §1.1 wires this provider into the
+      // default composite, so silent skip is the correct path for plain
+      // Playwright projects; other error codes (EACCES, EIO, EMFILE...)
+      // propagate so the operator sees the real cause.
+      const code = errorCodeOf(error);
+      if (code === "ENOENT") {
+        return undefined;
+      }
+      throw error;
+    }
+
+    const { results, warnings } = read;
 
     // 全 result file が parse 失敗した場合でも warnings は返す。完全な空
     // ディレクトリ (`results === [] && warnings === []`) は「Allure データなし」
@@ -72,6 +88,13 @@ export const allureReportProvider: ReportProvider = {
     return { summary, warnings };
   },
 };
+
+function errorCodeOf(error: unknown): string {
+  if (error instanceof Error && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return "UNKNOWN";
+}
 
 function aggregateAllureResults(
   results: ReadonlyArray<AllureResult>,

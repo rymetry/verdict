@@ -43,15 +43,20 @@ describe("AllureReportProvider", () => {
     expect(result).toBeUndefined();
   });
 
-  it("throws when the allure-results directory does not exist (caller handles ENOENT logging)", async () => {
+  it("returns undefined when the allure-results directory is missing (§1.1: silent skip for non-Allure projects)", async () => {
+    // §1.1 wired this provider into the default composite. A missing
+    // allure-results dir is the normal case for plain Playwright projects,
+    // so the provider must NOT throw — that would force the composite to
+    // emit a noisy warning on every run. EACCES / EIO etc still propagate
+    // (covered indirectly by readAllureResults' contract; see
+    // allureResultsReader.test.ts).
     fs.rmSync(allureResultsDir, { recursive: true, force: true });
-    await expect(
-      allureReportProvider.readSummary({
-        projectRoot: workdir,
-        runDir: workdir,
-        playwrightJsonPath: path.join(workdir, "ignored.json"),
-      })
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    const result = await allureReportProvider.readSummary({
+      projectRoot: workdir,
+      runDir: workdir,
+      playwrightJsonPath: path.join(workdir, "ignored.json"),
+    });
+    expect(result).toBeUndefined();
   });
 
   it("aggregates a single passing result", async () => {
