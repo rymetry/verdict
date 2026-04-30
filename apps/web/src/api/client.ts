@@ -1,10 +1,12 @@
 import {
+  AllureHistoryResponseSchema,
   HealthResponseSchema,
   ProjectSummarySchema,
   QmoSummarySchema,
   RunListResponseSchema,
   RunMetadataSchema,
   TestInventorySchema,
+  type AllureHistoryResponse,
   type ApiError,
   type HealthResponse,
   type ProjectSummary,
@@ -111,4 +113,21 @@ export async function fetchQmoSummary(runId: string): Promise<QmoSummary | null>
   if (response.status === 409) return null;
   const body = await parseJson<unknown>(response);
   return QmoSummarySchema.parse(body);
+}
+
+/**
+ * §1.3 fetch project-scoped Allure history JSONL entries (the cumulative
+ * trend file the Allure CLI maintains under
+ * `<projectRoot>/.playwright-workbench/reports/allure-history.jsonl`).
+ * Returns `{ entries: [], warnings: [] }` when no history exists yet —
+ * the dominant case before the first Allure-enabled run completes.
+ */
+export async function fetchAllureHistory(
+  projectId: string
+): Promise<AllureHistoryResponse> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/allure-history`
+  );
+  const body = await parseJson<unknown>(response);
+  return AllureHistoryResponseSchema.parse(body);
 }

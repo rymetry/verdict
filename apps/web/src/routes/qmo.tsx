@@ -22,15 +22,20 @@
 import * as React from "react";
 import { createRoute } from "@tanstack/react-router";
 
+import { AllureHistoryTrendCard } from "@/features/allure-history-trend-card/AllureHistoryTrendCard";
 import { InsightsView } from "@/features/insights-view/InsightsView";
 import { SAMPLE_INSIGHTS } from "@/features/insights-view/placeholder-data";
 import { QmoSummaryBanner } from "@/features/qmo-summary-banner/QmoSummaryBanner";
+import { useCurrentProjectQuery } from "@/hooks/use-current-project-query";
 import { useLatestQmoSummary } from "@/hooks/use-latest-qmo-summary";
 
 import { rootRoute } from "./__root";
 
 function InsightsViewRoute(): React.ReactElement {
   const latest = useLatestQmoSummary();
+  // §1.3: Allure history is project-scoped (one trend file per project),
+  // so the trend card needs the current project's id to fetch.
+  const project = useCurrentProjectQuery();
   return (
     <section data-testid="qmo-view" aria-label="Insights View" className="flex flex-col gap-4">
       {/* Phase 1.2 / T208-2: real QMO summary banner (latest run). The
@@ -41,6 +46,10 @@ function InsightsViewRoute(): React.ReactElement {
         isError={latest.isError}
         isEmpty={latest.isEmpty}
       />
+      {/* §1.3: live trend card driven by allure-history.jsonl. Replaces
+          nothing in the existing placeholder cards — sits above InsightsView
+          so operators see the actual trend before the placeholder mock data. */}
+      <AllureHistoryTrendCard projectId={project.data?.id ?? null} />
       <InsightsView summary={SAMPLE_INSIGHTS} />
     </section>
   );

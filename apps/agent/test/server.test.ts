@@ -82,6 +82,88 @@ describe("HTTP API surface", () => {
     expect(body.service).toBe("playwright-workbench-agent");
   });
 
+  it("returns Allure history JSONL entries via /projects/:id/allure-history (§1.3)", async () => {
+    // Project must be opened first so projectStore.getById(projectId) hits.
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    const open = await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: workdir })
+    });
+    expect(open.status).toBe(200);
+
+    const reportsDir = path.join(workdir, ".playwright-workbench", "reports");
+    fs.mkdirSync(reportsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(reportsDir, "allure-history.jsonl"),
+      [
+        JSON.stringify({ generatedAt: "2026-04-30T12:00:00Z", total: 5, passed: 4, failed: 1 }),
+        JSON.stringify({ generatedAt: "2026-04-30T12:01:00Z", total: 5, passed: 5, failed: 0 }),
+      ].join("\n") + "\n"
+    );
+
+    const response = await app.request(
+      `/projects/${encodeURIComponent(workdir)}/allure-history`
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.entries).toHaveLength(2);
+    expect(body.entries[0].generatedAt).toBe("2026-04-30T12:00:00Z");
+    expect(body.warnings).toEqual([]);
+  });
+
+  it("returns empty entries when allure-history.jsonl is missing (§1.3 PoC graceful degrade)", async () => {
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: workdir })
+    });
+    // Pre-clean any lingering history file from the previous test.
+    fs.rmSync(path.join(workdir, ".playwright-workbench", "reports", "allure-history.jsonl"), {
+      force: true,
+    });
+
+    const response = await app.request(
+      `/projects/${encodeURIComponent(workdir)}/allure-history`
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({ entries: [], warnings: [] });
+  });
+
+  it("returns 404 for /projects/:id/allure-history when the project is not open", async () => {
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    const response = await app.request(
+      `/projects/${encodeURIComponent("/nonexistent")}/allure-history`
+    );
+    expect(response.status).toBe(404);
+  });
+
   it("opens a project and exposes it via /projects/current", async () => {
     const { app } = buildApp({
       env: {

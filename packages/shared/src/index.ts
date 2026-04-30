@@ -363,6 +363,49 @@ export const QmoSummarySchema = z.object({
 });
 export type QmoSummary = z.infer<typeof QmoSummarySchema>;
 
+/**
+ * §1.3 Allure history JSONL entry (Phase 1.2 / T206).
+ *
+ * `<projectRoot>/.playwright-workbench/reports/allure-history.jsonl` is
+ * appended by the Allure CLI on each `allure generate --history-path`
+ * invocation. Each line is one JSON object describing the run's
+ * aggregate report; the precise field set varies between Allure
+ * versions. We pin the fields the GUI trend card needs and pass
+ * remaining keys through (Allure 3 ships forward-compatible additions).
+ *
+ * `generatedAt` is required so the hook can sort by recency without
+ * heuristics; everything else is optional because Allure history files
+ * predating Phase 1.2 may have a thinner shape.
+ */
+export const AllureHistoryEntrySchema = z
+  .object({
+    generatedAt: z.string(),
+    reportName: z.string().optional(),
+    runUuid: z.string().optional(),
+    total: z.number().int().nonnegative().optional(),
+    passed: z.number().int().nonnegative().optional(),
+    failed: z.number().int().nonnegative().optional(),
+    broken: z.number().int().nonnegative().optional(),
+    skipped: z.number().int().nonnegative().optional(),
+    unknown: z.number().int().nonnegative().optional(),
+    flaky: z.number().int().nonnegative().optional(),
+    durationMs: z.number().int().nonnegative().optional()
+  })
+  .passthrough();
+export type AllureHistoryEntry = z.infer<typeof AllureHistoryEntrySchema>;
+
+export const AllureHistoryResponseSchema = z.object({
+  /** Number of lines successfully parsed and validated. */
+  entries: z.array(AllureHistoryEntrySchema),
+  /**
+   * Surface why some lines were skipped (parse failure / schema mismatch
+   * / read failure). UI shows them as a low-volume warnings list rather
+   * than failing the whole trend card.
+   */
+  warnings: z.array(z.string())
+});
+export type AllureHistoryResponse = z.infer<typeof AllureHistoryResponseSchema>;
+
 /* ----------------------------------------------------------------------- */
 /* WebSocket event envelope (PLAN.v2 §20)                                  */
 /* ----------------------------------------------------------------------- */
