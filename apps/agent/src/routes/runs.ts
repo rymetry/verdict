@@ -1,6 +1,8 @@
+import * as fs from "node:fs/promises";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import {
+  QmoSummarySchema,
   RunRequestSchema,
   type RunListItem,
   type RunListResponse,
@@ -161,6 +163,139 @@ export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
       status: run.status,
       completedAt: run.completedAt
     });
+  });
+
+  /**
+   * Phase 1.2 / T208-1: serves the persisted QMO Release Readiness Summary
+   * (`<runDir>/qmo-summary.json`) produced by RunManager's runQmoSummaryStep.
+   *
+   * Response codes:
+   *   - 200: persisted JSON parsed successfully against `QmoSummarySchema`.
+   *   - 404 NO_PROJECT / NOT_FOUND: standard `loadRun` errors (no project,
+   *     run id missing).
+   *   - 409 NO_QMO_SUMMARY: file is absent (run still in progress, project
+   *     does not use Allure, or the summary step skipped earlier).
+   *   - 500 INVALID_QMO_SUMMARY: file exists but is malformed JSON or
+   *     fails schema validation. Caller's structured log records the
+   *     code via `errorLogFields(error)` so the absolute path stays
+   *     out of the response.
+   */
+  router.get("/runs/:runId/qmo-summary", async (c) => {
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    const { run } = result;
+    let raw: string;
+    try {
+      raw = await fs.readFile(run.paths.qmoSummaryJsonPath, "utf8");
+    } catch (error) {
+      const code =
+        error instanceof Error && "code" in error && typeof (error as { code: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : "READ_FAILED";
+      if (code === "ENOENT") {
+        return apiError(
+          c,
+          "NO_QMO_SUMMARY",
+          "QMO summary not yet generated for this run.",
+          409
+        );
+      }
+      logger?.error(
+        {
+          runId: run.runId,
+          artifactKind: "metadata",
+          ...errorLogFields(error)
+        },
+        "qmo-summary read failed"
+      );
+      return apiError(
+        c,
+        "QMO_SUMMARY_READ_FAILED",
+        `QMO summary file could not be read. code=${code}`,
+        500
+      );
+    }
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(raw);
+    } catch {
+      logger?.error(
+        {
+          runId: run.runId,
+          artifactKind: "metadata",
+          code: "INVALID_JSON"
+        },
+        "qmo-summary contained invalid JSON"
+      );
+      return apiError(
+        c,
+        "INVALID_QMO_SUMMARY",
+        "Persisted QMO summary is not valid JSON.",
+        500
+      );
+    }
+    const validated = QmoSummarySchema.safeParse(parsedJson);
+    if (!validated.success) {
+      logger?.error(
+        {
+          runId: run.runId,
+          artifactKind: "metadata",
+          code: "SCHEMA_MISMATCH",
+          issues: validated.error.issues.map((i) => i.path.join(".")).join(",")
+        },
+        "qmo-summary failed schema validation"
+      );
+      return apiError(
+        c,
+        "INVALID_QMO_SUMMARY",
+        "Persisted QMO summary failed schema validation.",
+        500
+      );
+    }
+    return c.json(validated.data);
+  });
+
+  /**
+   * Phase 1.2 / T208-1: Markdown form of the QMO summary. Same lifecycle
+   * as the JSON endpoint above; served as `text/markdown` for direct
+   * embedding in PR comments / chat tools that handle markdown natively.
+   */
+  router.get("/runs/:runId/qmo-summary.md", async (c) => {
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    const { run } = result;
+    let body: string;
+    try {
+      body = await fs.readFile(run.paths.qmoSummaryMarkdownPath, "utf8");
+    } catch (error) {
+      const code =
+        error instanceof Error && "code" in error && typeof (error as { code: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : "READ_FAILED";
+      if (code === "ENOENT") {
+        return apiError(
+          c,
+          "NO_QMO_SUMMARY",
+          "QMO summary markdown not yet generated for this run.",
+          409
+        );
+      }
+      logger?.error(
+        {
+          runId: run.runId,
+          artifactKind: "metadata",
+          ...errorLogFields(error)
+        },
+        "qmo-summary markdown read failed"
+      );
+      return apiError(
+        c,
+        "QMO_SUMMARY_READ_FAILED",
+        `QMO summary markdown could not be read. code=${code}`,
+        500
+      );
+    }
+    return c.body(body, 200, { "Content-Type": "text/markdown; charset=utf-8" });
   });
 
   router.post("/runs/:runId/cancel", (c) => {
