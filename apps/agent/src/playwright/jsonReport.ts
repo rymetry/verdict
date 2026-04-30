@@ -130,7 +130,13 @@ export function summarizePlaywrightJson(
           line: spec.line,
           column: spec.column,
           status: test.status,
-          durationMs: failingResultEntry.duration,
+          // FailedTestSchema.durationMs is `z.number().int()`. Playwright
+          // emits ms with high-precision timers, so the duration field
+          // can be fractional. Round defensively to keep schema valid.
+          durationMs:
+            failingResultEntry.duration !== undefined
+              ? Math.round(failingResultEntry.duration)
+              : undefined,
           message: error?.message,
           stack: error?.stack,
           attachments: (failingResultEntry.attachments ?? [])
@@ -152,7 +158,10 @@ export function summarizePlaywrightJson(
       failed,
       skipped,
       flaky,
-      durationMs: stats.duration,
+      // TestResultSummarySchema.durationMs is z.number().int() — same
+      // defensive rounding rationale as failedTests above.
+      durationMs:
+        stats.duration !== undefined ? Math.round(stats.duration) : undefined,
       failedTests
     },
     warnings
