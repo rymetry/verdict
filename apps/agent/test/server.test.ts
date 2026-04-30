@@ -817,4 +817,170 @@ describe("HTTP API surface", () => {
       fs.rmSync(allowedRoot, { recursive: true, force: true });
     }
   });
+
+  /* -------------------------------------------------------------- */
+  /* T208-1: GET /runs/:runId/qmo-summary{,.md}                     */
+  /* -------------------------------------------------------------- */
+
+  describe("GET /runs/:runId/qmo-summary (T208-1)", () => {
+    function seedRun(runIdLocal: string): void {
+      const runDir = path.join(workdir, ".playwright-workbench", "runs", runIdLocal);
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(runDir, "metadata.json"),
+        JSON.stringify({
+          runId: runIdLocal,
+          projectId: workdir,
+          projectRoot: workdir,
+          status: "passed",
+          startedAt: "2026-04-29T00:00:00Z",
+          completedAt: "2026-04-29T00:01:00Z",
+          command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+          cwd: workdir,
+          exitCode: 0,
+          signal: null,
+          durationMs: 1000,
+          requested: { projectId: workdir, headed: false },
+          paths: {
+            runDir,
+            metadataJson: path.join(runDir, "metadata.json"),
+            stdoutLog: path.join(runDir, "stdout.log"),
+            stderrLog: path.join(runDir, "stderr.log"),
+            playwrightJson: path.join(runDir, "playwright-results.json"),
+            playwrightHtml: path.join(runDir, "playwright-report"),
+            artifactsJson: path.join(runDir, "artifacts.json"),
+            allureResultsDest: path.join(runDir, "allure-results"),
+            allureReportDir: path.join(runDir, "allure-report"),
+            qualityGateResultPath: path.join(runDir, "quality-gate-result.json"),
+            qmoSummaryJsonPath: path.join(runDir, "qmo-summary.json"),
+            qmoSummaryMarkdownPath: path.join(runDir, "qmo-summary.md")
+          },
+          warnings: []
+        })
+      );
+    }
+
+    function buildAppForQmo() {
+      return buildApp({
+        env: {
+          port: 0,
+          host: "127.0.0.1",
+          logLevel: "silent",
+          allowedRoots: [workdir],
+          failClosedAudit: false
+        }
+      });
+    }
+
+    async function openProjectAndQuery(
+      app: Awaited<ReturnType<typeof buildAppForQmo>>["app"],
+      runIdLocal: string,
+      suffix = ""
+    ) {
+      await app.request("/projects/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rootPath: workdir })
+      });
+      return app.request(`/runs/${runIdLocal}/qmo-summary${suffix}`);
+    }
+
+    it("returns 409 NO_QMO_SUMMARY when the file does not exist (run still in progress / no Allure)", async () => {
+      const runIdLocal = "r-qmo-absent";
+      seedRun(runIdLocal);
+      const { app } = buildAppForQmo();
+      const response = await openProjectAndQuery(app, runIdLocal);
+      expect(response.status).toBe(409);
+      const body = await response.json();
+      expect(body.error.code).toBe("NO_QMO_SUMMARY");
+    });
+
+    it("returns 200 with the parsed QmoSummary when the file exists and is valid", async () => {
+      const runIdLocal = "r-qmo-valid";
+      seedRun(runIdLocal);
+      const runDir = path.join(workdir, ".playwright-workbench", "runs", runIdLocal);
+      const validSummary = {
+        runId: runIdLocal,
+        projectId: workdir,
+        generatedAt: "2026-04-29T00:01:30Z",
+        outcome: "ready",
+        testSummary: {
+          total: 2,
+          passed: 2,
+          failed: 0,
+          skipped: 0,
+          flaky: 0,
+          failedTests: []
+        },
+        warnings: [],
+        reportLinks: {
+          allureReportDir: path.join(runDir, "allure-report")
+        }
+      };
+      fs.writeFileSync(path.join(runDir, "qmo-summary.json"), JSON.stringify(validSummary));
+      const { app } = buildAppForQmo();
+      const response = await openProjectAndQuery(app, runIdLocal);
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.runId).toBe(runIdLocal);
+      expect(body.outcome).toBe("ready");
+      expect(body.testSummary.total).toBe(2);
+    });
+
+    it("returns 500 INVALID_QMO_SUMMARY when the file is malformed JSON", async () => {
+      const runIdLocal = "r-qmo-malformed";
+      seedRun(runIdLocal);
+      const runDir = path.join(workdir, ".playwright-workbench", "runs", runIdLocal);
+      fs.writeFileSync(path.join(runDir, "qmo-summary.json"), "{ not valid json");
+      const { app } = buildAppForQmo();
+      const response = await openProjectAndQuery(app, runIdLocal);
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.error.code).toBe("INVALID_QMO_SUMMARY");
+    });
+
+    it("returns 500 INVALID_QMO_SUMMARY when the JSON shape fails the schema", async () => {
+      const runIdLocal = "r-qmo-schema-bad";
+      seedRun(runIdLocal);
+      const runDir = path.join(workdir, ".playwright-workbench", "runs", runIdLocal);
+      // Missing required `outcome` field.
+      fs.writeFileSync(
+        path.join(runDir, "qmo-summary.json"),
+        JSON.stringify({ runId: runIdLocal, projectId: "/p", generatedAt: "x" })
+      );
+      const { app } = buildAppForQmo();
+      const response = await openProjectAndQuery(app, runIdLocal);
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.error.code).toBe("INVALID_QMO_SUMMARY");
+    });
+
+    it("returns 404 when the runId does not exist", async () => {
+      const { app } = buildAppForQmo();
+      const response = await openProjectAndQuery(app, "r-does-not-exist");
+      expect(response.status).toBe(404);
+    });
+
+    it("Markdown variant: returns 409 when absent and 200 text/markdown when present", async () => {
+      const runIdLocal = "r-qmo-md";
+      seedRun(runIdLocal);
+      const { app } = buildAppForQmo();
+
+      // 409 when absent
+      const absent = await openProjectAndQuery(app, runIdLocal, ".md");
+      expect(absent.status).toBe(409);
+
+      // 200 text/markdown when present
+      const runDir = path.join(workdir, ".playwright-workbench", "runs", runIdLocal);
+      fs.writeFileSync(
+        path.join(runDir, "qmo-summary.md"),
+        "# QMO Release Readiness Summary\n- **Outcome**: `ready`\n"
+      );
+      const present = await app.request(`/runs/${runIdLocal}/qmo-summary.md`);
+      expect(present.status).toBe(200);
+      expect(present.headers.get("content-type")).toContain("text/markdown");
+      const body = await present.text();
+      expect(body).toContain("# QMO Release Readiness Summary");
+    });
+  });
 });
