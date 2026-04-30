@@ -94,6 +94,14 @@ export const ProjectSummarySchema = z.object({
   hasAllurePlaywright: z.boolean(),
   hasAllureCli: z.boolean(),
   /**
+   * Parsed semver of the resolved Allure CLI binary
+   * (`node_modules/.bin/allure --version`). Populated only when
+   * `hasAllureCli` is true and the probe succeeded. Phase 1.2 is tested
+   * against Allure 3.x; 2.x produces a warning rather than a hard block,
+   * since the operator may want to inspect raw stdout themselves.
+   */
+  allureCliVersion: z.string().optional(),
+  /**
    * Project-relative `resultsDir` extracted from the `allure-playwright`
    * reporter clause in `playwright.config.{ts,js,mjs,cjs}` (Phase 1.2 / T203).
    * Optional: `undefined` when the reporter is absent, when its `resultsDir`
