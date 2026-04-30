@@ -89,25 +89,42 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
   expect(latestRunId).toBeDefined();
   // QMO summary persistence happens inside the same post-run lifecycle
   // that flips status, but the file may briefly be unreadable (write
-  // before flush). Poll the endpoint until it returns 200 with a
-  // not-ready outcome.
+  // before flush) or schema validation may fail mid-write — both
+  // surface as transient 500 from /api/runs/:id/qmo-summary. Treat any
+  // non-success status as "still processing" until either the outcome
+  // settles or the timeout is reached. Diagnostic: log the last response
+  // shape on each iteration so CI artifacts capture the failure mode.
   let qmoOutcome: string | undefined;
+  let lastDiagnostic = "";
   await expect
     .poll(
       async () => {
         const response = await page.request.get(
           `${apiBase}/api/runs/${encodeURIComponent(latestRunId!)}/qmo-summary`
         );
-        if (response.status() === 409) return "not-ready-yet";
-        if (!response.ok()) return `http-${response.status()}`;
+        if (response.status() === 409) {
+          lastDiagnostic = "409 NO_QMO_SUMMARY (file not yet generated)";
+          return "not-ready-yet";
+        }
+        if (!response.ok()) {
+          let bodyText = "";
+          try {
+            bodyText = await response.text();
+          } catch {
+            bodyText = "(unreadable body)";
+          }
+          lastDiagnostic = `http-${response.status()}: ${bodyText.slice(0, 200)}`;
+          return `transient-${response.status()}`;
+        }
         const body = (await response.json()) as { outcome?: string };
         qmoOutcome = body.outcome;
+        lastDiagnostic = `200 outcome=${body.outcome ?? "(none)"}`;
         return body.outcome ?? "no-outcome";
       },
-      { timeout: 60_000, intervals: [500] }
+      { timeout: 90_000, intervals: [1_000] }
     )
     .toBe("not-ready");
-  expect(qmoOutcome).toBe("not-ready");
+  expect(qmoOutcome, `last QMO endpoint diag: ${lastDiagnostic}`).toBe("not-ready");
 
   // 6. UI sanity check: navigate to /qmo and assert the banner
   //    surfaces the outcome the server already confirmed.
