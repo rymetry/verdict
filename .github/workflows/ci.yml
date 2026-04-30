@@ -107,6 +107,17 @@ jobs:
           FIXTURE_ROOT: ${{ github.workspace }}/tests/fixtures/sample-pw-project
         run: pnpm smoke:gui
 
+      # §1.2 E2E: drive the full Phase 1.2 Allure pipeline end-to-end
+      # against the sample-pw-allure-project fixture (open project →
+      # inventory → run → wait for QMO summary outcome). Verifies that
+      # the workbench actually works against an Allure-enabled project
+      # in this repo (the "ワークベンチ動作確認" the user asked for).
+      - name: GUI smoke (Allure pipeline)
+        env:
+          WORKBENCH_URL: http://127.0.0.1:5173
+          ALLURE_FIXTURE_ROOT: ${{ github.workspace }}/tests/fixtures/sample-pw-allure-project
+        run: pnpm --filter @pwqa-smoke/workbench-gui exec playwright test workbench-allure.smoke.spec.ts
+
       - name: Upload GUI smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
