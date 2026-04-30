@@ -24,9 +24,9 @@ import { createRoute } from "@tanstack/react-router";
 
 import { AllureHistoryTrendCard } from "@/features/allure-history-trend-card/AllureHistoryTrendCard";
 import { InsightsView } from "@/features/insights-view/InsightsView";
-import { SAMPLE_INSIGHTS } from "@/features/insights-view/placeholder-data";
 import { QmoSummaryBanner } from "@/features/qmo-summary-banner/QmoSummaryBanner";
 import { useCurrentProjectQuery } from "@/hooks/use-current-project-query";
+import { useInsightsSummary } from "@/hooks/use-insights-summary";
 import { useLatestQmoSummary } from "@/hooks/use-latest-qmo-summary";
 
 import { rootRoute } from "./__root";
@@ -36,21 +36,29 @@ function InsightsViewRoute(): React.ReactElement {
   // §1.3: Allure history is project-scoped (one trend file per project),
   // so the trend card needs the current project's id to fetch.
   const project = useCurrentProjectQuery();
+  // §1.2: derived InsightsSummary from real QMO + Allure history. When
+  // both data sources are empty, `summary === null` and we render an
+  // explicit empty state instead of mock content (the previous Phase 1
+  // path silently rendered SAMPLE_INSIGHTS even with zero real data).
+  const insights = useInsightsSummary();
   return (
     <section data-testid="qmo-view" aria-label="Insights View" className="flex flex-col gap-4">
-      {/* Phase 1.2 / T208-2: real QMO summary banner (latest run). The
-          existing placeholder InsightsView stays below until Phase 1.2
-          後段で full hook 置換が完了するまで併存。 */}
       <QmoSummaryBanner
         summary={latest.summary}
         isError={latest.isError}
         isEmpty={latest.isEmpty}
       />
-      {/* §1.3: live trend card driven by allure-history.jsonl. Replaces
-          nothing in the existing placeholder cards — sits above InsightsView
-          so operators see the actual trend before the placeholder mock data. */}
       <AllureHistoryTrendCard projectId={project.data?.id ?? null} />
-      <InsightsView summary={SAMPLE_INSIGHTS} />
+      {insights.summary !== null ? (
+        <InsightsView summary={insights.summary} />
+      ) : (
+        <p
+          data-testid="insights-view-empty"
+          className="text-sm text-[var(--ink-3)]"
+        >
+          No run data yet. Trigger a run to populate the insights view.
+        </p>
+      )}
     </section>
   );
 }
