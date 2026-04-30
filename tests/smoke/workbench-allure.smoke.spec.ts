@@ -61,39 +61,60 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
   // 4. Trigger a run via the GUI Run button.
   await page.getByRole("button", { name: /Run Playwright/ }).click();
 
-  // 5. Poll the agent /api/runs directly until a terminal run status
-  //    arrives. The QMO banner only refetches its `runs` list on a
-  //    re-mount, so polling server-side first is more deterministic
-  //    than waiting for a UI re-render. The Allure pipeline (allure
-  //    generate + quality-gate + QMO persist) takes ~30-60s in CI
-  //    runners; we cap at 150s to absorb GitHub Actions cold starts.
+  // 5. Server-side end-to-end assertion: poll /api/runs until a terminal
+  //    status appears, then poll /api/runs/<runId>/qmo-summary until the
+  //    QMO summary file is persisted (200 with outcome). This validates
+  //    the actual Phase 1.2 pipeline server-side; the GUI banner check
+  //    afterwards is a UI sanity-check, not the primary acceptance signal.
   const apiBase = WORKBENCH_URL.replace(/\/$/, "");
+  let latestRunId: string | undefined;
   await expect
     .poll(
       async () => {
         const response = await page.request.get(`${apiBase}/api/runs`);
         if (!response.ok()) return "unreachable";
         const body = (await response.json()) as {
-          runs: ReadonlyArray<{ status: string }>;
+          runs: ReadonlyArray<{ runId: string; status: string }>;
         };
-        return (
-          body.runs.find((r) => r.status === "passed" || r.status === "failed")
-            ?.status ?? "running"
+        const terminal = body.runs.find(
+          (r) => r.status === "passed" || r.status === "failed"
         );
+        if (terminal) latestRunId = terminal.runId;
+        return terminal?.status ?? "running";
       },
       { timeout: 150_000, intervals: [1_000] }
     )
     .toMatch(/passed|failed/);
 
-  // 6. Force the QMO banner to re-fetch by navigating directly to the
-  //    /qmo route (the QMO banner only lives there, not on /qa). By now
-  //    the QMO summary file is persisted, so a fresh `useLatestQmoSummary`
-  //    will read it via `/api/runs/<runId>/qmo-summary`.
+  expect(latestRunId).toBeDefined();
+  // QMO summary persistence happens inside the same post-run lifecycle
+  // that flips status, but the file may briefly be unreadable (write
+  // before flush). Poll the endpoint until it returns 200 with a
+  // not-ready outcome.
+  let qmoOutcome: string | undefined;
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(
+          `${apiBase}/api/runs/${encodeURIComponent(latestRunId!)}/qmo-summary`
+        );
+        if (response.status() === 409) return "not-ready-yet";
+        if (!response.ok()) return `http-${response.status()}`;
+        const body = (await response.json()) as { outcome?: string };
+        qmoOutcome = body.outcome;
+        return body.outcome ?? "no-outcome";
+      },
+      { timeout: 60_000, intervals: [500] }
+    )
+    .toBe("not-ready");
+  expect(qmoOutcome).toBe("not-ready");
+
+  // 6. UI sanity check: navigate to /qmo and assert the banner
+  //    surfaces the outcome the server already confirmed.
   await page.goto(`${WORKBENCH_URL}/qmo`);
   await expect(page.getByText(/Agent v/)).toBeVisible({ timeout: 15_000 });
   const outcome = page.getByTestId("qmo-summary-banner-outcome");
   await expect(outcome).toBeVisible({ timeout: 30_000 });
-  // The fixture has 1 failing test so the outcome must be Not Ready.
   await expect(outcome).toHaveText(/Not Ready/);
   await page.screenshot({
     path: path.join(ARTIFACT_DIR, "allure-smoke-after-run.png"),
@@ -101,7 +122,7 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
   });
 
   // 7. QG row should be visible because Allure CLI is installed in the
-  //    fixture; status will be "failed" (max-failures violation).
+  //    fixture; profile name is rendered alongside the status.
   const qg = page.getByTestId("qmo-summary-banner-qg");
   await expect(qg).toBeVisible();
   await expect(qg).toContainText(/local-review|release-smoke|full-regression/);
