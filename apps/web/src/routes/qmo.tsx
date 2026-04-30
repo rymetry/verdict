@@ -36,7 +36,11 @@ function InsightsViewRoute(): React.ReactElement {
       {/* Phase 1.2 / T208-2: real QMO summary banner (latest run). The
           existing placeholder InsightsView stays below until Phase 1.2
           後段で full hook 置換が完了するまで併存。 */}
-      <QmoSummaryBanner summary={latest.summary} isError={latest.isError} />
+      <QmoSummaryBanner
+        summary={latest.summary}
+        isError={latest.isError}
+        isEmpty={latest.isEmpty}
+      />
       <InsightsView summary={SAMPLE_INSIGHTS} />
     </section>
   );

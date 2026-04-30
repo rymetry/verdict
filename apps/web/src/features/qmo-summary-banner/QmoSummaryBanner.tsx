@@ -53,6 +53,14 @@ interface QmoSummaryBannerProps {
   readonly summary: QmoSummary | null | undefined;
   /** True when the hook reports an error (non-409). */
   readonly isError: boolean;
+  /**
+   * True when the runs list resolved successfully but contained zero
+   * runs (project just opened, no run yet executed). Distinguished from
+   * the generic loading / not-yet-generated states so the operator
+   * sees a clear "Run a test to populate this view" message instead of
+   * an indefinite spinner. T208-2 review fix (PR #49).
+   */
+  readonly isEmpty: boolean;
 }
 
 export function QmoSummaryBanner(props: QmoSummaryBannerProps): React.ReactElement | null {
@@ -75,11 +83,22 @@ export function QmoSummaryBanner(props: QmoSummaryBannerProps): React.ReactEleme
  * suppresses the entire Card so layout does not shift while waiting.
  */
 function renderBody(props: QmoSummaryBannerProps): React.ReactElement | null {
-  const { summary, isError } = props;
+  const { summary, isError, isEmpty } = props;
   if (isError) {
     return (
       <span data-testid="qmo-summary-banner-error" className="text-destructive">
         QMO summary unavailable
+      </span>
+    );
+  }
+  // Empty-project state takes precedence over the generic loading branch.
+  // Without this, an empty runs list would leave the banner stuck in
+  // the loading=null branch indefinitely, indistinguishable from "still
+  // fetching" (T208-2 review fix / PR #49).
+  if (isEmpty) {
+    return (
+      <span data-testid="qmo-summary-banner-no-runs" className="text-muted-foreground">
+        No runs yet. Trigger a test run to populate this summary.
       </span>
     );
   }
