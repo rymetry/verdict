@@ -95,8 +95,12 @@ describe("scanProject", () => {
       });
       touch("pnpm-lock.yaml");
       touch("node_modules/.bin/playwright");
-      const { summary } = await scanProject({ rootPath: workdir });
+      const { summary } = await scanProject({
+        rootPath: workdir,
+        allureCliProbe: async () => ({ version: "3.6.2", warnings: [] })
+      });
       expect(summary.hasAllureCli).toBe(true);
+      expect(summary.allureCliVersion).toBe("3.6.2");
     });
 
     it("detects Allure 2 CLI by `allure-commandline` package (backward-compat)", async () => {
@@ -108,8 +112,18 @@ describe("scanProject", () => {
       });
       touch("pnpm-lock.yaml");
       touch("node_modules/.bin/playwright");
-      const { summary } = await scanProject({ rootPath: workdir });
+      const { summary } = await scanProject({
+        rootPath: workdir,
+        allureCliProbe: async () => ({
+          version: "2.30.0",
+          warnings: ["Allure CLI version is 2.30.0; Phase 1.2 is tested against 3.x."]
+        })
+      });
       expect(summary.hasAllureCli).toBe(true);
+      expect(summary.allureCliVersion).toBe("2.30.0");
+      expect(summary.warnings).toContain(
+        "Allure CLI version is 2.30.0; Phase 1.2 is tested against 3.x."
+      );
     });
 
     it("returns hasAllureCli=false when neither Allure CLI is installed", async () => {
@@ -120,6 +134,43 @@ describe("scanProject", () => {
       touch("node_modules/.bin/playwright");
       const { summary } = await scanProject({ rootPath: workdir });
       expect(summary.hasAllureCli).toBe(false);
+      expect(summary.allureCliVersion).toBeUndefined();
+    });
+
+    it("skips the version probe entirely when hasAllureCli is false", async () => {
+      writeJson("package.json", {
+        devDependencies: { "@playwright/test": "^1.55.0" }
+      });
+      touch("pnpm-lock.yaml");
+      touch("node_modules/.bin/playwright");
+      let probeCalled = false;
+      await scanProject({
+        rootPath: workdir,
+        allureCliProbe: async () => {
+          probeCalled = true;
+          return { version: "3.6.2", warnings: [] };
+        }
+      });
+      expect(probeCalled).toBe(false);
+    });
+
+    it("surfaces probe warnings on the project summary when probe fails", async () => {
+      writeJson("package.json", {
+        devDependencies: {
+          "@playwright/test": "^1.55.0",
+          allure: "~3.6.2"
+        }
+      });
+      touch("pnpm-lock.yaml");
+      touch("node_modules/.bin/playwright");
+      const { summary } = await scanProject({
+        rootPath: workdir,
+        allureCliProbe: async () => ({
+          warnings: ["Allure CLI version probe failed: ENOENT"]
+        })
+      });
+      expect(summary.allureCliVersion).toBeUndefined();
+      expect(summary.warnings).toContain("Allure CLI version probe failed: ENOENT");
     });
   });
 

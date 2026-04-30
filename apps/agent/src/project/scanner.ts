@@ -14,6 +14,10 @@ import {
   yarnPnpMarkers,
   type PackageJsonView
 } from "./packageManager.js";
+import {
+  probeAllureCliVersion,
+  type AllureCliVersionProbe
+} from "./allureCliVersion.js";
 
 const PLAYWRIGHT_CONFIG_CANDIDATES = [
   "playwright.config.ts",
@@ -30,6 +34,11 @@ export interface ScanRequest {
    * refuses to open paths outside the list. Empty list disables the check.
    */
   allowedRoots?: ReadonlyArray<string>;
+  /**
+   * Override the Allure CLI version probe. Tests inject a deterministic
+   * stub; production callers omit it and get the real `spawn`-based probe.
+   */
+  allureCliProbe?: AllureCliVersionProbe;
 }
 
 export interface ScanResult {
@@ -292,6 +301,15 @@ export async function scanProject(request: ScanRequest): Promise<ScanResult> {
   const hasYarnPnP = detectYarnPnP(realpath);
   const hasPlaywrightBinInNodeModules = detectPlaywrightBin(realpath);
   const { hasAllurePlaywright, hasAllureCli } = detectAllure(packageJson);
+  // §1.6 Allure CLI version probe. Skipped when the package isn't declared
+  // (avoids a misleading "binary not found" warning); when declared, the
+  // probe runs once per project-open and surfaces version mismatches as a
+  // warning so unsupported 2.x setups don't silently produce broken QG/history
+  // output later in the run pipeline.
+  const allureCliProbe = request.allureCliProbe ?? probeAllureCliVersion;
+  const allureCliVersionResult = hasAllureCli
+    ? await allureCliProbe(realpath)
+    : { warnings: [] as string[] };
   // Read the Playwright config text and run a heuristic Allure resultsDir
   // detection. Non-load-bearing for run execution; T203-2 will use it for
   // archive/copy decisions, falling back to default or user override when
@@ -325,6 +343,7 @@ export async function scanProject(request: ScanRequest): Promise<ScanResult> {
   // run pipeline can present remediation hints (e.g. "configure resultsDir
   // explicitly" or "supply a Workbench override").
   warnings.push(...allureDetection.warnings);
+  warnings.push(...allureCliVersionResult.warnings);
 
   const summary: ProjectSummary = {
     id: realpath,
@@ -334,6 +353,7 @@ export async function scanProject(request: ScanRequest): Promise<ScanResult> {
     packageManager,
     hasAllurePlaywright,
     hasAllureCli,
+    allureCliVersion: allureCliVersionResult.version,
     allureResultsDir: allureDetection.resultsDir,
     warnings,
     blockingExecution: packageManager.blockingExecution
