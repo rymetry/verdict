@@ -1,3 +1,50 @@
+# Implementation Report — PLAN.v2 Progress
+
+## Phase 2 Failure Review Workbench Update (2026-05-01)
+
+### 実装サマリ
+
+- **完了タスク数**: 1 (T300)
+- **マージ済 PR**: #60
+- **最終マージ commit**: `24f17628dfa24da41474fdd82e5aff323a887c2d`
+- **目的**: PLAN.v2 §31/§32 の Phase 2 成功条件「失敗testごとにstack、artifact、Allure履歴、known issue/flakyが確認できる」を満たす。
+
+### T300: Phase 2 Failure Review Workbench
+
+- **変更ファイル**: `packages/shared/src/index.ts`, `apps/agent/src/reporting/failureReview.ts`, `apps/agent/src/routes/runs.ts`, `apps/web/src/api/client.ts`, `apps/web/src/features/failure-review/FailureReview.tsx`, related tests, `docs/design/t300-phase-2-failure-review-workbench.md`
+- **主要設計判断**: 既存 `/runs/:runId` の永続 metadata は変更せず、新設 `GET /runs/:runId/failure-review` で run summary に Allure results / Allure history JSONL / known-issues JSON を best-effort 合成する。Allure 固有の照合ロジックは agent 側に閉じ込め、web は shared zod schema の Workbench shape だけを扱う。
+- **特記事項**: Allure side files が欠落または malformed の場合も basic failure detail は表示し続け、warning として surface する。
+
+### 実行したテスト
+
+- `pnpm test`
+- `pnpm typecheck`
+- `pnpm build`
+- `pnpm smoke:gui`
+- GitHub Actions CI #146: `verify (node 24)` success, `gui smoke (node 24)` success
+
+### セキュリティ確認事項
+
+- 新 API は Workbench 管理下の run metadata / run-scoped Allure results / project-scoped reports の read のみ。
+- 任意コマンド実行、外部送信、設定変更、artifact 削除は追加していない。
+- warning は stable code / context を中心にし、新たな path 露出 surface を増やさない。
+
+### パフォーマンス・運用上の影響
+
+- `known-issues.json` は 1 MiB cap を設け、過大 file は読み飛ばして warning 化する。
+- Allure history は既存 reader の cap / validation を再利用する。
+- FailureReview UI は既存 row 表示に per-test signal panel を足すだけで、既存 run console / inventory flow には影響しない。
+
+### ミッション完了条件のセルフチェック
+
+- [x] T300 が PROGRESS.md 上で完了
+- [x] T300 の Definition of Done を満たす
+- [x] PR #60 がマージ済み
+- [x] 最終統合確認に合格
+- [x] 本レポートを更新済み
+
+---
+
 # Implementation Report — Phase 1.2 Allure Report 3 Integration
 
 **Engagement scope**: Phase 1.7 cleanup (open Issues #27 / #30 / #31) + PLAN.v2 §22-§28 Phase 1.2 (Allure Report 3 統合 PoC) end-to-end.
