@@ -61,7 +61,11 @@ function renderReleaseReviewMarkdown(input: {
   }
   if (input.qmoSummary.qualityGate) {
     const qg = input.qmoSummary.qualityGate;
-    lines.push(`- Quality Gate: \`${qg.status}\` (${qg.profile})`);
+    const qgLabel =
+      qg.enforcement === "advisory"
+        ? `evaluated · advisory (${qg.profile})`
+        : `\`${qg.status}\` (${qg.profile})`;
+    lines.push(`- Quality Gate: ${qgLabel}`);
   } else {
     lines.push("- Quality Gate: not evaluated");
   }

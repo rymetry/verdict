@@ -272,6 +272,16 @@ export function validatePhase1PlaywrightArgs({
       index += 2;
       continue;
     }
+    if (arg === "--config") {
+      const value = args[index + 1];
+      if (value === undefined || isFlagValue(value)) {
+        return argsInvalid("missing-flag-value", `${arg} must be followed by a non-flag value.`);
+      }
+      const operandResult = validateProjectRelativeOperand(value);
+      if (!operandResult.ok) return operandResult;
+      index += 2;
+      continue;
+    }
     if (arg === "--retries" || arg === "--workers") {
       const value = args[index + 1];
       if (value === undefined || isFlagValue(value)) {
@@ -744,18 +754,7 @@ export function createAllureCommandPolicy(cwdBoundary: string): CommandPolicy {
 /* T500-2: AI CLI 引数検証 policy                                    */
 /* ----------------------------------------------------------------- */
 
-const CLAUDE_AI_ARGS_PREFIX = [
-  "--bare",
-  "--print",
-  "--input-format",
-  "text",
-  "--output-format",
-  "json",
-  "--tools",
-  "",
-  "--no-session-persistence",
-  "--json-schema"
-] as const;
+const CLAUDE_AI_ARGS = ["--print", "--output-format", "json"] as const;
 
 export function validateAiArgs({
   executableName,
@@ -774,27 +773,19 @@ export function validateAiArgs({
     const valueError = validateArgValue(arg);
     if (!valueError.ok) return valueError;
   }
-  if (args.length !== CLAUDE_AI_ARGS_PREFIX.length + 1) {
+  if (args.length !== CLAUDE_AI_ARGS.length) {
     return argsInvalid(
       "invalid-prefix",
       "Claude Code AI analysis must use the approved non-interactive JSON invocation."
     );
   }
-  for (let index = 0; index < CLAUDE_AI_ARGS_PREFIX.length; index += 1) {
-    if (args[index] !== CLAUDE_AI_ARGS_PREFIX[index]) {
+  for (let index = 0; index < CLAUDE_AI_ARGS.length; index += 1) {
+    if (args[index] !== CLAUDE_AI_ARGS[index]) {
       return argsInvalid(
         "invalid-prefix",
         "Claude Code AI analysis must use the approved non-interactive JSON invocation."
       );
     }
-  }
-  try {
-    const schema = JSON.parse(args[CLAUDE_AI_ARGS_PREFIX.length]!);
-    if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
-      return argsInvalid("invalid-json-schema", "AI output schema must be a JSON object.");
-    }
-  } catch {
-    return argsInvalid("invalid-json-schema", "AI output schema argument must be valid JSON.");
   }
   return argsValid;
 }

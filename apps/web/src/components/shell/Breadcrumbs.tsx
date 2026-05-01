@@ -21,7 +21,7 @@ interface BreadcrumbsProps {
 }
 
 const itemBase = cn(
-  "inline-flex items-center gap-1.5 rounded-md px-2 py-1",
+  "inline-flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1",
   "text-[var(--ink-1)] transition-colors hover:bg-[var(--bg-2)] hover:text-[var(--ink-0)]",
   "[&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:opacity-70"
 );
@@ -44,6 +44,7 @@ export function Breadcrumbs({
   const hasProject = typeof projectName === "string" && projectName.length > 0;
   const hasBranch = typeof branch === "string" && branch.length > 0;
   const hasRun = typeof runId === "string" && runId.length > 0;
+  const runLabel = hasRun ? shortRunId(runId as string) : "";
 
   // すべて欠落していれば表示しない (Phase 1 はプロジェクト未オープンの状態が普通)
   if (!hasProject && !hasBranch && !hasRun) return null;
@@ -78,11 +79,11 @@ export function Breadcrumbs({
       {(hasProject || hasBranch) && hasRun ? <Divider /> : null}
 
       {hasRun ? (
-        <span className={cn(itemBase, "gap-2")}>
+        <span className={cn(itemBase, "gap-2")} title={runId as string}>
           <Clock aria-hidden />
-          <span>Run #{runId}</span>
+          <span className="truncate">Run #{runLabel}</span>
           {runStatus ? (
-            <Badge variant={runStatusBadgeVariant(runStatus)} className="ml-1">
+            <Badge variant={runStatusBadgeVariant(runStatus)} className="ml-1 shrink-0">
               {runStatusLabel(runStatus)}
             </Badge>
           ) : null}
@@ -90,4 +91,9 @@ export function Breadcrumbs({
       ) : null}
     </nav>
   );
+}
+
+function shortRunId(runId: string): string {
+  if (runId.length <= 14) return runId;
+  return `${runId.slice(0, 8)}..${runId.slice(-4)}`;
 }

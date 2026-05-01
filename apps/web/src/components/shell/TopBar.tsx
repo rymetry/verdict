@@ -60,7 +60,7 @@ export function TopBar({
       aria-label="Workbench top bar"
       className={cn(
         // sticky で常時表示。z-index は overlay より下、modal より上の中間層 (50)。
-        "sticky top-0 z-50 grid grid-cols-[auto_1fr_auto] items-center gap-5 border-b border-[var(--line)] px-6 py-3",
+        "sticky top-0 z-50 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-5 border-b border-[var(--line)] px-6 py-3",
         // 半透明 + backdrop-blur でデザインモック準拠 (var(--bg-overlay) は light/dark 両モード定義済)
         "bg-[var(--bg-overlay)] backdrop-blur-md",
         className
@@ -75,7 +75,7 @@ export function TopBar({
         runStatus={activeRunStatus}
       />
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <PersonaToggle value={persona} />
         <RerunButton onRerun={onRerun} canRerun={canRerun} isRunning={isRunning} />
         <ThemeToggle value={theme} onValueChange={onThemeChange} />

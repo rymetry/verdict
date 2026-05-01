@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import * as fs from "node:fs";
 import { type FailedTest, type TestResultSummary } from "@pwqa/shared";
 
 interface PwJsonAttachment {
@@ -121,12 +122,18 @@ export function summarizePlaywrightJson(
         const failingResultEntry = failingResult(test);
         if (!failingResultEntry) continue;
         const file = spec.file ?? suiteFile;
+        const absoluteFilePath = resolveSpecFilePath(file, projectRoot);
+        const relativeFilePath = absoluteFilePath
+          ? normalizeRelativePath(path.relative(projectRoot, absoluteFilePath))
+          : undefined;
         const error = failingResultEntry.error ?? failingResultEntry.errors?.[0];
         failedTests.push({
           testId: test.id,
           title: spec.title,
           fullTitle: [...describePath, spec.title].join(" > "),
-          filePath: file ? (path.isAbsolute(file) ? file : path.join(projectRoot, file)) : undefined,
+          filePath: absoluteFilePath,
+          relativeFilePath,
+          absoluteFilePath,
           line: spec.line,
           column: spec.column,
           status: test.status,
@@ -144,6 +151,8 @@ export function summarizePlaywrightJson(
             .map((attachment) => ({
               kind: attachmentKind(attachment.name, attachment.contentType),
               path: attachment.path!,
+              relativePath: normalizeRelativePath(attachment.path!),
+              absolutePath: path.isAbsolute(attachment.path!) ? attachment.path! : undefined,
               label: attachment.name
             }))
         });
@@ -166,4 +175,20 @@ export function summarizePlaywrightJson(
     },
     warnings
   };
+}
+
+function normalizeRelativePath(value: string): string {
+  return value.split(/[\\/]+/).join("/");
+}
+
+function resolveSpecFilePath(file: string | undefined, projectRoot: string): string | undefined {
+  if (!file) return undefined;
+  if (path.isAbsolute(file)) return file;
+  const direct = path.join(projectRoot, file);
+  if (fs.existsSync(direct)) return direct;
+  if (!file.includes("/") && !file.includes("\\")) {
+    const underTests = path.join(projectRoot, "tests", file);
+    if (fs.existsSync(underTests)) return underTests;
+  }
+  return direct;
 }

@@ -122,6 +122,22 @@ describe("buildQmoSummary outcome derivation", () => {
     ).toBe("not-ready");
   });
 
+  it("keeps advisory local-review QG failures from driving release outcome", () => {
+    const qg: QualityGateResult = {
+      status: "failed",
+      profile: "local-review",
+      enforcement: "advisory",
+      evaluatedAt: "2026-04-29T00:01:30Z",
+      exitCode: 1,
+      stdout: "",
+      stderr: "violated",
+      warnings: []
+    };
+    expect(
+      buildQmoSummary({ runMetadata: makeMetadata(), qualityGateResult: qg }).outcome
+    ).toBe("ready");
+  });
+
   it("returns 'not-ready' when QG errored", () => {
     const qg: QualityGateResult = {
       status: "error",
@@ -203,7 +219,7 @@ describe("renderQmoSummaryMarkdown", () => {
     expect(md).toContain("# QMO Release Readiness Summary");
     expect(md).toContain("**Outcome**: `ready`");
     expect(md).toContain("**Run**: `run-1`");
-    expect(md).toContain("**Project**: `/p`");
+    expect(md).toContain("**Project**: `p`");
     expect(md).toContain("## Test Summary");
     expect(md).toContain("## Quality Gate");
     expect(md).toContain("_Quality gate not evaluated for this run._");
@@ -240,6 +256,31 @@ describe("renderQmoSummaryMarkdown", () => {
     expect(text).toContain("[failed]");
     expect(text).toContain("suite > broken");
     expect(text).toContain("[broken]");
+  });
+
+  it("renders Windows-style absolute failure paths as project-relative paths", () => {
+    const metadata = makeMetadata({
+      projectId: "C:\\repo",
+      projectRoot: "C:\\repo",
+      summary: {
+        total: 1,
+        passed: 0,
+        failed: 1,
+        skipped: 0,
+        flaky: 0,
+        failedTests: [
+          {
+            title: "broken",
+            status: "failed",
+            filePath: "C:\\repo\\tests\\checkout.spec.ts",
+            attachments: []
+          }
+        ]
+      }
+    });
+    const text = renderQmoSummaryMarkdown(buildQmoSummary({ runMetadata: metadata }));
+    expect(text).toContain("tests/checkout.spec.ts");
+    expect(text).not.toContain("C:\\repo");
   });
 
   it("renders the QG section when present", () => {

@@ -20,6 +20,7 @@ import {
   INSIGHTS_VIEW_LABELS,
   DEFERRED_PLACEHOLDER_LABEL,
   type AllureSummaryRow,
+  type QualityGateEnforcement,
   type QualityGateRule,
   type QualityGateStatus,
   type RecentRun
@@ -27,6 +28,7 @@ import {
 
 interface SidebarPanelsProps {
   readonly qualityGateStatus: QualityGateStatus;
+  readonly qualityGateEnforcement?: QualityGateEnforcement;
   readonly qualityGate: ReadonlyArray<QualityGateRule>;
   readonly allureSummary: ReadonlyArray<AllureSummaryRow>;
   readonly recentRuns: ReadonlyArray<RecentRun>;
@@ -92,12 +94,14 @@ function RuleRow({
 
 function QualityGateCard({
   status,
+  enforcement,
   rules
 }: {
   status: QualityGateStatus;
+  enforcement?: QualityGateEnforcement;
   rules: ReadonlyArray<QualityGateRule>;
 }): React.ReactElement {
-  const badge = qualityGateBadge(status, rules);
+  const badge = qualityGateBadge(status, rules, enforcement);
   return (
     <Card data-testid="insights-quality-gate-card">
       <CardHeader className="pb-2">
@@ -111,6 +115,11 @@ function QualityGateCard({
       <CardContent className="px-0">
         {rules.length > 0 ? (
           <div className="divide-y divide-[var(--line)]">
+            <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+              <span>Rule</span>
+              <span>Threshold</span>
+              <span>Actual</span>
+            </div>
             {rules.map((rule) => (
               <RuleRow
                 key={rule.name}
@@ -135,8 +144,12 @@ function QualityGateCard({
 
 function qualityGateBadge(
   status: QualityGateStatus,
-  rules: ReadonlyArray<QualityGateRule>
+  rules: ReadonlyArray<QualityGateRule>,
+  enforcement?: QualityGateEnforcement
 ): { label: string; variant: BadgeProps["variant"] } {
+  if (enforcement === "advisory" && status !== "not-evaluated") {
+    return { label: "Evaluated · Advisory", variant: "flaky" };
+  }
   if (status === "not-evaluated") return { label: "Not evaluated", variant: "default" };
   if (status === "passed") return { label: "Passed", variant: "pass" };
   if (status === "failed") return { label: "Failed", variant: "fail" };
@@ -180,6 +193,13 @@ function AllureSummaryPanel({
       </CardHeader>
       <CardContent className="px-0">
         <div className="divide-y divide-[var(--line)]">
+          {rows.length > 0 ? (
+            <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+              <span>Metric</span>
+              <span>Previous</span>
+              <span>Current</span>
+            </div>
+          ) : null}
           {rows.map((row) => (
             <RuleRow
               key={row.name}
@@ -228,6 +248,7 @@ function RecentRunsPanel({
         </CardTitle>
       </CardHeader>
       <CardContent>
+        {runs.length > 0 ? (
         <ul className="flex flex-col divide-y divide-[var(--line)]">
           {runs.map((run) => (
             <li
@@ -249,6 +270,9 @@ function RecentRunsPanel({
             </li>
           ))}
         </ul>
+        ) : (
+          <p className="text-xs text-[var(--ink-3)]">No recent runs.</p>
+        )}
       </CardContent>
     </Card>
   );
@@ -256,6 +280,7 @@ function RecentRunsPanel({
 
 export function SidebarPanels({
   qualityGateStatus,
+  qualityGateEnforcement,
   qualityGate,
   allureSummary,
   recentRuns
@@ -266,7 +291,11 @@ export function SidebarPanels({
       data-testid="insights-sidebar"
       className="flex flex-col gap-4"
     >
-      <QualityGateCard status={qualityGateStatus} rules={qualityGate} />
+      <QualityGateCard
+        status={qualityGateStatus}
+        enforcement={qualityGateEnforcement}
+        rules={qualityGate}
+      />
       <AllureSummaryPanel rows={allureSummary} />
       <RecentRunsPanel runs={recentRuns} />
     </aside>

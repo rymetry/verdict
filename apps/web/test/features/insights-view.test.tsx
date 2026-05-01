@@ -59,15 +59,14 @@ describe("InsightsView (composer)", () => {
     expect(h3s).toHaveLength(7);
   });
 
-  it("Phase 5+ で接続予定 badge が 3 つ visible で存在する (Known / Flaky / AI のみ)", () => {
-    // §1.2 で Hero / Critical Failures は実データ wire 済のため badge 撤去。
-    // 残るのは Known Issues (1) + Top Flaky (1) + AI (1) = 3。
+  it("接続済み card に Phase 5+ badge が visible 表示されない", () => {
+    // Release-blocker 対応で Known Issues / Top Flaky / AI summary も
+    // 実データ由来の表示に切り替えたため、card header の visible badge は残さない。
     // sidebar (Allure / RecentRuns) の同 label は Tooltip content として
     // portal 経由で開いた時のみ DOM に現れるため、本 visible-only assertion からは外れる。
     // 個別の sidebar tooltip 動作は SidebarPanels describe ブロックで pin する。
     render(<InsightsView summary={SAMPLE_INSIGHTS} />);
-    const badges = screen.getAllByText(DEFERRED_PLACEHOLDER_LABEL);
-    expect(badges).toHaveLength(3);
+    expect(screen.queryByText(DEFERRED_PLACEHOLDER_LABEL)).not.toBeInTheDocument();
   });
 });
 
@@ -328,6 +327,23 @@ describe("SidebarPanels", () => {
     );
     const card = screen.getByTestId("insights-quality-gate-card");
     expect(within(card).getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("local-review advisory のとき Failed ではなく advisory badge を表示する", () => {
+    renderWithTooltip(
+      <SidebarPanels
+        qualityGateStatus="failed"
+        qualityGateEnforcement="advisory"
+        qualityGate={[
+          { name: "Max failures", threshold: "<= 0", actual: "1", status: "fail" }
+        ]}
+        allureSummary={SAMPLE_INSIGHTS.allureSummary}
+        recentRuns={SAMPLE_INSIGHTS.recentRuns}
+      />
+    );
+    const card = screen.getByTestId("insights-quality-gate-card");
+    expect(within(card).getByText("Evaluated · Advisory")).toBeInTheDocument();
+    expect(within(card).queryByText("Failed")).not.toBeInTheDocument();
   });
 
   it("未評価で rule が空のとき Passed を表示しない", () => {

@@ -170,6 +170,7 @@ export function MainCardsRow({
         title={INSIGHTS_VIEW_LABELS.knownIssues}
         count={knownIssues.length}
         showAllId="insights-known-show-all"
+        connected
       >
         {knownIssues.map((item) => (
           <KnownIssueRow key={item.id} item={item} />
@@ -181,6 +182,7 @@ export function MainCardsRow({
         title={INSIGHTS_VIEW_LABELS.topFlaky}
         count={topFlaky.length}
         showAllId="insights-flaky-show-all"
+        connected
       >
         {topFlaky.map((item) => (
           <FlakyRow key={item.id} item={item} />

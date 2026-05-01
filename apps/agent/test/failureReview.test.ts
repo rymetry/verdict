@@ -97,6 +97,23 @@ describe("buildFailureReview", () => {
     const review = await buildFailureReview({ run, projectRoot: workdir });
     expect(review.warnings.some((warning) => warning.includes("Known issues file"))).toBe(true);
   });
+
+  it("returns project-relative paths for Windows-style failed test paths", async () => {
+    const run = makeRun("r4");
+    run.projectId = "C:\\repo";
+    run.projectRoot = "C:\\repo";
+    run.summary!.failedTests[0] = {
+      ...run.summary!.failedTests[0]!,
+      filePath: "C:\\repo\\tests\\checkout.spec.ts",
+      absoluteFilePath: "C:\\repo\\tests\\checkout.spec.ts"
+    };
+
+    const review = await buildFailureReview({ run, projectRoot: "C:\\repo" });
+
+    expect(review.failedTests[0]?.test.filePath).toBe("tests/checkout.spec.ts");
+    expect(review.failedTests[0]?.test.relativeFilePath).toBe("tests/checkout.spec.ts");
+    expect(review.failedTests[0]?.test.absoluteFilePath).toBeUndefined();
+  });
 });
 
 function makeRun(runId: string): RunMetadata {
