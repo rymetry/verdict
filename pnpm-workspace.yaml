@@ -2,4 +2,4 @@ packages:
   - apps/*
   - packages/*
   - tests/fixtures/*
-  - tests/smoke
+  - e2e

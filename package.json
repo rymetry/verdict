@@ -11,8 +11,10 @@
     "build": "pnpm --filter '@pwqa/*' build",
     "typecheck": "pnpm --filter @pwqa/shared build && pnpm --filter '@pwqa/*' typecheck && pnpm --filter @pwqa/agent typecheck:test",
     "test": "pnpm --filter '@pwqa/*' test",
-    "smoke:gui": "pnpm --filter @pwqa-smoke/workbench-gui smoke",
-    "smoke:gui:allure": "pnpm --filter @pwqa-smoke/workbench-gui smoke:allure"
+    "e2e": "pnpm --filter @pwqa-e2e/workbench-gui e2e",
+    "e2e:allure": "pnpm --filter @pwqa-e2e/workbench-gui e2e:allure",
+    "smoke:gui": "pnpm --filter @pwqa-e2e/workbench-gui smoke",
+    "smoke:gui:allure": "pnpm --filter @pwqa-e2e/workbench-gui smoke:allure"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

@@ -55,8 +55,8 @@ jobs:
       - name: build
         run: pnpm build
 
-  gui-smoke:
-    name: gui smoke (node 24)
+  gui-e2e:
+    name: gui e2e (node 24)
     runs-on: ubuntu-latest
     needs: verify
     steps:
@@ -79,7 +79,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Chromium
-        run: pnpm --filter @pwqa-smoke/workbench-gui exec playwright install chromium --with-deps
+        run: pnpm --filter @pwqa-e2e/workbench-gui exec playwright install chromium --with-deps
 
       - name: Start local workbench
         env:
@@ -101,31 +101,31 @@ jobs:
           echo "::endgroup::"
           exit 1
 
-      - name: GUI smoke
+      - name: GUI E2E
         env:
           WORKBENCH_URL: http://127.0.0.1:5173
           FIXTURE_ROOT: ${{ github.workspace }}/tests/fixtures/sample-pw-project
-        run: pnpm smoke:gui
+        run: pnpm e2e
 
       # §1.2 E2E: drive the full Phase 1.2 Allure pipeline end-to-end
       # against the sample-pw-allure-project fixture (open project →
       # inventory → run → wait for QMO summary outcome). Verifies that
       # the workbench actually works against an Allure-enabled project
       # in this repo (the "ワークベンチ動作確認" the user asked for).
-      - name: GUI smoke (Allure pipeline)
+      - name: GUI E2E (Allure pipeline)
         env:
           WORKBENCH_URL: http://127.0.0.1:5173
           ALLURE_FIXTURE_ROOT: ${{ github.workspace }}/tests/fixtures/sample-pw-allure-project
-        run: pnpm --filter @pwqa-smoke/workbench-gui exec playwright test workbench-allure.smoke.spec.ts
+        run: pnpm e2e:allure
 
-      - name: Upload GUI smoke artifacts
+      - name: Upload GUI E2E artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gui-smoke-artifacts
+          name: gui-e2e-artifacts
           path: |
-            tests/smoke/_artifacts
-            tests/smoke/test-results
+            e2e/_artifacts
+            e2e/test-results
             /tmp/playwright-workbench-agent.log
             /tmp/playwright-workbench-web.log
           if-no-files-found: ignore

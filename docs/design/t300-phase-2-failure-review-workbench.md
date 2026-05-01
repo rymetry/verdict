@@ -41,7 +41,7 @@ PLAN.v2 §31/§32 の Phase 2 成功条件「失敗testごとにstack、artifact
 - 要件: Phase 2 の stack / artifact / Allure history / known issue / flaky signal が同じ失敗 test row で確認できる。
 - セキュリティ: 新 API は既存 run metadata と Workbench 管理下 artifacts の read のみ。任意 command 実行、path traversal、外部送信は追加しない。
 - 運用: Allure side file 欠落や malformed known-issues は warning 化し、基本の failure review を表示し続ける。
-- 検証: `pnpm test`, `pnpm typecheck`, `pnpm build`, `pnpm smoke:gui` 合格。
+- 検証: `pnpm test`, `pnpm typecheck`, `pnpm build`, `pnpm e2e` 合格。
 
 ## 想定外の判断ポイント
 

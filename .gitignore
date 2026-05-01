@@ -38,9 +38,9 @@ coverage/
 .playwright-workbench/
 
 # Smoke spec artifacts (run output, captured screenshots)
-tests/smoke/_artifacts/
-tests/smoke/test-results/
-tests/smoke/playwright-report/
+e2e/_artifacts/
+e2e/test-results/
+e2e/playwright-report/
 
 # Design iteration scratch (Playwright MCP snapshots, iteration screenshots)
 # モックアップを更新する際の作業ファイルはここに置く: docs/design/_scratch/

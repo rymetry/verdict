@@ -1,5 +1,5 @@
 /**
- * §1.2 Phase 1.2 GUI smoke against the Allure fixture.
+ * §1.2 Phase 1.2 GUI E2E against the Allure fixture.
  *
  * Drives the Workbench through the full Phase 1 + 1.2 pipeline against
  * `tests/fixtures/sample-pw-allure-project/` (allure-playwright reporter
@@ -27,7 +27,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_URL = process.env.WORKBENCH_URL ?? "http://127.0.0.1:5173";
 const FIXTURE =
   process.env.ALLURE_FIXTURE_ROOT ??
-  path.resolve(here, "../fixtures/sample-pw-allure-project");
+  path.resolve(here, "../tests/fixtures/sample-pw-allure-project");
 const ARTIFACT_DIR = path.resolve(here, "_artifacts");
 
 test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", async ({
@@ -54,7 +54,7 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
   });
   await expect(page.getByText(/passes a trivial assertion/)).toBeVisible();
   await page.screenshot({
-    path: path.join(ARTIFACT_DIR, "allure-smoke-after-open.png"),
+    path: path.join(ARTIFACT_DIR, "allure-e2e-after-open.png"),
     fullPage: true,
   });
 
@@ -166,7 +166,7 @@ test("Workbench GUI: full Allure pipeline against sample-pw-allure-project", asy
   await expect(outcome).toHaveText(/Not Ready/);
   await expect(page.getByTestId("qmo-summary-banner-allure-report-link")).toBeVisible();
   await page.screenshot({
-    path: path.join(ARTIFACT_DIR, "allure-smoke-after-run.png"),
+    path: path.join(ARTIFACT_DIR, "allure-e2e-after-run.png"),
     fullPage: true,
   });
 
