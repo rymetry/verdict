@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import {
   QmoSummarySchema,
   RunRequestSchema,
+  FailureReviewResponseSchema,
   type RunListItem,
   type RunListResponse,
   type RunMetadata
@@ -17,6 +18,7 @@ import { pathExists } from "../lib/pathExists.js";
 import { CommandPolicyError } from "../commands/runner.js";
 import { PlaywrightCommandBuildError } from "../playwright/builder.js";
 import { AuditPersistenceError } from "../lib/errors.js";
+import { buildFailureReview } from "../reporting/failureReview.js";
 
 /**
  * Maps startup failures to stable public codes. Structured logs use the
@@ -164,6 +166,33 @@ export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
       status: run.status,
       completedAt: run.completedAt
     });
+  });
+
+  router.get("/runs/:runId/failure-review", async (c) => {
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    try {
+      const review = await buildFailureReview({
+        run: result.run,
+        projectRoot: result.run.projectRoot
+      });
+      return c.json(FailureReviewResponseSchema.parse(review));
+    } catch (error) {
+      logger?.error(
+        {
+          runId: result.run.runId,
+          artifactKind: "metadata",
+          ...errorLogFields(error)
+        },
+        "failure-review read failed"
+      );
+      return apiError(
+        c,
+        "FAILURE_REVIEW_READ_FAILED",
+        "Failure review data could not be derived for this run.",
+        500
+      );
+    }
   });
 
   /**

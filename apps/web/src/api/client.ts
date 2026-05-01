@@ -1,5 +1,6 @@
 import {
   AllureHistoryResponseSchema,
+  FailureReviewResponseSchema,
   HealthResponseSchema,
   ProjectSummarySchema,
   QmoSummarySchema,
@@ -8,6 +9,7 @@ import {
   TestInventorySchema,
   type AllureHistoryResponse,
   type ApiError,
+  type FailureReviewResponse,
   type HealthResponse,
   type ProjectSummary,
   type QmoSummary,
@@ -91,6 +93,12 @@ export async function fetchRun(runId: string): Promise<RunMetadata> {
   const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}`);
   const body = await parseJson<unknown>(response);
   return RunMetadataSchema.parse(body);
+}
+
+export async function fetchFailureReview(runId: string): Promise<FailureReviewResponse> {
+  const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/failure-review`);
+  const body = await parseJson<unknown>(response);
+  return FailureReviewResponseSchema.parse(body);
 }
 
 export async function cancelRun(runId: string): Promise<void> {

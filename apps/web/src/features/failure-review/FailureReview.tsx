@@ -13,9 +13,9 @@
 import * as React from "react";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { FailedTest } from "@pwqa/shared";
+import type { FailureReviewTest } from "@pwqa/shared";
 
-import { fetchRun } from "@/api/client";
+import { fetchFailureReview } from "@/api/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,7 +37,7 @@ export function FailureReview({ runId }: FailureReviewProps): React.ReactElement
         console.error("[FailureReview] queryFn called with invalid runId");
         throw new Error("FailureReview: runId が不正なまま queryFn が呼ばれた");
       }
-      return fetchRun(runId);
+      return fetchFailureReview(runId);
     },
     enabled: typeof runId === "string" && runId.length > 0,
     refetchInterval: (query) => {
@@ -74,8 +74,8 @@ export function FailureReview({ runId }: FailureReviewProps): React.ReactElement
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span>Failure review</span>
-          {runQuery.data?.summary?.failedTests?.length ? (
-            <Badge variant="fail">{runQuery.data.summary.failedTests.length} failed</Badge>
+          {runQuery.data?.failedTests?.length ? (
+            <Badge variant="fail">{runQuery.data.failedTests.length} failed</Badge>
           ) : null}
         </CardTitle>
       </CardHeader>
@@ -92,15 +92,11 @@ export function FailureReview({ runId }: FailureReviewProps): React.ReactElement
         ) : (
           <>
             <RunWarningsAlert warnings={runQuery.data?.warnings ?? []} />
-            {runQuery.data?.summary?.failedTests?.length ? (
-              <FailedTestList failedTests={runQuery.data.summary.failedTests} />
+            {runQuery.data?.failedTests?.length ? (
+              <FailedTestList failedTests={runQuery.data.failedTests} />
             ) : (
               <p className="mt-3 text-sm text-[var(--ink-3)]">
-                {runQuery.data?.status === "passed"
-                  ? "全テストが成功しました。"
-                  : runQuery.data?.summary
-                    ? "このランに失敗テストはありません。"
-                    : "Run の完了を待機中…"}
+                {emptyFailureReviewMessage(runQuery.data?.status)}
               </p>
             )}
           </>
@@ -110,17 +106,33 @@ export function FailureReview({ runId }: FailureReviewProps): React.ReactElement
   );
 }
 
-function FailedTestList({ failedTests }: { failedTests: FailedTest[] }): React.ReactElement {
+function emptyFailureReviewMessage(status: string | undefined): string {
+  if (status === "passed") return "全テストが成功しました。";
+  if (status === "running" || status === "queued" || status === undefined) {
+    return "Run の完了を待機中…";
+  }
+  return "このランに失敗テストはありません。";
+}
+
+function FailedTestList({
+  failedTests
+}: {
+  failedTests: FailureReviewTest[];
+}): React.ReactElement {
   return (
     <ul className="flex flex-col gap-4">
-      {failedTests.map((test, index) => (
-        <FailedTestRow key={`${test.testId ?? test.fullTitle ?? test.title}-${index}`} test={test} />
+      {failedTests.map((entry, index) => (
+        <FailedTestRow
+          key={`${entry.test.testId ?? entry.test.fullTitle ?? entry.test.title}-${index}`}
+          entry={entry}
+        />
       ))}
     </ul>
   );
 }
 
-function FailedTestRow({ test }: { test: FailedTest }): React.ReactElement {
+function FailedTestRow({ entry }: { entry: FailureReviewTest }): React.ReactElement {
+  const { test } = entry;
   return (
     <li className="flex flex-col gap-2 rounded-md border border-[var(--line-faint)] bg-[var(--bg-1)] p-3">
       <div>
@@ -149,7 +161,7 @@ function FailedTestRow({ test }: { test: FailedTest }): React.ReactElement {
         </details>
       ) : null}
       {test.attachments.length > 0 ? (
-        <ul className="flex flex-col gap-1.5">
+        <ul className="flex flex-col gap-1.5" aria-label="Artifacts">
           {test.attachments.map((attachment) => (
             <li key={attachment.path} className="flex flex-wrap items-center gap-2 text-xs">
               <Badge variant="default">{attachment.kind}</Badge>
@@ -161,6 +173,86 @@ function FailedTestRow({ test }: { test: FailedTest }): React.ReactElement {
           ))}
         </ul>
       ) : null}
+      <FailureSignals entry={entry} />
     </li>
+  );
+}
+
+function FailureSignals({ entry }: { entry: FailureReviewTest }): React.ReactElement {
+  return (
+    <div className="grid grid-cols-1 gap-2 border-t border-[var(--line-faint)] pt-2 text-xs md:grid-cols-3">
+      <SignalPanel title="Allure history">
+        {entry.history.length > 0 ? (
+          <ol className="flex flex-col gap-1">
+            {entry.history.slice(-4).map((history) => (
+              <li
+                key={`${history.generatedAt}-${history.status}`}
+                className="flex items-center justify-between gap-2"
+              >
+                <span className="font-mono text-[11px] text-[var(--ink-3)]">
+                  {history.generatedAt.replace("T", " ").slice(0, 16)}
+                </span>
+                <Badge variant={history.status === "passed" ? "pass" : "fail"}>
+                  {history.status}
+                </Badge>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="m-0 text-[var(--ink-3)]">No per-test history</p>
+        )}
+      </SignalPanel>
+      <SignalPanel title="Known issue">
+        {entry.knownIssues.length > 0 ? (
+          <ul className="flex flex-col gap-1">
+            {entry.knownIssues.map((issue) => (
+              <li key={issue.id} className="flex flex-col gap-0.5">
+                <span className="font-medium text-[var(--ink-1)]">
+                  {issue.title ?? issue.id}
+                </span>
+                {issue.status ? (
+                  <span className="font-mono text-[11px] text-[var(--ink-3)]">
+                    {issue.status}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="m-0 text-[var(--ink-3)]">No known issue match</p>
+        )}
+      </SignalPanel>
+      <SignalPanel title="Flaky signal">
+        {entry.flaky.recentStatuses.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <Badge variant={entry.flaky.isCandidate ? "flaky" : "default"}>
+              {entry.flaky.isCandidate ? "flaky candidate" : "stable pattern"}
+            </Badge>
+            <span className="font-mono text-[11px] text-[var(--ink-3)]">
+              pass {entry.flaky.passedRuns} / fail {entry.flaky.failedRuns + entry.flaky.brokenRuns}
+            </span>
+          </div>
+        ) : (
+          <p className="m-0 text-[var(--ink-3)]">No history signal</p>
+        )}
+      </SignalPanel>
+    </div>
+  );
+}
+
+function SignalPanel({
+  title,
+  children
+}: {
+  title: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <section className="min-w-0 rounded-sm border border-[var(--line-faint)] bg-[var(--bg-0)] p-2">
+      <h4 className="m-0 mb-1 text-[11px] font-semibold uppercase text-[var(--ink-3)]">
+        {title}
+      </h4>
+      {children}
+    </section>
   );
 }
