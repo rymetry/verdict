@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AiAnalysisContextSchema,
+  AiAnalysisOutputSchema,
   RunCompletedPayloadSchema,
   RunCancelledPayloadSchema,
   RunErrorPayloadSchema,
@@ -263,5 +265,53 @@ describe("shared run warning schemas", () => {
         payload: { chunk: "hello" }
       })
     ).toThrow();
+  });
+});
+
+describe("shared AI analysis schemas", () => {
+  it("accepts the minimal redacted AI analysis context", () => {
+    const parsed = AiAnalysisContextSchema.parse({
+      runId: "run-1",
+      projectId: "project-1",
+      generatedAt: "2026-05-01T00:00:00.000Z",
+      status: "failed",
+      command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+      requested: { projectId: "project-1", headed: false },
+      failures: [
+        {
+          title: "checkout fails",
+          status: "failed",
+          attachments: [],
+          history: [],
+          knownIssues: [],
+          flaky: {
+            isCandidate: false,
+            passedRuns: 0,
+            failedRuns: 0,
+            brokenRuns: 0,
+            skippedRuns: 0,
+            recentStatuses: []
+          }
+        }
+      ],
+      logs: [{ stream: "stderr", text: "expected error", truncated: false, redactions: 0 }],
+      warnings: []
+    });
+
+    expect(parsed.failures[0]?.title).toBe("checkout fails");
+  });
+
+  it("validates AI analysis output for the adapter boundary", () => {
+    expect(
+      AiAnalysisOutputSchema.parse({
+        classification: "test-bug",
+        rootCause: "Assertion no longer matches the product text.",
+        evidence: ["stderr shows the assertion failure"],
+        risk: ["Patch touches one spec file"],
+        filesTouched: ["tests/example.spec.ts"],
+        confidence: 0.72,
+        requiresHumanDecision: true
+      }).classification
+    ).toBe("test-bug");
   });
 });
