@@ -533,8 +533,8 @@ Provide a migration tool (`workbench migrate`) at Phase 1.5-δ.
 ### 6.2 Adoption to existing projects
 
 ```bash
-# Initialize via the Workbench Agent CLI
-npx playwright-workbench init
+# Initialize via the Verdict Agent CLI (currently shipped as `playwright-workbench`; will migrate alongside the brand rename)
+npx verdict init  # alias of: npx playwright-workbench init
 # → generates .workbench/ skeleton + sample AGENTS.md / rules / skills
 # → suggests .gitignore changes
 # → scans existing specs for rule violations

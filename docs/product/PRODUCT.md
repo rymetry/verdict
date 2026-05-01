@@ -1,9 +1,10 @@
-# Playwright Workbench — Product Vision
+# Verdict — Product Vision
 
 > **AI ネイティブなソフトウェア品質統合プラットフォーム。**
 > テストを「コードを書ける人の専門技能」から「組織全体の共通知」へ民主化する、自社設置可能な OSS 基盤。
 
 **Status**: Draft v3 (2026-05) / **Audience**: design partner / 実装担当 (Codex 等) / 社内意思決定
+**License**: Apache 2.0 / **Repo**: `rymetry/verdict` (旧名 `playwright-workbench`、Phase 1 までの実装根拠は PLAN.v2 として残置)
 
 ---
 
@@ -46,7 +47,7 @@
 - Web SaaS スタートアップ後期の QA チーム (商用ツールが高すぎる)
 
 ### Phase 2-3 拡張先 (12-36 ヶ月)
-- Playwright だけでなく Cypress / TestCafe
+- 複数 Quality Signal source 統合 (探索的 / visual / a11y / load 等)
 - E2E だけでなく unit / integration / load / accessibility / security
 - 単発 run だけでなく continuous exploration
 
@@ -145,7 +146,7 @@
 
 ## 10. 配布モデル
 
-- **Workbench Agent**: `npx playwright-workbench --project <path>` で起動。npm package。Phase 1 で完成済
+- **Verdict Agent**: `npx verdict --project <path>` で起動 (現状 Phase 1 では `playwright-workbench` バイナリ名、ブランド rename と同期して移行予定)。npm package。Phase 1 で完成済
 - **Workbench Server** (Phase 2-3 で導入): k8s / docker compose で自社設置。PostgreSQL + S3 互換ストレージ。RBAC / audit log / multi-user comment 対応
 - **Workbench Cloud SaaS**: 提供しない (少なくとも当面)。SaaS が wedge と矛盾するため
 

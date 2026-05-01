@@ -1,9 +1,10 @@
-# Playwright Workbench — Product Vision
+# Verdict — Product Vision
 
 > **An AI-native software quality integration platform.**
 > A self-hostable OSS foundation that turns testing from "a specialist skill held by code-readers" into "shared organizational knowledge."
 
 **Status**: Draft v3 (2026-05) / **Audience**: design partners / implementation agents (Codex etc.) / internal decision-makers
+**License**: Apache 2.0 / **Repo**: `rymetry/verdict` (formerly `playwright-workbench`; Phase 1 implementation is referenced in PLAN.v2)
 
 ---
 
@@ -46,7 +47,7 @@ Concrete personas:
 - Late-stage SaaS startups whose QA teams find commercial tools too expensive
 
 ### Phase 2-3 expansion (12-36 months)
-- Beyond Playwright: Cypress / TestCafe support
+- Multiple Quality Signal source integrations (exploratory / visual / a11y / load, etc.)
 - Beyond E2E: unit / integration / load / accessibility / security
 - Beyond single runs: continuous exploration
 
@@ -145,7 +146,7 @@ Details: see [`PLAN.v3.en.md`](PLAN.v3.en.md).
 
 ## 10. Distribution
 
-- **Workbench Agent**: `npx playwright-workbench --project <path>` to start. Distributed as an npm package. Completed in Phase 1.
+- **Verdict Agent**: starts via `npx verdict --project <path>` (currently shipped as the `playwright-workbench` binary in Phase 1; will migrate alongside the brand rename). Distributed as an npm package. Completed in Phase 1.
 - **Workbench Server** (introduced in Phase 2-3): self-hosted via k8s / docker compose. PostgreSQL + S3-compatible storage. Adds RBAC, audit log, multi-user comments.
 - **Workbench Cloud SaaS**: not provided (at least for the foreseeable future). SaaS would contradict the wedge.
 

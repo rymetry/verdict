@@ -71,7 +71,7 @@ PLAN.v2 で構築した実装基盤に、**`.workbench/` directory + 多段 AI p
 | T1500-7 | Conversational Clarification UI | `apps/web/src/features/test-plan-review/` (新規) |
 | T1500-8 | Code Generation 強化 (rule/skill/hook context 注入) | 既存 `apps/agent/src/ai/cliAdapter.ts` の拡張 |
 | T1500-9 | Plan 駆動 Repair Review 統合 | 既存 `apps/agent/src/repair/` の拡張 |
-| T1500-10 | Community rule pack registry (OSS) | 別リポ `playwright-workbench-rules/` |
+| T1500-10 | Community rule pack registry (OSS) | 別リポ `verdict-rules/` (旧称 `playwright-workbench-rules/`) |
 
 ### 2.3 多段 pipeline の実装順序
 
@@ -107,7 +107,7 @@ Phase 1.5-δ (9-12 ヶ月) : エコシステム
 ### 2.5 Phase 1.5 で意図的に作らないもの
 
 - 探索的 testing agent (Phase 2 領域)
-- Cypress / TestCafe support (Playwright に集中)
+- ~~Cypress / TestCafe support~~ (削除: Playwright が新規開発のデファクト、runner 多様性は ROI 見合わず)
 - multi-user state / RBAC / Server (Phase 3 領域)
 - SaaS deploy (戦略的に永遠に作らない可能性)
 - Visual regression / accessibility scanner (Phase 2 で Quality Signal Bus 統合時)
@@ -142,7 +142,7 @@ Workbench を **「Playwright だけのツール」から「Quality 全体の統
 | T2000-6 | GitHub PR comment 自動投稿 | `release-review-draft` の出口、GitHub App 経由 |
 | T2000-7 | Slack / Teams alert (flaky / critical fail) | webhook 連携 |
 | T2000-8 | Sharable Bundle (zip + 静的 HTML) | Cloud server 不要で multi-role 共有を実現 |
-| T2000-9 | Cypress / TestCafe runner adapter | Playwright 以外の E2E runner 対応 |
+| ~~T2000-9~~ | ~~Cypress / TestCafe runner adapter~~ | **削除** — Phase 2 は Quality Signal の category 多様性 (visual / a11y / load / 探索) で実現する。Playwright が新規開発のデファクトを取った今、runner 多様性は ROI が見合わない |
 
 ### 3.3 Quality Signal Bus の構造
 
@@ -178,7 +178,7 @@ Workbench を **「Playwright だけのツール」から「Quality 全体の統
 - ✅ CI replay が 1 コマンドで動作し、design partner 環境で月 5 回以上利用される
 - ✅ Workbench bot による PR comment 自動投稿が標準運用に
 - ✅ Sharable Bundle により非エンジニア (PM / sales) が Workbench 結果を閲覧できた事例
-- ✅ Cypress / TestCafe ユーザーが 1 件以上 design partner に
+- ✅ Visual regression または accessibility スキャナの結果統合事例 1 件以上
 
 ### 3.5 Phase 2 のリスク
 
@@ -308,7 +308,7 @@ PLAN.v2 §32 に準拠。`pnpm test` 943 件 + `pnpm smoke:gui:allure` 全合格
 ### Phase 2
 - Quality Signal source 3 種以上を統合
 - CI replay が 1 コマンドで動作
-- Cypress / TestCafe どちらか 1 つ以上 adapter 提供
+- Visual regression / a11y / load のいずれか 1 つ以上を Quality Signal source として統合
 
 ### Phase 3
 - Server が helm install から 30 分以内に運用開始
@@ -324,7 +324,7 @@ PLAN.v2 §34 から繰越 + 新規:
 
 | # | 質問 | 解消予定 |
 |---|---|---|
-| OQ-1 | 配布パッケージ名 (`playwright-workbench` で確定?) | Phase 1.5-α |
+| OQ-1 | npm 配布パッケージ名 (`@verdict/cli` 等の scope 設計、CLI binary 名 `verdict` への移行スケジュール) | Phase 1.5-α |
 | OQ-2 | 探索 engine の primary 選択 (Stagehand vs Browser Use) | Phase 1.5-α 末で実機評価後決定 |
 | OQ-3 | rule pack registry の運用形態 (npm? GitHub Releases?) | Phase 1.5-δ |
 | OQ-4 | Conversation UI は sync (modal) か async (slack-like thread) か | Phase 1.5-γ design partner FB 後 |
