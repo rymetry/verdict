@@ -71,7 +71,7 @@ Layer the **`.workbench/` directory + multi-stage AI pipeline** on top of the Ph
 | T1500-7 | Conversational Clarification UI | `apps/web/src/features/test-plan-review/` (new) |
 | T1500-8 | Code generation hardening (rule/skill/hook context injection) | Existing `apps/agent/src/ai/cliAdapter.ts` extension |
 | T1500-9 | Plan-driven Repair Review integration | Existing `apps/agent/src/repair/` extension |
-| T1500-10 | Community rule pack registry (OSS) | Separate repo `playwright-workbench-rules/` |
+| T1500-10 | Community rule pack registry (OSS) | Separate repo `verdict-rules/` (formerly `playwright-workbench-rules/`) |
 
 ### 2.3 Implementation order
 
@@ -107,7 +107,7 @@ Phase 1.5-δ (9-12 months): Ecosystem
 ### 2.5 Deliberately NOT in Phase 1.5
 
 - Exploratory testing agents (Phase 2 territory)
-- Cypress / TestCafe support (focus on Playwright)
+- ~~Cypress / TestCafe support~~ (dropped: Playwright is the new-development default; runner diversity has poor ROI)
 - Multi-user state / RBAC / Server (Phase 3 territory)
 - SaaS deployment (possibly never)
 - Visual regression / accessibility scanner (Phase 2, when Quality Signal Bus arrives)
@@ -142,7 +142,7 @@ Take the first step from **"a Playwright-only tool"** toward **"a hub for integr
 | T2000-6 | Automated GitHub PR comment posting | Output of `release-review-draft` via GitHub App |
 | T2000-7 | Slack / Teams alert (flaky / critical fail) | Webhook integration |
 | T2000-8 | Sharable Bundle (zip + static HTML) | Multi-role sharing without a Cloud server |
-| T2000-9 | Cypress / TestCafe runner adapter | Support E2E runners beyond Playwright |
+| ~~T2000-9~~ | ~~Cypress / TestCafe runner adapter~~ | **Dropped** — Phase 2 achieves diversity through Quality Signal **categories** (visual / a11y / load / exploration) rather than runner adapters. Playwright dominates new development; runner diversity is poor ROI |
 
 ### 3.3 Quality Signal Bus structure
 
@@ -178,7 +178,7 @@ Take the first step from **"a Playwright-only tool"** toward **"a hub for integr
 - ✅ CI replay works in one command and is used ≥5 times/month in design-partner environments
 - ✅ Workbench-bot PR comments become standard practice
 - ✅ At least one case where non-engineers (PM / sales) viewed Workbench results via Sharable Bundle
-- ✅ At least one Cypress / TestCafe user joins as a design partner
+- ✅ At least one production case integrating a visual regression or accessibility scanner result
 
 ### 3.5 Phase 2 risks
 
@@ -308,7 +308,7 @@ Per PLAN.v2 §32. `pnpm test` 943 cases + `pnpm smoke:gui:allure` all pass. CI g
 ### Phase 2
 - ≥3 Quality Signal sources integrated
 - CI replay works in one command
-- ≥1 of Cypress / TestCafe adapter delivered
+- ≥1 of visual regression / a11y / load integrated as a Quality Signal source
 
 ### Phase 3
 - Server reaches operational state ≤30 min from helm install
@@ -324,7 +324,7 @@ Carried over from PLAN.v2 §34 plus new items:
 
 | # | Question | Target resolution |
 |---|---|---|
-| OQ-1 | Distribution package name (`playwright-workbench` final?) | Phase 1.5-α |
+| OQ-1 | npm distribution package name (`@verdict/cli` etc. scoped layout; migration timing for the `verdict` CLI binary) | Phase 1.5-α |
 | OQ-2 | Primary exploration engine (Stagehand vs Browser Use) | Decided after empirical evaluation at end of Phase 1.5-α |
 | OQ-3 | Rule pack registry format (npm? GitHub Releases?) | Phase 1.5-δ |
 | OQ-4 | Conversation UI: synchronous (modal) or asynchronous (slack-like thread) | After Phase 1.5-γ design-partner feedback |

@@ -1,5 +1,7 @@
 # `docs/product/` — Product Strategy Documents
 
+**Brand**: Verdict (formerly Playwright Workbench) · **License**: [Apache 2.0](../../LICENSE)
+
 製品戦略・ロードマップ・技術仕様の Source-of-Truth。
 Product strategy, roadmap, and technical-specification documents (source of truth).
 
