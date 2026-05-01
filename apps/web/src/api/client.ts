@@ -1,6 +1,7 @@
 import {
   AiAnalysisResponseSchema,
   AllureHistoryResponseSchema,
+  CiArtifactImportResponseSchema,
   FailureReviewResponseSchema,
   HealthResponseSchema,
   PatchApplyResponseSchema,
@@ -17,6 +18,8 @@ import {
   type AllureHistoryResponse,
   type ApiError,
   type AiAnalysisResponse,
+  type CiArtifactImportRequest,
+  type CiArtifactImportResponse,
   type FailureReviewResponse,
   type HealthResponse,
   type PatchApplyResponse,
@@ -219,6 +222,19 @@ export async function createReleaseReviewDraft(
   if (response.status === 409) return null;
   const body = await parseJson<unknown>(response);
   return ReleaseReviewDraftSchema.parse(body);
+}
+
+export async function importCiArtifacts(
+  runId: string,
+  request: CiArtifactImportRequest
+): Promise<CiArtifactImportResponse> {
+  const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/ci-artifacts/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request)
+  });
+  const body = await parseJson<unknown>(response);
+  return CiArtifactImportResponseSchema.parse(body);
 }
 
 /**

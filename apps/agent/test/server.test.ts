@@ -455,6 +455,72 @@ describe("HTTP API surface", () => {
     expect(body.error.code).toBe("NO_QMO_SUMMARY");
   });
 
+  it("imports CI artifact links for a run", async () => {
+    const run = fakeRunMetadata(workdir, "run-ci-11111111", 0);
+    writeRunMetadata(run);
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+
+    const response = await app.request(`/runs/${run.runId}/ci-artifacts/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        artifacts: [
+          {
+            name: "playwright-report",
+            url: "https://github.com/owner/repo/actions/runs/1/artifacts/10"
+          },
+          {
+            name: "coverage",
+            url: "https://github.com/owner/repo/actions/runs/1/artifacts/11"
+          }
+        ]
+      })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.runId).toBe(run.runId);
+    expect(body.imported).toHaveLength(1);
+    expect(body.imported[0].kind).toBe("playwright-report");
+    expect(body.skipped[0].reason).toBe("unsupported-kind");
+  });
+
+  it("rejects CI artifact import requests with non-HTTP URLs", async () => {
+    const run = fakeRunMetadata(workdir, "run-ci-22222222", 0);
+    writeRunMetadata(run);
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+
+    const response = await app.request(`/runs/${run.runId}/ci-artifacts/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        artifacts: [{ name: "playwright-report", url: "file:///tmp/report.zip" }]
+      })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("INVALID_INPUT");
+  });
+
   it("rejects invalid repair comparison rerun ids", async () => {
     const baseline = fakeRunMetadata(workdir, "run-baseline-66666666", 1);
     writeRunMetadata(baseline);

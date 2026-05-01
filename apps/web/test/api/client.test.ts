@@ -6,6 +6,7 @@ import {
   createReleaseReviewDraft,
   fetchRepairComparison,
   fetchRuns,
+  importCiArtifacts,
   revertPatchTemporary,
   runAiAnalysis,
   startRepairRerun
@@ -182,6 +183,43 @@ describe("api/client createReleaseReviewDraft", () => {
     );
 
     await expect(createReleaseReviewDraft("run-1", { issues: [], ciArtifacts: [] })).resolves.toBeNull();
+  });
+});
+
+describe("api/client importCiArtifacts", () => {
+  it("posts CI artifact metadata and validates imported links", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      runId: "run-1",
+      projectId: "p1",
+      imported: [
+        {
+          name: "allure-report",
+          url: "https://github.com/owner/repo/actions/runs/1/artifacts/2",
+          source: "github-actions",
+          kind: "allure-report"
+        }
+      ],
+      skipped: [],
+      warnings: []
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      importCiArtifacts("run-1", {
+        artifacts: [
+          {
+            name: "allure-report",
+            url: "https://github.com/owner/repo/actions/runs/1/artifacts/2"
+          }
+        ]
+      })
+    ).resolves.toMatchObject({
+      imported: [{ kind: "allure-report" }]
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/ci-artifacts/import",
+      expect.objectContaining({ method: "POST" })
+    );
   });
 });
 

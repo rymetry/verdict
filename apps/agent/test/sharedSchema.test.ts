@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   AiAnalysisContextSchema,
   AiAnalysisOutputSchema,
+  CiArtifactImportRequestSchema,
+  CiArtifactImportResponseSchema,
   CiArtifactLinkSchema,
   GitHubPullRequestLinkSchema,
   ReleaseReviewDraftRequestSchema,
@@ -358,5 +360,40 @@ describe("shared release review schemas", () => {
         url: "javascript:alert(1)"
       })
     ).toThrow(/http or https/);
+  });
+
+  it("validates imported CI artifact response shapes", () => {
+    const request = CiArtifactImportRequestSchema.parse({
+      artifacts: [
+        {
+          name: "playwright-report",
+          url: "https://github.com/owner/repo/actions/runs/1/artifacts/2"
+        }
+      ]
+    });
+    expect(request.artifacts[0]?.source).toBe("github-actions");
+
+    expect(
+      CiArtifactImportResponseSchema.parse({
+        runId: "run-1",
+        projectId: "project-1",
+        imported: [
+          {
+            name: "playwright-report",
+            url: "https://github.com/owner/repo/actions/runs/1/artifacts/2",
+            source: "github-actions",
+            kind: "playwright-report"
+          }
+        ],
+        skipped: [
+          {
+            name: "coverage",
+            url: "https://github.com/owner/repo/actions/runs/1/artifacts/3",
+            reason: "unsupported-kind"
+          }
+        ],
+        warnings: []
+      }).imported[0]?.kind
+    ).toBe("playwright-report");
   });
 });

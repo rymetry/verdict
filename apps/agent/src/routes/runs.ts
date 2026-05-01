@@ -6,6 +6,7 @@ import {
   AiAnalysisRequestSchema,
   AiAnalysisResponseSchema,
   type AiAnalysisResponse,
+  CiArtifactImportRequestSchema,
   QmoSummarySchema,
   ReleaseReviewDraftRequestSchema,
   RepairComparisonSchema,
@@ -28,6 +29,7 @@ import { AuditPersistenceError } from "../lib/errors.js";
 import { buildFailureReview } from "../reporting/failureReview.js";
 import { buildAiAnalysisContext } from "../ai/analysisContext.js";
 import { AiAnalysisError, type AiAnalysisAdapter } from "../ai/cliAdapter.js";
+import { importCiArtifacts } from "../reporting/ciArtifactImport.js";
 import { buildReleaseReviewDraft } from "../reporting/releaseReviewDraft.js";
 import {
   isValidRunIdSegment,
@@ -515,6 +517,28 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
       );
     }
     return c.json(buildReleaseReviewDraft({ qmoSummary: qmoSummary.data, request: parsed.data }));
+  });
+
+  router.post("/runs/:runId/ci-artifacts/import", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = CiArtifactImportRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return apiError(
+        c,
+        "INVALID_INPUT",
+        parsed.error.issues.map((i) => i.message).join("; "),
+        400
+      );
+    }
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    return c.json(
+      importCiArtifacts({
+        runId: result.run.runId,
+        projectId: result.run.projectId,
+        request: parsed.data
+      })
+    );
   });
 
   router.post("/runs/:runId/repair-rerun", async (c) => {
