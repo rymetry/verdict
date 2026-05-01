@@ -155,8 +155,11 @@ function QaMetadataView({ test }: { test: TestCase }): React.ReactElement {
   const { qaMetadata } = test;
   const hasSteps = qaMetadata.steps.length > 0;
   const hasExpectations = qaMetadata.expectations.length > 0;
+  const normalizedPurpose = qaMetadata.purpose.toLocaleLowerCase();
+  const normalizedTitle = test.title.toLocaleLowerCase();
   const shouldShowPurpose =
-    qaMetadata.confidence !== "low" || !qaMetadata.purpose.includes(test.title);
+    !normalizedTitle.includes(normalizedPurpose) &&
+    (qaMetadata.confidence !== "low" || !normalizedPurpose.includes(normalizedTitle));
 
   return (
     <div className="mt-2 flex flex-col gap-2 border-t border-[var(--line-faint)] pt-2">

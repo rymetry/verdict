@@ -84,6 +84,21 @@ export const QaTestMetadataSchema = z.object({
 });
 export type QaTestMetadata = z.infer<typeof QaTestMetadataSchema>;
 
+export const TestCodeSignalKindSchema = z.enum([
+  "locator",
+  "assertion",
+  "allure-metadata"
+]);
+export type TestCodeSignalKind = z.infer<typeof TestCodeSignalKindSchema>;
+
+export const TestCodeSignalSchema = z.object({
+  kind: TestCodeSignalKindSchema,
+  value: z.string().min(1),
+  line: z.number().int().positive().optional(),
+  source: QaMetadataSourceSchema
+});
+export type TestCodeSignal = z.infer<typeof TestCodeSignalSchema>;
+
 export const TestCaseSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -95,7 +110,8 @@ export const TestCaseSchema = z.object({
   describePath: z.array(z.string()),
   tags: z.array(z.string()),
   projectName: z.string().optional(),
-  qaMetadata: QaTestMetadataSchema
+  qaMetadata: QaTestMetadataSchema,
+  codeSignals: z.array(TestCodeSignalSchema).optional()
 });
 export type TestCase = z.infer<typeof TestCaseSchema>;
 

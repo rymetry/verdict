@@ -24,6 +24,7 @@ import {
   RunStartedPayloadSchema,
   SnapshotPayloadSchema,
   TestCaseSchema,
+  TestCodeSignalSchema,
   WorkbenchEventSchema,
   terminalStatusMatchesEvent
 } from "@pwqa/shared";
@@ -128,6 +129,15 @@ describe("shared run warning schemas", () => {
       confidence: "medium"
     });
 
+    expect(
+      TestCodeSignalSchema.parse({
+        kind: "locator",
+        value: "page.getByRole('button', { name: 'Pay' })",
+        line: 14,
+        source: "static-analysis"
+      }).kind
+    ).toBe("locator");
+
     expect(() =>
       TestCaseSchema.parse({
         id: "t1",
@@ -145,7 +155,15 @@ describe("shared run warning schemas", () => {
           expectations: [],
           source: "unknown-source",
           confidence: "low"
-        }
+        },
+        codeSignals: [
+          {
+            kind: "assertion",
+            value: "await expect(page).toHaveURL(/done/);",
+            line: 20,
+            source: "static-analysis"
+          }
+        ]
       })
     ).toThrow();
   });

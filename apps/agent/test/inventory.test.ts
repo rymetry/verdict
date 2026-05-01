@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parsePlaywrightListJson } from "../src/project/inventory.js";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import {
+  enrichSpecFilesWithStaticAnalysis,
+  parsePlaywrightListJson
+} from "../src/project/inventory.js";
 
 const SAMPLE = JSON.stringify({
   config: { rootDir: "/repo/tests" },
@@ -91,5 +97,98 @@ describe("parsePlaywrightListJson", () => {
     });
     const result = parsePlaywrightListJson("/repo", sample);
     expect(result.errors[0]).toContain("config not found");
+  });
+
+  it("enriches tests with steps assertions locators and Allure metadata", async () => {
+    const workdir = fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-inventory-"));
+    try {
+      const specDir = path.join(workdir, "tests");
+      fs.mkdirSync(specDir, { recursive: true });
+      const specPath = path.join(specDir, "checkout.spec.ts");
+      fs.writeFileSync(
+        specPath,
+        [
+          "import { test, expect } from '@playwright/test';",
+          "import * as allure from 'allure-js-commons';",
+          "",
+          "test('checkout completes', async ({ page }) => {",
+          "  allure.feature('Checkout');",
+          "  await test.step('Open checkout', async () => {",
+          "    await page.getByRole('link', { name: 'Checkout' }).click();",
+          "  });",
+          "  await allure.step('Submit payment', async () => {});",
+          "  await expect(page.getByText('Order confirmed')).toBeVisible();",
+          "});"
+        ].join("\n")
+      );
+
+      const parsed = parsePlaywrightListJson(
+        workdir,
+        JSON.stringify({
+          config: { rootDir: specDir },
+          suites: [
+            {
+              title: "checkout.spec.ts",
+              file: "checkout.spec.ts",
+              specs: [
+                {
+                  title: "checkout completes",
+                  file: "checkout.spec.ts",
+                  line: 4,
+                  column: 0,
+                  tests: [{ projectName: "chromium" }]
+                }
+              ]
+            }
+          ]
+        })
+      );
+
+      const enriched = await enrichSpecFilesWithStaticAnalysis(workdir, parsed.specs);
+      expect(enriched.warnings).toEqual([]);
+      const test = enriched.specs[0]!.tests[0]!;
+      expect(test.qaMetadata.source).toBe("static-analysis");
+      expect(test.qaMetadata.confidence).toBe("medium");
+      expect(test.qaMetadata.steps).toEqual([
+        { title: "Open checkout", line: 6 },
+        { title: "Submit payment", line: 9 }
+      ]);
+      expect(test.qaMetadata.expectations).toEqual([
+        {
+          title: "await expect(page.getByText('Order confirmed')).toBeVisible();",
+          line: 10
+        }
+      ]);
+      expect(test.codeSignals).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "locator",
+            value: "page.getByRole('link', { name: 'Checkout' }).click();",
+            line: 7,
+            source: "static-analysis"
+          }),
+          expect.objectContaining({
+            kind: "assertion",
+            value: "await expect(page.getByText('Order confirmed')).toBeVisible();",
+            line: 10,
+            source: "static-analysis"
+          }),
+          expect.objectContaining({
+            kind: "locator",
+            value: "page.getByText('Order confirmed')).toBeVisible();",
+            line: 10,
+            source: "static-analysis"
+          }),
+          expect.objectContaining({
+            kind: "allure-metadata",
+            value: "allure.feature('Checkout');",
+            line: 5,
+            source: "allure-metadata"
+          })
+        ])
+      );
+    } finally {
+      fs.rmSync(workdir, { recursive: true, force: true });
+    }
   });
 });
