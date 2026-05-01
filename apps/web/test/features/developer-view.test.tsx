@@ -112,6 +112,12 @@ describe("FileTreeCard", () => {
     const card = screen.getByTestId("dev-file-tree-card");
     expect(within(card).getByText("0")).toBeInTheDocument();
   });
+
+  it("wire 済みの FileTree は placeholder badge を非表示にできる", () => {
+    render(<FileTreeCard groups={SAMPLE_FILE_TREE} badgeLabel={null} />);
+    const card = screen.getByTestId("dev-file-tree-card");
+    expect(within(card).queryByText(DEFERRED_PLACEHOLDER_LABEL)).not.toBeInTheDocument();
+  });
 });
 
 describe("SourceTabsCard", () => {
@@ -234,6 +240,27 @@ describe("InspectorPanel", () => {
     expect(within(card).getByText(/getByRole\('button'/)).toBeInTheDocument();
     expect(within(card).getAllByText("hidden").length).toBeGreaterThan(0);
     expect(within(card).getByText("disabled")).toBeInTheDocument();
+  });
+
+  it("wire 済みの Locator と Run metadata は placeholder badge を非表示にできる", () => {
+    render(
+      <InspectorPanel
+        locator={SAMPLE_LOCATOR}
+        consoleEntries={SAMPLE_CONSOLE}
+        runMetadata={SAMPLE_RUN_METADATA}
+        locatorBadgeLabel={null}
+        runMetadataBadgeLabel={null}
+      />
+    );
+    expect(
+      within(screen.getByTestId("dev-locator-card")).queryByText(DEFERRED_PLACEHOLDER_LABEL)
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("dev-run-metadata-card")).queryByText(DEFERRED_PLACEHOLDER_LABEL)
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("dev-console-card")).getByText(DEFERRED_PLACEHOLDER_LABEL)
+    ).toBeInTheDocument();
   });
 
   it("Console card は warn / error / info の各 level を Badge で描画する", () => {

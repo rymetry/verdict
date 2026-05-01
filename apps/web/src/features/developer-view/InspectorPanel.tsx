@@ -34,22 +34,30 @@ interface InspectorPanelProps {
   locator: LocatorState;
   consoleEntries: ReadonlyArray<ConsoleEntry>;
   runMetadata: ReadonlyArray<RunMetadataRow>;
+  locatorBadgeLabel?: string | null;
+  consoleBadgeLabel?: string | null;
+  runMetadataBadgeLabel?: string | null;
 }
 
-function PhaseBadge(): React.ReactElement {
-  return <Badge variant="info">{DEFERRED_PLACEHOLDER_LABEL}</Badge>;
+function PhaseBadge({
+  label = DEFERRED_PLACEHOLDER_LABEL
+}: {
+  label?: string | null;
+}): React.ReactElement | null {
+  return label ? <Badge variant="info">{label}</Badge> : null;
 }
 
 function LocatorCard({
   expression,
-  rows
-}: LocatorState): React.ReactElement {
+  rows,
+  badgeLabel
+}: LocatorState & { badgeLabel?: string | null }): React.ReactElement {
   return (
     <Card data-testid="dev-locator-card">
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span>{DEVELOPER_VIEW_LABELS.locator}</span>
-          <PhaseBadge />
+          <PhaseBadge label={badgeLabel} />
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -67,7 +75,7 @@ function LocatorCard({
               <dt className="text-[var(--ink-3)]">{row.key}</dt>
               <dd
                 className={cn(
-                  "font-mono",
+                  "break-all font-mono",
                   row.status === "miss"
                     ? "text-[var(--fail)]"
                     : row.status === "ok"
@@ -86,16 +94,18 @@ function LocatorCard({
 }
 
 function ConsoleCard({
-  entries
+  entries,
+  badgeLabel
 }: {
   entries: ReadonlyArray<ConsoleEntry>;
+  badgeLabel?: string | null;
 }): React.ReactElement {
   return (
     <Card data-testid="dev-console-card">
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span>{DEVELOPER_VIEW_LABELS.console}</span>
-          <PhaseBadge />
+          <PhaseBadge label={badgeLabel} />
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -131,16 +141,18 @@ function ConsoleCard({
 }
 
 function RunMetadataCard({
-  rows
+  rows,
+  badgeLabel
 }: {
   rows: ReadonlyArray<RunMetadataRow>;
+  badgeLabel?: string | null;
 }): React.ReactElement {
   return (
     <Card data-testid="dev-run-metadata-card">
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span>{DEVELOPER_VIEW_LABELS.runMetadata}</span>
-          <PhaseBadge />
+          <PhaseBadge label={badgeLabel} />
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -169,7 +181,10 @@ function RunMetadataCard({
 export function InspectorPanel({
   locator,
   consoleEntries,
-  runMetadata
+  runMetadata,
+  locatorBadgeLabel = DEFERRED_PLACEHOLDER_LABEL,
+  consoleBadgeLabel = DEFERRED_PLACEHOLDER_LABEL,
+  runMetadataBadgeLabel = DEFERRED_PLACEHOLDER_LABEL
 }: InspectorPanelProps): React.ReactElement {
   return (
     <div
@@ -177,9 +192,13 @@ export function InspectorPanel({
       aria-label={DEVELOPER_VIEW_LABELS.inspector}
       className="flex flex-col gap-4"
     >
-      <LocatorCard expression={locator.expression} rows={locator.rows} />
-      <ConsoleCard entries={consoleEntries} />
-      <RunMetadataCard rows={runMetadata} />
+      <LocatorCard
+        expression={locator.expression}
+        rows={locator.rows}
+        badgeLabel={locatorBadgeLabel}
+      />
+      <ConsoleCard entries={consoleEntries} badgeLabel={consoleBadgeLabel} />
+      <RunMetadataCard rows={runMetadata} badgeLabel={runMetadataBadgeLabel} />
     </div>
   );
 }

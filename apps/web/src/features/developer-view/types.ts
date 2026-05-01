@@ -92,7 +92,7 @@ export const DEVELOPER_VIEW_LABELS = {
   source: "ソース",
   diff: "差分",
   terminal: "ターミナル",
-  locator: "Locator (失敗時の状態)",
+  locator: "Locator / Assertion signals",
   console: "Console (失敗中の出力)",
   runMetadata: "Run メタデータ"
 } as const;

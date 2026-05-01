@@ -178,6 +178,23 @@ export const FixtureEntrySchema = z.object({
 });
 export type FixtureEntry = z.infer<typeof FixtureEntrySchema>;
 
+export const PomLocatorSignalSchema = z.object({
+  value: z.string().min(1),
+  line: z.number().int().positive().optional(),
+  source: z.literal("heuristic")
+});
+export type PomLocatorSignal = z.infer<typeof PomLocatorSignalSchema>;
+
+export const PomEntrySchema = z.object({
+  relativePath: z.string(),
+  kind: z.enum(["page-object", "page-like-file"]),
+  classNames: z.array(z.string()),
+  locatorCount: z.number().int().nonnegative(),
+  locatorSamples: z.array(PomLocatorSignalSchema),
+  sizeBytes: z.number().int().nonnegative()
+});
+export type PomEntry = z.infer<typeof PomEntrySchema>;
+
 export const AuthSetupRiskSignalSchema = z.enum([
   "storage-state-path",
   "storage-state-inline",
@@ -210,6 +227,7 @@ export const ProjectConfigSummarySchema = z.object({
   reporters: z.array(ConfigReporterSchema),
   useOptions: z.array(ConfigUseOptionSchema),
   fixtureFiles: z.array(FixtureEntrySchema),
+  pomFiles: z.array(PomEntrySchema).default([]),
   authRisks: z.array(AuthSetupRiskSchema).default([]),
   warnings: z.array(z.string())
 });

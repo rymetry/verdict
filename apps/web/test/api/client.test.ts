@@ -79,6 +79,22 @@ describe("api/client fetchConfigSummary", () => {
               sizeBytes: 42
             }
           ],
+          pomFiles: [
+            {
+              relativePath: "pages/checkout.page.ts",
+              kind: "page-object",
+              classNames: ["CheckoutPage"],
+              locatorCount: 1,
+              locatorSamples: [
+                {
+                  value: "this.page.getByRole('button', { name: 'Pay' })",
+                  line: 12,
+                  source: "heuristic"
+                }
+              ],
+              sizeBytes: 128
+            }
+          ],
           authRisks: [
             {
               signal: "storage-state-path",
@@ -96,6 +112,7 @@ describe("api/client fetchConfigSummary", () => {
     await expect(fetchConfigSummary("p1")).resolves.toMatchObject({
       config: { relativePath: "playwright.config.ts" },
       fixtureFiles: [{ relativePath: "tests/fixtures/auth.fixture.ts" }],
+      pomFiles: [{ relativePath: "pages/checkout.page.ts" }],
       authRisks: [{ signal: "storage-state-path" }]
     });
     expect(fetch).toHaveBeenCalledWith("/api/projects/p1/config-summary");
