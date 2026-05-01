@@ -86,10 +86,10 @@ if push_pattern.search(cmd) and force_pattern.search(cmd):
     if main_pattern.search(cmd):
         emit_block("force-push to main is not permitted. Use --force-with-lease on a feature branch instead.")
 
-# B2. rm -rf targeting system paths (also: bare /, /usr, /etc, /System, /Library).
-rm_pattern = re.compile(
-    r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*|-rf?|--recursive)(?:\s+-[a-zA-Z]+)*\s+([^\s;&|]+)",
-)
+# B2. rm -rf with any operand pointing at a system path. Iterate over every
+# non-option argument after a recursive flag — a multi-operand command like
+# `rm -rf build /etc/passwd` must block on the second operand even when the
+# first is innocuous.
 DANGER_PATH_PREFIXES = (
     "/",
     "/usr",
@@ -105,20 +105,72 @@ DANGER_PATH_PREFIXES = (
     "/home",
     "/root",
 )
-for match in rm_pattern.finditer(cmd):
-    target = match.group(1).strip().strip("'\"")
+RECURSIVE_FLAG_RE = re.compile(r"^-[a-zA-Z]*r[a-zA-Z]*$|^-rf?$|^--recursive$")
+SHELL_SEPARATORS = {";", "&&", "||", "|", "&"}
+
+def shell_segments(text: str):
+    """Yield substrings of `text` split on top-level shell separators.
+
+    This is intentionally simple — it does not understand quoting.
+    Combined with the python policy this handles the common cases the hook
+    cares about; deeper analysis belongs in the agent's CommandRunner.
+    """
+    buf = []
+    i = 0
+    while i < len(text):
+        matched = None
+        for sep in (";", "&&", "||", "|", "&"):
+            if text[i : i + len(sep)] == sep:
+                matched = sep
+                break
+        if matched:
+            yield "".join(buf)
+            buf = []
+            i += len(matched)
+            continue
+        buf.append(text[i])
+        i += 1
+    yield "".join(buf)
+
+def is_protected(target: str) -> bool:
     if not target:
-        continue
-    # Bare "/" stays "/"; "/etc/" → "/etc"; "/etc/passwd" stays "/etc/passwd"
+        return False
     normalized = target if target == "/" else target.rstrip("/")
     if normalized in DANGER_PATH_PREFIXES:
-        emit_block(f"rm -rf targeting a system path ({normalized}) is not permitted.")
-    # /etc/passwd, /usr/local, etc. — anything UNDER a system root
+        return True
     for prefix in DANGER_PATH_PREFIXES:
         if prefix == "/":
             continue
         if normalized == prefix or normalized.startswith(prefix + "/"):
-            emit_block(f"rm -rf targeting a system path ({normalized}) is not permitted.")
+            return True
+    return False
+
+for segment in shell_segments(cmd):
+    tokens = segment.strip().split()
+    if not tokens:
+        continue
+    # Locate `rm` (allow leading `sudo` / env vars).
+    idx = 0
+    while idx < len(tokens) and (tokens[idx] == "sudo" or "=" in tokens[idx]):
+        idx += 1
+    if idx >= len(tokens) or tokens[idx] != "rm":
+        continue
+    # Need a recursive flag somewhere in the option block.
+    has_recursive = False
+    operands = []
+    for tok in tokens[idx + 1 :]:
+        if tok == "--":
+            continue
+        if tok.startswith("-"):
+            if RECURSIVE_FLAG_RE.match(tok):
+                has_recursive = True
+            continue
+        operands.append(tok.strip("'\""))
+    if not has_recursive:
+        continue
+    for operand in operands:
+        if is_protected(operand):
+            emit_block(f"rm -rf targeting a system path ({operand}) is not permitted.")
 
 # --- Warn rules ------------------------------------------------------------
 
