@@ -120,16 +120,25 @@ function flattenSuite(
     const { absolute, relative } = resolveSpecFile(projectRoot, rootDir, specFile);
     const stub = spec.tests?.[0];
     const id = spec.id ?? `${relative}:${spec.line ?? 0}:${spec.title}`;
+    const fullTitle = [...describePath, spec.title].join(" > ");
     const testCase: TestCase = {
       id,
       title: spec.title,
+      fullTitle,
       filePath: absolute,
       relativePath: relative,
       line: spec.line ?? 1,
       column: spec.column ?? 0,
       describePath: [...describePath],
       tags: extractTags(spec, stub),
-      projectName: stub?.projectName || undefined
+      projectName: stub?.projectName || undefined,
+      qaMetadata: {
+        purpose: fullTitle,
+        steps: [],
+        expectations: [],
+        source: "playwright-list-json",
+        confidence: "low"
+      }
     };
     emit(relative, testCase);
   }

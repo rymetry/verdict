@@ -65,16 +65,37 @@ export const TestStepSchema = z.object({
 });
 export type TestStep = z.infer<typeof TestStepSchema>;
 
+export const QaMetadataSourceSchema = z.enum([
+  "playwright-list-json",
+  "static-analysis",
+  "allure-metadata"
+]);
+export type QaMetadataSource = z.infer<typeof QaMetadataSourceSchema>;
+
+export const QaMetadataConfidenceSchema = z.enum(["low", "medium", "high"]);
+export type QaMetadataConfidence = z.infer<typeof QaMetadataConfidenceSchema>;
+
+export const QaTestMetadataSchema = z.object({
+  purpose: z.string(),
+  steps: z.array(TestStepSchema),
+  expectations: z.array(TestStepSchema),
+  source: QaMetadataSourceSchema,
+  confidence: QaMetadataConfidenceSchema
+});
+export type QaTestMetadata = z.infer<typeof QaTestMetadataSchema>;
+
 export const TestCaseSchema = z.object({
   id: z.string(),
   title: z.string(),
+  fullTitle: z.string(),
   filePath: z.string(),
   relativePath: z.string(),
   line: z.number().int().positive(),
   column: z.number().int().nonnegative(),
   describePath: z.array(z.string()),
   tags: z.array(z.string()),
-  projectName: z.string().optional()
+  projectName: z.string().optional(),
+  qaMetadata: QaTestMetadataSchema
 });
 export type TestCase = z.infer<typeof TestCaseSchema>;
 

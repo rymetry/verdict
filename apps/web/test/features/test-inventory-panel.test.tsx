@@ -124,22 +124,38 @@ describe("TestInventoryPanel", () => {
             {
               id: "t1",
               title: "should login",
+              fullTitle: "auth > should login",
               filePath: "/p/tests/auth.spec.ts",
               relativePath: "tests/auth.spec.ts",
               line: 12,
               column: 0,
               describePath: [],
-              tags: ["@smoke"]
+              tags: ["@smoke"],
+              qaMetadata: {
+                purpose: "auth > should login",
+                steps: [],
+                expectations: [],
+                source: "playwright-list-json",
+                confidence: "low"
+              }
             },
             {
               id: "t2",
               title: "should reject",
+              fullTitle: "auth > should reject",
               filePath: "/p/tests/auth.spec.ts",
               relativePath: "tests/auth.spec.ts",
               line: 30,
               column: 0,
               describePath: [],
-              tags: []
+              tags: [],
+              qaMetadata: {
+                purpose: "auth > should reject",
+                steps: [],
+                expectations: [],
+                source: "playwright-list-json",
+                confidence: "low"
+              }
             }
           ]
         }
