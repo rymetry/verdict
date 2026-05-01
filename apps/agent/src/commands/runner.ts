@@ -21,6 +21,8 @@ export interface CommandSpec {
   timeoutMs?: number;
   /** Optional human-readable label for audit logs. */
   label?: string;
+  /** 任意の stdin payload。audit log には含めない。 */
+  stdin?: string;
 }
 
 export interface CommandStreamHandlers {
@@ -155,9 +157,12 @@ export function createNodeCommandRunner({
         cwd: spec.cwd,
         env: filteredEnv,
         shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [spec.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
         windowsHide: true
       });
+      if (spec.stdin !== undefined) {
+        child.stdin?.end(spec.stdin, "utf8");
+      }
 
       const stdoutChunks: string[] = [];
       const stderrChunks: string[] = [];

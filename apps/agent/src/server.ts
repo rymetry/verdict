@@ -20,10 +20,12 @@ import {
 } from "./commands/runner.js";
 import { AuditPersistenceError } from "./lib/errors.js";
 import {
+  createAiCommandPolicy,
   createAllureCommandPolicy,
   createDefaultCommandPolicy,
   type CommandPolicy
 } from "./commands/policy.js";
+import { createAiCliAdapter, type AiAnalysisAdapter } from "./ai/cliAdapter.js";
 import { createEventBus, type EventBus } from "./events/bus.js";
 import { errorLogFields, projectIdHash } from "./lib/structuredLog.js";
 import {
@@ -56,6 +58,7 @@ export interface BuildAppOptions {
    * payloads and assert no absolute paths leak into structured logs).
    */
   logger?: RunManagerLogger;
+  aiAdapterFactory?: (projectRoot: string) => AiAnalysisAdapter;
 }
 
 export interface BuildAppResult {
@@ -63,6 +66,7 @@ export interface BuildAppResult {
   injectWebSocket: (server: ServerType) => void;
   bus: EventBus;
   runnerForProject: (projectRoot: string) => CommandRunner;
+  aiAdapterForProject: (projectRoot: string) => AiAnalysisAdapter;
   runManager: RunManager;
   projectStore: ProjectStore;
 }
@@ -246,6 +250,15 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       audit: buildAuditHandler(projectRoot)
     });
 
+  const aiRunnerForProject = (projectRoot: string): CommandRunner =>
+    createNodeCommandRunner({
+      policy: createAiCommandPolicy(projectRoot),
+      audit: buildAuditHandler(projectRoot)
+    });
+
+  const aiAdapterForProject = (projectRoot: string): AiAnalysisAdapter =>
+    options.aiAdapterFactory?.(projectRoot) ?? createAiCliAdapter(aiRunnerForProject(projectRoot));
+
   const projectStore = createProjectStore();
   const runManager = createRunManager({
     runnerForProject,
@@ -261,7 +274,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     "/",
     projectsRoutes({ projectStore, runnerForProject, allowedRoots: env.allowedRoots })
   );
-  app.route("/", runsRoutes({ projectStore, runManager, logger }));
+  app.route("/", runsRoutes({ projectStore, runManager, logger, aiAdapterForProject }));
   const injectWebSocket = attachWebSocket(app, bus, logger);
 
   if (env.initialProjectRoot) {
@@ -286,7 +299,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       });
   }
 
-  return { app, injectWebSocket, bus, runnerForProject, runManager, projectStore };
+  return { app, injectWebSocket, bus, runnerForProject, aiAdapterForProject, runManager, projectStore };
 }
 
 async function main(): Promise<void> {

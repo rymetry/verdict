@@ -23,7 +23,8 @@ export type CommandArgsValidationCode =
   | "extra-positional"
   | "missing-results-dir"
   | "missing-output-flag"
-  | "missing-history-path-flag";
+  | "missing-history-path-flag"
+  | "invalid-json-schema";
 
 export type CommandArgsValidationResult =
   | { ok: true }
@@ -661,6 +662,74 @@ export function createAllureCommandPolicy(cwdBoundary: string): CommandPolicy {
   return {
     allowedExecutables: ["allure"],
     argValidator: validateAllureArgs,
+    cwdBoundary: fs.realpathSync(cwdBoundary),
+    envAllowlist: DEFAULT_ENV_ALLOWLIST
+  };
+}
+
+/* ----------------------------------------------------------------- */
+/* T500-2: AI CLI 引数検証 policy                                    */
+/* ----------------------------------------------------------------- */
+
+const CLAUDE_AI_ARGS_PREFIX = [
+  "--bare",
+  "--print",
+  "--input-format",
+  "text",
+  "--output-format",
+  "json",
+  "--tools",
+  "",
+  "--no-session-persistence",
+  "--json-schema"
+] as const;
+
+export function validateAiArgs({
+  executableName,
+  args
+}: {
+  executableName: string;
+  args: ReadonlyArray<string>;
+}): CommandArgsValidationResult {
+  if (executableName !== "claude") {
+    return argsInvalid(
+      "unsupported-executable",
+      `Executable '${executableName}' is not supported by the AI command policy.`
+    );
+  }
+  for (const arg of args) {
+    const valueError = validateArgValue(arg);
+    if (!valueError.ok) return valueError;
+  }
+  if (args.length !== CLAUDE_AI_ARGS_PREFIX.length + 1) {
+    return argsInvalid(
+      "invalid-prefix",
+      "Claude Code AI analysis must use the approved non-interactive JSON invocation."
+    );
+  }
+  for (let index = 0; index < CLAUDE_AI_ARGS_PREFIX.length; index += 1) {
+    if (args[index] !== CLAUDE_AI_ARGS_PREFIX[index]) {
+      return argsInvalid(
+        "invalid-prefix",
+        "Claude Code AI analysis must use the approved non-interactive JSON invocation."
+      );
+    }
+  }
+  try {
+    const schema = JSON.parse(args[CLAUDE_AI_ARGS_PREFIX.length]!);
+    if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+      return argsInvalid("invalid-json-schema", "AI output schema must be a JSON object.");
+    }
+  } catch {
+    return argsInvalid("invalid-json-schema", "AI output schema argument must be valid JSON.");
+  }
+  return argsValid;
+}
+
+export function createAiCommandPolicy(cwdBoundary: string): CommandPolicy {
+  return {
+    allowedExecutables: ["claude"],
+    argValidator: validateAiArgs,
     cwdBoundary: fs.realpathSync(cwdBoundary),
     envAllowlist: DEFAULT_ENV_ALLOWLIST
   };

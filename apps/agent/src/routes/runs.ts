@@ -1,7 +1,11 @@
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import {
+  AiAnalysisRequestSchema,
+  AiAnalysisResponseSchema,
+  type AiAnalysisResponse,
   QmoSummarySchema,
   RunRequestSchema,
   FailureReviewResponseSchema,
@@ -19,6 +23,8 @@ import { CommandPolicyError } from "../commands/runner.js";
 import { PlaywrightCommandBuildError } from "../playwright/builder.js";
 import { AuditPersistenceError } from "../lib/errors.js";
 import { buildFailureReview } from "../reporting/failureReview.js";
+import { buildAiAnalysisContext } from "../ai/analysisContext.js";
+import { AiAnalysisError, type AiAnalysisAdapter } from "../ai/cliAdapter.js";
 
 /**
  * Maps startup failures to stable public codes. Structured logs use the
@@ -62,9 +68,10 @@ interface Deps {
   projectStore: ProjectStore;
   runManager: RunManager;
   logger?: RunManagerLogger;
+  aiAdapterForProject: (projectRoot: string) => AiAnalysisAdapter;
 }
 
-export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
+export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProject }: Deps): Hono {
   const router = new Hono();
 
   router.post("/runs", async (c) => {
@@ -190,6 +197,93 @@ export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
         c,
         "FAILURE_REVIEW_READ_FAILED",
         "Failure review data could not be derived for this run.",
+        500
+      );
+    }
+  });
+
+  router.post("/runs/:runId/ai-analysis", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = AiAnalysisRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return apiError(
+        c,
+        "INVALID_INPUT",
+        parsed.error.issues.map((i) => i.message).join("; "),
+        400
+      );
+    }
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    const { run } = result;
+    if (run.status === "queued" || run.status === "running") {
+      return apiError(
+        c,
+        "AI_ANALYSIS_NOT_READY",
+        "AI analysis requires a completed run.",
+        409
+      );
+    }
+    try {
+      const failureReview = await buildFailureReview({ run, projectRoot: run.projectRoot });
+      if (failureReview.failedTests.length === 0) {
+        return apiError(
+          c,
+          "AI_ANALYSIS_NO_FAILURES",
+          "AI analysis requires at least one failed test.",
+          409
+        );
+      }
+      const context = await buildAiAnalysisContext({ run, failureReview });
+      const analysis = await aiAdapterForProject(run.projectRoot).analyze({
+        provider: parsed.data.provider,
+        projectRoot: run.projectRoot,
+        context
+      });
+      const response = AiAnalysisResponseSchema.parse({
+        runId: run.runId,
+        projectId: context.projectId,
+        provider: parsed.data.provider,
+        generatedAt: new Date().toISOString(),
+        analysis,
+        warnings: context.warnings
+      } satisfies AiAnalysisResponse);
+      await fs.writeFile(
+        aiAnalysisPathFor(run),
+        `${JSON.stringify(response, null, 2)}\n`,
+        "utf8"
+      );
+      return c.json(response);
+    } catch (error) {
+      logger?.error(
+        {
+          runId: run.runId,
+          artifactKind: "ai-analysis",
+          ...errorLogFields(error)
+        },
+        "ai-analysis failed"
+      );
+      if (error instanceof CommandPolicyError) {
+        return apiError(
+          c,
+          "AI_COMMAND_REJECTED",
+          "AI command was rejected before spawn.",
+          400
+        );
+      }
+      if (error instanceof AiAnalysisError) {
+        const status = error.code === "AI_CLI_TIMED_OUT" ? 504 : 502;
+        return apiError(
+          c,
+          error.code,
+          "AI analysis could not be completed.",
+          status
+        );
+      }
+      return apiError(
+        c,
+        "AI_ANALYSIS_FAILED",
+        "AI analysis could not be completed.",
         500
       );
     }
@@ -338,6 +432,10 @@ export function runsRoutes({ projectStore, runManager, logger }: Deps): Hono {
   });
 
   return router;
+}
+
+function aiAnalysisPathFor(run: RunMetadata): string {
+  return path.join(run.paths.runDir, "ai-analysis.json");
 }
 
 function toListItem(run: RunMetadata): RunListItem {
