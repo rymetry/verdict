@@ -130,6 +130,60 @@ describe("RunConsole", () => {
     expect(screen.getByText(/3 passed · 0 failed/)).toBeInTheDocument();
   });
 
+  it("run.completed の trace/screenshot/video attachments を launch link として表示する", async () => {
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+    await act(async () => {
+      stream.emit({
+        type: "run.completed",
+        runId: "r1",
+        sequence: 2,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: {
+          status: "failed",
+          exitCode: 1,
+          durationMs: 12000,
+          warnings: [],
+          summary: {
+            total: 1,
+            passed: 0,
+            failed: 1,
+            skipped: 0,
+            flaky: 0,
+            failedTests: [
+              {
+                title: "checkout fails",
+                status: "failed",
+                attachments: [
+                  { kind: "screenshot", label: "screenshot", path: "/p/test-results/a.png" },
+                  { kind: "trace", label: "trace", path: "/p/test-results/trace.zip" },
+                  { kind: "video", label: "video", path: "/p/test-results/video.webm" },
+                  { kind: "log", label: "stdout", path: "/p/stdout.log" }
+                ]
+              }
+            ]
+          }
+        }
+      });
+    });
+
+    const links = screen.getByLabelText("Evidence artifact links");
+    expect(links).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "screenshot: screenshot" })).toHaveAttribute(
+      "href",
+      "/api/runs/r1/evidence/0/0"
+    );
+    expect(screen.getByRole("link", { name: "trace: trace" })).toHaveAttribute(
+      "href",
+      "/api/runs/r1/evidence/0/1"
+    );
+    expect(screen.getByRole("link", { name: "video: video" })).toHaveAttribute(
+      "href",
+      "/api/runs/r1/evidence/0/2"
+    );
+    expect(screen.queryByRole("link", { name: "log: stdout" })).not.toBeInTheDocument();
+  });
+
   it("run.completed の warnings を warning alert として表示する", async () => {
     const stream = makeFakeStream();
     render(<RunConsole eventStream={stream} activeRunId="r1" />);

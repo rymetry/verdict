@@ -1674,6 +1674,63 @@ describe("HTTP API surface", () => {
     expect(body.result.filesTouched).toEqual(["tests/generated.spec.ts"]);
   });
 
+  it("serves linkable evidence artifacts through index-based routes", async () => {
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+    const screenshotPath = path.join(workdir, "test-results", "checkout.png");
+    fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
+    fs.writeFileSync(screenshotPath, "png-bytes");
+    const run = fakeRunMetadata(workdir, "evidence-run", 1);
+    run.summary!.failedTests[0]!.attachments = [
+      { kind: "screenshot", label: "screenshot", path: screenshotPath },
+      { kind: "log", label: "stdout", path: path.join(workdir, "stdout.log") }
+    ];
+    writeRunMetadata(run);
+
+    const response = await app.request("/runs/evidence-run/evidence/0/0");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("image/png");
+    expect(await response.text()).toBe("png-bytes");
+
+    const unsupportedKind = await app.request("/runs/evidence-run/evidence/0/1");
+    expect(unsupportedKind.status).toBe(404);
+  });
+
+  it("rejects evidence artifacts outside the opened project root", async () => {
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+    const outsidePath = path.join(path.dirname(workdir), "outside-evidence.png");
+    fs.writeFileSync(outsidePath, "outside");
+    try {
+      const run = fakeRunMetadata(workdir, "outside-evidence-run", 1);
+      run.summary!.failedTests[0]!.attachments = [
+        { kind: "screenshot", label: "outside", path: outsidePath }
+      ];
+      writeRunMetadata(run);
+
+      const response = await app.request("/runs/outside-evidence-run/evidence/0/0");
+      expect(response.status).toBe(404);
+    } finally {
+      fs.rmSync(outsidePath, { force: true });
+    }
+  });
+
   /* -------------------------------------------------------------- */
   /* T208-1: GET /runs/:runId/qmo-summary{,.md}                     */
   /* -------------------------------------------------------------- */
