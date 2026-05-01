@@ -413,6 +413,52 @@ export const AllureHistoryResponseSchema = z.object({
 });
 export type AllureHistoryResponse = z.infer<typeof AllureHistoryResponseSchema>;
 
+export const FailureReviewKnownIssueSchema = z.object({
+  id: z.string(),
+  title: z.string().optional(),
+  message: z.string().optional(),
+  status: z.string().optional(),
+  historyId: z.string().optional(),
+  testCaseId: z.string().optional()
+});
+export type FailureReviewKnownIssue = z.infer<typeof FailureReviewKnownIssueSchema>;
+
+export const FailureReviewHistoryEntrySchema = z.object({
+  generatedAt: z.string(),
+  status: z.string(),
+  runUuid: z.string().optional(),
+  reportName: z.string().optional()
+});
+export type FailureReviewHistoryEntry = z.infer<typeof FailureReviewHistoryEntrySchema>;
+
+export const FailureReviewFlakySignalSchema = z.object({
+  isCandidate: z.boolean(),
+  passedRuns: z.number().int().nonnegative(),
+  failedRuns: z.number().int().nonnegative(),
+  brokenRuns: z.number().int().nonnegative(),
+  skippedRuns: z.number().int().nonnegative(),
+  recentStatuses: z.array(z.string())
+});
+export type FailureReviewFlakySignal = z.infer<typeof FailureReviewFlakySignalSchema>;
+
+export const FailureReviewTestSchema = z.object({
+  test: FailedTestSchema,
+  history: z.array(FailureReviewHistoryEntrySchema),
+  knownIssues: z.array(FailureReviewKnownIssueSchema),
+  flaky: FailureReviewFlakySignalSchema
+});
+export type FailureReviewTest = z.infer<typeof FailureReviewTestSchema>;
+
+export const FailureReviewResponseSchema = z.object({
+  runId: z.string(),
+  projectId: z.string(),
+  status: RunStatusSchema,
+  completedAt: z.string().optional(),
+  failedTests: z.array(FailureReviewTestSchema),
+  warnings: z.array(z.string())
+});
+export type FailureReviewResponse = z.infer<typeof FailureReviewResponseSchema>;
+
 /* ----------------------------------------------------------------------- */
 /* WebSocket event envelope (PLAN.v2 §20)                                  */
 /* ----------------------------------------------------------------------- */

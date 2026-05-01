@@ -900,6 +900,117 @@ describe("HTTP API surface", () => {
     }
   });
 
+  it("returns Phase 2 failure review detail via /runs/:runId/failure-review", async () => {
+    const runIdLocal = "r-failure-review";
+    const runDir = path.join(workdir, ".playwright-workbench", "runs", runIdLocal);
+    fs.mkdirSync(path.join(runDir, "allure-results"), { recursive: true });
+    fs.mkdirSync(path.join(workdir, ".playwright-workbench", "reports"), { recursive: true });
+    fs.writeFileSync(
+      path.join(runDir, "metadata.json"),
+      JSON.stringify({
+        runId: runIdLocal,
+        projectId: workdir,
+        projectRoot: workdir,
+        status: "failed",
+        startedAt: "2026-04-29T00:00:00Z",
+        completedAt: "2026-04-29T00:01:00Z",
+        command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+        cwd: workdir,
+        exitCode: 1,
+        signal: null,
+        durationMs: 1000,
+        requested: { projectId: workdir, headed: false },
+        paths: {
+          runDir,
+          metadataJson: path.join(runDir, "metadata.json"),
+          stdoutLog: path.join(runDir, "stdout.log"),
+          stderrLog: path.join(runDir, "stderr.log"),
+          playwrightJson: path.join(runDir, "playwright-results.json"),
+          playwrightHtml: path.join(runDir, "playwright-report"),
+          artifactsJson: path.join(runDir, "artifacts.json"),
+          allureResultsDest: path.join(runDir, "allure-results"),
+          allureReportDir: path.join(runDir, "allure-report"),
+          qualityGateResultPath: path.join(runDir, "quality-gate-result.json"),
+          allureExportsDir: path.join(runDir, "allure-exports"),
+          allureCsvPath: path.join(runDir, "allure-exports", "results.csv"),
+          allureLogPath: path.join(runDir, "allure-exports", "results.log"),
+          qmoSummaryJsonPath: path.join(runDir, "qmo-summary.json"),
+          qmoSummaryMarkdownPath: path.join(runDir, "qmo-summary.md")
+        },
+        summary: {
+          total: 1,
+          passed: 0,
+          failed: 1,
+          skipped: 0,
+          flaky: 0,
+          failedTests: [
+            {
+              testId: "pw-id",
+              title: "should checkout",
+              fullTitle: "checkout > should checkout",
+              status: "failed",
+              stack: "at tests/checkout.spec.ts:1:1",
+              attachments: []
+            }
+          ]
+        },
+        warnings: []
+      })
+    );
+    fs.writeFileSync(
+      path.join(runDir, "allure-results", "uuid-result.json"),
+      JSON.stringify({
+        uuid: "allure-uuid",
+        historyId: "hist-checkout",
+        fullName: "checkout > should checkout",
+        name: "should checkout",
+        status: "failed"
+      })
+    );
+    fs.writeFileSync(
+      path.join(workdir, ".playwright-workbench", "reports", "allure-history.jsonl"),
+      [
+        JSON.stringify({
+          generatedAt: "2026-04-30T00:00:00Z",
+          testResults: { "hist-checkout": { status: "passed" } }
+        }),
+        JSON.stringify({
+          generatedAt: "2026-04-30T00:10:00Z",
+          testResults: { "hist-checkout": { status: "failed" } }
+        })
+      ].join("\n") + "\n"
+    );
+    fs.writeFileSync(
+      path.join(workdir, ".playwright-workbench", "reports", "known-issues.json"),
+      JSON.stringify([{ historyId: "hist-checkout", title: "tracked checkout issue" }])
+    );
+
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: workdir })
+    });
+
+    const response = await app.request(`/runs/${runIdLocal}/failure-review`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.failedTests[0].history.map((entry: { status: string }) => entry.status)).toEqual([
+      "passed",
+      "failed"
+    ]);
+    expect(body.failedTests[0].knownIssues[0].title).toBe("tracked checkout issue");
+    expect(body.failedTests[0].flaky.isCandidate).toBe(true);
+  });
+
   /* -------------------------------------------------------------- */
   /* T208-1: GET /runs/:runId/qmo-summary{,.md}                     */
   /* -------------------------------------------------------------- */
