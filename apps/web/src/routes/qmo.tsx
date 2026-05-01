@@ -25,6 +25,7 @@ import { createRoute } from "@tanstack/react-router";
 import { AllureHistoryTrendCard } from "@/features/allure-history-trend-card/AllureHistoryTrendCard";
 import { InsightsView } from "@/features/insights-view/InsightsView";
 import { QmoSummaryBanner } from "@/features/qmo-summary-banner/QmoSummaryBanner";
+import { ReleaseReviewDraftPanel } from "@/features/release-review-draft/ReleaseReviewDraftPanel";
 import { useCurrentProjectQuery } from "@/hooks/use-current-project-query";
 import { useInsightsSummary } from "@/hooks/use-insights-summary";
 import { useLatestQmoSummary } from "@/hooks/use-latest-qmo-summary";
@@ -44,6 +45,11 @@ function InsightsViewRoute(): React.ReactElement {
   return (
     <section data-testid="qmo-view" aria-label="Insights View" className="flex flex-col gap-4">
       <QmoSummaryBanner
+        summary={latest.summary}
+        isError={latest.isError}
+        isEmpty={latest.isEmpty}
+      />
+      <ReleaseReviewDraftPanel
         summary={latest.summary}
         isError={latest.isError}
         isEmpty={latest.isEmpty}
