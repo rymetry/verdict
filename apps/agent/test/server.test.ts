@@ -10,9 +10,15 @@ import {
   type CommandPolicy
 } from "../src/commands/policy.js";
 import { PlaywrightCommandBuildError } from "../src/playwright/builder.js";
-import type { DetectedPackageManager, ProjectSummary } from "@pwqa/shared";
+import type {
+  DetectedPackageManager,
+  ProjectSummary,
+  RunMetadata,
+  TestResultSummary
+} from "@pwqa/shared";
 import { runPathsFor } from "../src/storage/paths.js";
 import { PatchValidationError, type PatchManager } from "../src/git/patchManager.js";
+import { persistRepairComparison } from "../src/repair/repairComparison.js";
 
 let workdir: string;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +53,45 @@ function fakeProjectSummary(projectRoot: string, packageManager = fakePackageMan
     warnings: [],
     blockingExecution: false
   };
+}
+
+function fakeRunSummary(failed = 0): TestResultSummary {
+  return {
+    total: 3,
+    passed: 3 - failed,
+    failed,
+    skipped: 0,
+    flaky: 0,
+    failedTests:
+      failed > 0
+        ? [{ testId: "checkout", title: "checkout fails", status: "failed", attachments: [] }]
+        : []
+  };
+}
+
+function fakeRunMetadata(projectRoot: string, runId: string, failed = 0): RunMetadata {
+  return {
+    runId,
+    projectId: projectRoot,
+    projectRoot,
+    status: failed > 0 ? "failed" : "passed",
+    startedAt: "2026-05-01T00:00:00.000Z",
+    completedAt: "2026-05-01T00:00:01.000Z",
+    command: { executable: process.execPath, args: ["-e", ""] },
+    cwd: projectRoot,
+    exitCode: failed > 0 ? 1 : 0,
+    signal: null,
+    durationMs: 1_000,
+    requested: { projectId: projectRoot, headed: false },
+    paths: runPathsFor(projectRoot, runId),
+    summary: fakeRunSummary(failed),
+    warnings: []
+  };
+}
+
+function writeRunMetadata(run: RunMetadata): void {
+  fs.mkdirSync(run.paths.runDir, { recursive: true });
+  fs.writeFileSync(run.paths.metadataJson, JSON.stringify(run, null, 2));
 }
 
 beforeAll(() => {
@@ -226,6 +271,112 @@ describe("HTTP API surface", () => {
     expect((await blocked.json()).error.code).toBe("PATCH_APPLY_FAILED");
     expect(invalid.status).toBe(400);
     expect((await invalid.json()).error.code).toBe("PATCH_INVALID");
+  });
+
+  it("starts a repair rerun from a completed baseline run", async () => {
+    const packageManager = fakePackageManager({ executable: process.execPath, args: ["-e", ""] });
+    const baseline = fakeRunMetadata(workdir, "run-baseline-11111111", 1);
+    writeRunMetadata(baseline);
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      },
+      policyFactory: (root): CommandPolicy => ({
+        allowedExecutables: ["node"],
+        argValidator: unsafelyAllowAnyArgsValidator,
+        cwdBoundary: root,
+        envAllowlist: ["PATH"]
+      })
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir, packageManager), packageManager });
+
+    const response = await app.request(`/runs/${baseline.runId}/repair-rerun`, {
+      method: "POST"
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body.baselineRunId).toBe(baseline.runId);
+    expect(body.rerunId).toMatch(/^run-[a-z0-9]+-[a-f0-9]{8}$/);
+    expect(body.comparisonPath).toBe(
+      path.join(baseline.paths.runDir, "reruns", body.rerunId, "comparison.json")
+    );
+  });
+
+  it("returns 409 while a repair comparison artifact is not generated yet", async () => {
+    const baseline = fakeRunMetadata(workdir, "run-baseline-22222222", 1);
+    writeRunMetadata(baseline);
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+
+    const response = await app.request(
+      `/runs/${baseline.runId}/repair-comparison/run-rerun-33333333`
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("NO_REPAIR_COMPARISON");
+  });
+
+  it("serves persisted repair comparison artifacts", async () => {
+    const baseline = fakeRunMetadata(workdir, "run-baseline-44444444", 1);
+    const rerun = fakeRunMetadata(workdir, "run-rerun-55555555", 0);
+    writeRunMetadata(baseline);
+    await persistRepairComparison({ baseline, rerun });
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+
+    const response = await app.request(
+      `/runs/${baseline.runId}/repair-comparison/${rerun.runId}`
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.verdict).toBe("fixed");
+    expect(body.resolvedFailures).toHaveLength(1);
+  });
+
+  it("rejects invalid repair comparison rerun ids", async () => {
+    const baseline = fakeRunMetadata(workdir, "run-baseline-66666666", 1);
+    writeRunMetadata(baseline);
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+
+    const response = await app.request(
+      `/runs/${baseline.runId}/repair-comparison/not-a-run`
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("INVALID_RERUN_ID");
   });
 
   it("returns Allure history JSONL entries via /projects/:id/allure-history (§1.3)", async () => {

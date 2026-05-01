@@ -570,6 +570,75 @@ export const PatchRevertResponseSchema = z.object({
 });
 export type PatchRevertResponse = z.infer<typeof PatchRevertResponseSchema>;
 
+export const RepairComparisonVerdictSchema = z.enum([
+  "fixed",
+  "improved",
+  "unchanged",
+  "regressed",
+  "inconclusive"
+]);
+export type RepairComparisonVerdict = z.infer<typeof RepairComparisonVerdictSchema>;
+
+export const RepairComparisonArtifactLinksSchema = z.object({
+  runDir: z.string(),
+  playwrightHtml: z.string(),
+  allureReportDir: z.string(),
+  qmoSummaryJsonPath: z.string()
+});
+export type RepairComparisonArtifactLinks = z.infer<
+  typeof RepairComparisonArtifactLinksSchema
+>;
+
+export const RepairComparisonDeltaSchema = z.object({
+  total: z.number().int(),
+  passed: z.number().int(),
+  failed: z.number().int(),
+  skipped: z.number().int(),
+  flaky: z.number().int()
+});
+export type RepairComparisonDelta = z.infer<typeof RepairComparisonDeltaSchema>;
+
+export const RepairFailureComparisonSchema = z.object({
+  key: z.string(),
+  title: z.string(),
+  before: FailedTestSchema.optional(),
+  after: FailedTestSchema.optional()
+});
+export type RepairFailureComparison = z.infer<typeof RepairFailureComparisonSchema>;
+
+export const RepairComparisonSchema = z.object({
+  baselineRunId: z.string(),
+  rerunId: z.string(),
+  generatedAt: z.string(),
+  verdict: RepairComparisonVerdictSchema,
+  before: z.object({
+    status: RunStatusSchema,
+    summary: TestResultSummarySchema.optional()
+  }),
+  after: z.object({
+    status: RunStatusSchema,
+    summary: TestResultSummarySchema.optional()
+  }),
+  delta: RepairComparisonDeltaSchema.optional(),
+  resolvedFailures: z.array(RepairFailureComparisonSchema),
+  remainingFailures: z.array(RepairFailureComparisonSchema),
+  newFailures: z.array(RepairFailureComparisonSchema),
+  artifacts: z.object({
+    before: RepairComparisonArtifactLinksSchema,
+    after: RepairComparisonArtifactLinksSchema
+  }),
+  warnings: z.array(z.string())
+});
+export type RepairComparison = z.infer<typeof RepairComparisonSchema>;
+
+export const RepairRerunResponseSchema = z.object({
+  baselineRunId: z.string(),
+  rerunId: z.string(),
+  status: z.literal("queued"),
+  comparisonPath: z.string()
+});
+export type RepairRerunResponse = z.infer<typeof RepairRerunResponseSchema>;
+
 /* ----------------------------------------------------------------------- */
 /* WebSocket event envelope (PLAN.v2 §20)                                  */
 /* ----------------------------------------------------------------------- */

@@ -7,6 +7,8 @@ import {
   AiAnalysisResponseSchema,
   type AiAnalysisResponse,
   QmoSummarySchema,
+  RepairComparisonSchema,
+  RepairRerunResponseSchema,
   RunRequestSchema,
   FailureReviewResponseSchema,
   type RunListItem,
@@ -25,6 +27,12 @@ import { AuditPersistenceError } from "../lib/errors.js";
 import { buildFailureReview } from "../reporting/failureReview.js";
 import { buildAiAnalysisContext } from "../ai/analysisContext.js";
 import { AiAnalysisError, type AiAnalysisAdapter } from "../ai/cliAdapter.js";
+import {
+  isValidRunIdSegment,
+  persistRepairComparison,
+  readRepairComparison,
+  repairComparisonPathFor
+} from "../repair/repairComparison.js";
 
 /**
  * Maps startup failures to stable public codes. Structured logs use the
@@ -420,6 +428,109 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
       );
     }
     return c.body(body, 200, { "Content-Type": "text/markdown; charset=utf-8" });
+  });
+
+  router.post("/runs/:runId/repair-rerun", async (c) => {
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    const { run } = result;
+    if (run.status === "queued" || run.status === "running") {
+      return apiError(
+        c,
+        "REPAIR_RERUN_NOT_READY",
+        "Repair rerun requires a completed baseline run.",
+        409
+      );
+    }
+    const current = projectStore.get();
+    if (!current || current.summary.id !== run.projectId) {
+      return apiError(c, "NO_PROJECT", "Project is not open.", 404);
+    }
+    try {
+      const handle = await runManager.startRun({
+        projectId: current.summary.id,
+        projectRoot: current.summary.rootPath,
+        packageManager: current.packageManager,
+        request: { ...run.requested, projectId: current.summary.id },
+        allureResultsDir: current.summary.allureResultsDir,
+        hasAllurePlaywright: current.summary.hasAllurePlaywright
+      });
+      const comparisonPath = repairComparisonPathFor(run, handle.runId);
+      void handle.finished
+        .then((rerun) => persistRepairComparison({ baseline: run, rerun }))
+        .catch((error) => {
+          logger?.error(
+            {
+              runId: run.runId,
+              rerunId: handle.runId,
+              artifactKind: "metadata",
+              ...errorLogFields(error)
+            },
+            "repair comparison persistence failed"
+          );
+        });
+      return c.json(
+        RepairRerunResponseSchema.parse({
+          baselineRunId: run.runId,
+          rerunId: handle.runId,
+          status: "queued",
+          comparisonPath
+        }),
+        202
+      );
+    } catch (error) {
+      logger?.error(
+        {
+          runId: run.runId,
+          projectIdHash: projectIdHash(current.summary.id),
+          ...errorLogFields(error)
+        },
+        "repair rerun start failed"
+      );
+      const response = startupFailureResponse(error);
+      return apiError(c, response.code, response.message, response.status);
+    }
+  });
+
+  router.get("/runs/:runId/repair-comparison/:rerunId", async (c) => {
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    const rerunId = c.req.param("rerunId");
+    if (!isValidRunIdSegment(rerunId)) {
+      return apiError(c, "INVALID_RERUN_ID", "rerunId is not valid.", 400);
+    }
+    try {
+      const comparison = await readRepairComparison(result.run, rerunId);
+      return c.json(RepairComparisonSchema.parse(comparison));
+    } catch (error) {
+      const code =
+        error instanceof Error && "code" in error && typeof (error as { code: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : "READ_FAILED";
+      if (code === "ENOENT") {
+        return apiError(
+          c,
+          "NO_REPAIR_COMPARISON",
+          "Repair comparison is not yet generated for this rerun.",
+          409
+        );
+      }
+      logger?.error(
+        {
+          runId: result.run.runId,
+          rerunId,
+          artifactKind: "metadata",
+          ...errorLogFields(error)
+        },
+        "repair comparison read failed"
+      );
+      return apiError(
+        c,
+        "REPAIR_COMPARISON_READ_FAILED",
+        "Repair comparison could not be read.",
+        500
+      );
+    }
   });
 
   router.post("/runs/:runId/cancel", (c) => {
