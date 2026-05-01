@@ -11,6 +11,7 @@ import {
 } from "../src/commands/policy.js";
 import { PlaywrightCommandBuildError } from "../src/playwright/builder.js";
 import type { DetectedPackageManager, ProjectSummary } from "@pwqa/shared";
+import { runPathsFor } from "../src/storage/paths.js";
 
 let workdir: string;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -1009,6 +1010,90 @@ describe("HTTP API surface", () => {
     ]);
     expect(body.failedTests[0].knownIssues[0].title).toBe("tracked checkout issue");
     expect(body.failedTests[0].flaky.isCandidate).toBe(true);
+  });
+
+  it("runs AI analysis for a failed run and persists the validated response", async () => {
+    const runIdLocal = "r-ai-analysis";
+    const paths = runPathsFor(workdir, runIdLocal);
+    fs.mkdirSync(paths.runDir, { recursive: true });
+    fs.writeFileSync(
+      paths.metadataJson,
+      JSON.stringify({
+        runId: runIdLocal,
+        projectId: workdir,
+        projectRoot: workdir,
+        status: "failed",
+        startedAt: "2026-04-29T00:00:00Z",
+        completedAt: "2026-04-29T00:01:00Z",
+        command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+        cwd: workdir,
+        exitCode: 1,
+        signal: null,
+        durationMs: 1000,
+        requested: { projectId: workdir, headed: false },
+        paths,
+        summary: {
+          total: 1,
+          passed: 0,
+          failed: 1,
+          skipped: 0,
+          flaky: 0,
+          failedTests: [
+            {
+              testId: "pw-id",
+              title: "should checkout",
+              fullTitle: "checkout > should checkout",
+              status: "failed",
+              stack: `at ${path.join(workdir, "tests/checkout.spec.ts")}:1:1`,
+              attachments: []
+            }
+          ]
+        },
+        warnings: []
+      })
+    );
+    let capturedRunId: string | undefined;
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      },
+      aiAdapterFactory: () => ({
+        async analyze(input) {
+          capturedRunId = input.context.runId;
+          expect(JSON.stringify(input.context)).not.toContain(workdir);
+          return {
+            classification: "test-bug",
+            rootCause: "Assertion expected stale checkout copy.",
+            evidence: ["failure context includes checkout stack"],
+            risk: ["test-only change"],
+            filesTouched: ["tests/checkout.spec.ts"],
+            confidence: 0.75,
+            requiresHumanDecision: false
+          };
+        }
+      })
+    });
+    await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: workdir })
+    });
+
+    const response = await app.request(`/runs/${runIdLocal}/ai-analysis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+    expect(response.status).toBe(200);
+    expect(capturedRunId).toBe(runIdLocal);
+    const body = await response.json();
+    expect(body.analysis.classification).toBe("test-bug");
+    const persisted = JSON.parse(fs.readFileSync(path.join(paths.runDir, "ai-analysis.json"), "utf8"));
+    expect(persisted.analysis.rootCause).toBe("Assertion expected stale checkout copy.");
   });
 
   /* -------------------------------------------------------------- */

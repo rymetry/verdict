@@ -521,6 +521,24 @@ export const AiAnalysisOutputSchema = z.object({
 });
 export type AiAnalysisOutput = z.infer<typeof AiAnalysisOutputSchema>;
 
+export const AiAnalysisProviderSchema = z.enum(["claude-code"]);
+export type AiAnalysisProvider = z.infer<typeof AiAnalysisProviderSchema>;
+
+export const AiAnalysisRequestSchema = z.object({
+  provider: AiAnalysisProviderSchema.optional().default("claude-code")
+});
+export type AiAnalysisRequest = z.infer<typeof AiAnalysisRequestSchema>;
+
+export const AiAnalysisResponseSchema = z.object({
+  runId: z.string(),
+  projectId: z.string(),
+  provider: AiAnalysisProviderSchema,
+  generatedAt: z.string(),
+  analysis: AiAnalysisOutputSchema,
+  warnings: z.array(z.string())
+});
+export type AiAnalysisResponse = z.infer<typeof AiAnalysisResponseSchema>;
+
 /* ----------------------------------------------------------------------- */
 /* WebSocket event envelope (PLAN.v2 §20)                                  */
 /* ----------------------------------------------------------------------- */

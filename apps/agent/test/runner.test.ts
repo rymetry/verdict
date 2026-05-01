@@ -59,6 +59,24 @@ describe("NodeCommandRunner", () => {
     expect(chunks.join("")).toBe("ab");
   });
 
+  it("passes stdin without including it in the audited argv", async () => {
+    const auditEntries: Array<{ args: ReadonlyArray<string> }> = [];
+    const runner = createNodeCommandRunner({
+      policy: basePolicy(),
+      audit: (entry) => auditEntries.push({ args: entry.args })
+    });
+    const handle = runner.run({
+      executable: "node",
+      args: ["-e", "process.stdin.pipe(process.stdout)"],
+      cwd: workdir,
+      stdin: "context-secret"
+    });
+    const result = await handle.result;
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("context-secret");
+    expect(JSON.stringify(auditEntries)).not.toContain("context-secret");
+  });
+
   it("returns non-zero exit code without throwing", async () => {
     const runner = createNodeCommandRunner({ policy: basePolicy() });
     const handle = runner.run({

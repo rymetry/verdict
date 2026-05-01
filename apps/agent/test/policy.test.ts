@@ -3,8 +3,10 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   type CommandArgsValidationResult,
+  createAiCommandPolicy,
   createAllureCommandPolicy,
   createDefaultCommandPolicy,
+  validateAiArgs,
   validateAllureArgs,
   validateAllureGenerateArgs,
   validatePhase1PlaywrightArgs
@@ -95,6 +97,42 @@ describe("default Phase 1 command policy", () => {
         cwd: cwdBoundary
       })
     ).toThrow(CommandPolicyError);
+  });
+});
+
+describe("AI CLI command policy (T500-2)", () => {
+  const schema = JSON.stringify({ type: "object", properties: { ok: { type: "boolean" } } });
+  const approvedArgs = [
+    "--bare",
+    "--print",
+    "--input-format",
+    "text",
+    "--output-format",
+    "json",
+    "--tools",
+    "",
+    "--no-session-persistence",
+    "--json-schema",
+    schema
+  ];
+
+  it("accepts the approved Claude Code non-interactive JSON invocation", () => {
+    expect(validateAiArgs({ executableName: "claude", args: approvedArgs }).ok).toBe(true);
+  });
+
+  it.each([
+    ["codex", approvedArgs],
+    ["claude", ["--print", "--output-format", "text"]],
+    ["claude", [...approvedArgs.slice(0, -1), "{not-json}"]]
+  ])("rejects unsafe AI invocation for %s", (executableName, args) => {
+    expect(validateAiArgs({ executableName, args }).ok).toBe(false);
+  });
+
+  it("returns a policy that only allows Claude Code", async () => {
+    const fs = await import("node:fs");
+    const policy = createAiCommandPolicy(os.tmpdir());
+    expect(policy.allowedExecutables).toEqual(["claude"]);
+    expect(policy.cwdBoundary).toBe(fs.realpathSync(os.tmpdir()));
   });
 });
 
