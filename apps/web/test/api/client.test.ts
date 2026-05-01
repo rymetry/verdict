@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchRuns, runAiAnalysis } from "@/api/client";
+import {
+  applyPatchTemporary,
+  checkPatch,
+  fetchRepairComparison,
+  fetchRuns,
+  revertPatchTemporary,
+  runAiAnalysis,
+  startRepairRerun
+} from "@/api/client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -79,3 +87,65 @@ describe("api/client runAiAnalysis", () => {
     );
   });
 });
+
+describe("api/client repair review", () => {
+  it("posts patch check/apply/revert requests and validates responses", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, filesTouched: ["a.ts"], dirtyFiles: [], diagnostics: "ok" }))
+      .mockResolvedValueOnce(jsonResponse({ applied: true, filesTouched: ["a.ts"], diagnostics: "ok" }))
+      .mockResolvedValueOnce(jsonResponse({ reverted: true, filesTouched: ["a.ts"], diagnostics: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(checkPatch("p1", "diff")).resolves.toMatchObject({ ok: true });
+    await expect(applyPatchTemporary("p1", "diff")).resolves.toMatchObject({ applied: true });
+    await expect(revertPatchTemporary("p1", "diff")).resolves.toMatchObject({ reverted: true });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/patches/check",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/patches/apply-temporary",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/patches/revert-temporary",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("starts repair rerun and treats missing comparison as pending", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        baselineRunId: "run-before-11111111",
+        rerunId: "run-after-22222222",
+        status: "queued",
+        comparisonPath: "/tmp/comparison.json"
+      }))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: "NO_REPAIR_COMPARISON", message: "pending" } }, 409));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(startRepairRerun("run-before-11111111")).resolves.toMatchObject({
+      rerunId: "run-after-22222222"
+    });
+    await expect(fetchRepairComparison("run-before-11111111", "run-after-22222222")).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/runs/run-before-11111111/repair-rerun",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/runs/run-before-11111111/repair-comparison/run-after-22222222"
+    );
+  });
+});
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
+}

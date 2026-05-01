@@ -1,14 +1,15 @@
 import * as React from "react";
 import { useEffect } from "react";
-import { AlertTriangle, Bot, FileDiff, Sparkles } from "lucide-react";
+import { AlertTriangle, Bot, Sparkles } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
-import type { AiAnalysisOutput } from "@pwqa/shared";
+import type { AiAnalysisOutput, AiAnalysisResponse } from "@pwqa/shared";
 
 import { runAiAnalysis } from "@/api/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RepairReviewPanel } from "@/features/repair-review/RepairReviewPanel";
 import { formatMutationError } from "@/lib/mutation-error";
 
 interface AiAnalysisPanelProps {
@@ -34,7 +35,8 @@ export function AiAnalysisPanel({ runId }: AiAnalysisPanelProps): React.ReactEle
     }
   }, [analysisMutation.status, analysisMutation.error]);
 
-  const analysis = analysisMutation.data?.analysis;
+  const response = analysisMutation.data;
+  const analysis = response?.analysis;
 
   return (
     <Card>
@@ -75,7 +77,7 @@ export function AiAnalysisPanel({ runId }: AiAnalysisPanelProps): React.ReactEle
           </Alert>
         ) : null}
 
-        {analysis ? <AnalysisResult analysis={analysis} /> : null}
+        {response ? <AnalysisResult response={response} runId={runId} /> : null}
       </CardContent>
     </Card>
   );
@@ -86,7 +88,14 @@ function ClassificationBadge({ analysis }: { analysis: AiAnalysisOutput }): Reac
   return <Badge variant={variant}>{analysis.classification}</Badge>;
 }
 
-function AnalysisResult({ analysis }: { analysis: AiAnalysisOutput }): React.ReactElement {
+function AnalysisResult({
+  response,
+  runId
+}: {
+  response: AiAnalysisResponse;
+  runId: string | null;
+}): React.ReactElement {
+  const { analysis } = response;
   return (
     <div className="flex flex-col gap-3">
       <section className="rounded-sm border border-[var(--line-faint)] bg-[var(--bg-1)] p-3">
@@ -119,15 +128,11 @@ function AnalysisResult({ analysis }: { analysis: AiAnalysisOutput }): React.Rea
       ) : null}
 
       {analysis.proposedPatch ? (
-        <section className="rounded-sm border border-[var(--line-faint)] bg-[var(--bg-0)] p-3">
-          <h4 className="m-0 mb-2 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase text-[var(--ink-3)]">
-            <FileDiff className="size-3.5" aria-hidden="true" />
-            Proposed patch
-          </h4>
-          <pre className="m-0 max-h-[28vh] overflow-auto whitespace-pre-wrap break-words rounded-sm bg-[var(--bg-2)] p-2 font-mono text-[11.5px] text-[var(--ink-1)]">
-            {analysis.proposedPatch}
-          </pre>
-        </section>
+        <RepairReviewPanel
+          runId={runId ?? response.runId}
+          projectId={response.projectId}
+          patch={analysis.proposedPatch}
+        />
       ) : (
         <div className="flex items-center gap-2 text-xs text-[var(--ink-3)]">
           <AlertTriangle className="size-3.5" aria-hidden="true" />
