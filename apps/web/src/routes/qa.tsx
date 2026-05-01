@@ -17,6 +17,7 @@ import { createRoute } from "@tanstack/react-router";
 
 import { fetchRun } from "@/api/client";
 import { AiAnalysisPanel } from "@/features/ai-analysis/AiAnalysisPanel";
+import { AiTestGenerationPanel } from "@/features/ai-test-generation/AiTestGenerationPanel";
 import { FailureReview } from "@/features/failure-review/FailureReview";
 import { ProjectPicker } from "@/features/project-picker/ProjectPicker";
 import { RunConsole } from "@/features/run-console/RunConsole";
@@ -75,6 +76,7 @@ function QaView(): React.ReactElement {
       <div className="flex flex-col gap-4">
         <FailureReview runId={activeRunId} />
         <AiAnalysisPanel runId={activeRunId} />
+        <AiTestGenerationPanel runId={activeRunId} />
       </div>
     </div>
   );
