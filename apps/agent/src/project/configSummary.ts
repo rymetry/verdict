@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type {
+  AuthSetupRisk,
   ConfigReporter,
   ConfigUseOption,
   FixtureEntry,
@@ -32,6 +33,7 @@ const KNOWN_REPORTERS = [
 
 const BLOCK_COMMENT_PATTERN = /\/\*[\s\S]*?\*\//g;
 const LINE_COMMENT_PATTERN = /\/\/.*$/gm;
+const AUTH_SETUP_FILE_PATTERN = /(^|[./_-])(auth|login|global|setup)[._-]?(setup|auth|login)?\.(?:ts|tsx|js|jsx|mjs|cjs)$/i;
 
 function stripJsComments(text: string): string {
   return text.replace(BLOCK_COMMENT_PATTERN, "").replace(LINE_COMMENT_PATTERN, "");
@@ -123,6 +125,64 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function isUnsafeProjectRelativePath(value: string): boolean {
+  if (value.startsWith("-") || path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value)) {
+    return true;
+  }
+  return value.split(/[\\/]+/).includes("..");
+}
+
+function riskPath(value: string): string | undefined {
+  return isUnsafeProjectRelativePath(value) ? undefined : value.split(/[\\/]+/).join("/");
+}
+
+function extractConfigAuthRisks(
+  configText: string | undefined,
+  configRelativePath: string | undefined
+): AuthSetupRisk[] {
+  if (!configText) return [];
+  const stripped = stripJsComments(configText);
+  const risks: AuthSetupRisk[] = [];
+
+  for (const match of stripped.matchAll(/\bstorageState\s*:\s*(['"])([^'"]+)\1/g)) {
+    const value = match[2]!;
+    const relativePath = riskPath(value);
+    risks.push({
+      signal: "storage-state-path",
+      severity: relativePath ? "warning" : "high",
+      message: relativePath
+        ? "storageState file path is configured; cookie/localStorage contents are intentionally not read."
+        : "storageState path is absolute or escapes the project boundary.",
+      relativePath,
+      source: "heuristic"
+    });
+  }
+
+  if (/\bstorageState\s*:\s*\{/.test(stripped)) {
+    risks.push({
+      signal: "storage-state-inline",
+      severity: "high",
+      message: "Inline storageState object detected; avoid committing cookies or localStorage values.",
+      relativePath: configRelativePath,
+      source: "heuristic"
+    });
+  }
+
+  for (const match of stripped.matchAll(/\bglobalSetup\s*:\s*(['"])([^'"]+)\1/g)) {
+    const value = match[2]!;
+    const relativePath = riskPath(value);
+    risks.push({
+      signal: "global-setup",
+      severity: "info",
+      message: "globalSetup is configured; auth setup side effects should be documented.",
+      relativePath: relativePath ?? configRelativePath,
+      source: "heuristic"
+    });
+  }
+
+  return risks;
+}
+
 async function scanFixtureFiles(projectRoot: string): Promise<{
   fixtureFiles: FixtureEntry[];
   warnings: string[];
@@ -184,6 +244,62 @@ async function scanFixtureFiles(projectRoot: string): Promise<{
   return { fixtureFiles, warnings };
 }
 
+async function scanAuthSetupRisks(projectRoot: string): Promise<{
+  authRisks: AuthSetupRisk[];
+  warnings: string[];
+}> {
+  const authRisks: AuthSetupRisk[] = [];
+  const warnings: string[] = [];
+  let directoriesVisited = 0;
+  let sourceFilesVisited = 0;
+  let stopped = false;
+
+  async function visit(directory: string): Promise<void> {
+    if (stopped) return;
+    directoriesVisited += 1;
+    if (directoriesVisited > MAX_DIRECTORY_ENTRIES) {
+      warnings.push(`auth setup scan stopped after ${MAX_DIRECTORY_ENTRIES} directories.`);
+      stopped = true;
+      return;
+    }
+
+    let entries: Array<import("node:fs").Dirent>;
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      warnings.push(`auth setup scan skipped unreadable directory ${relativeToProject(projectRoot, directory)}. code=${readErrnoCode(error)}`);
+      return;
+    }
+
+    for (const entry of entries) {
+      if (stopped) return;
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIPPED_DIRECTORIES.has(entry.name)) {
+          await visit(absolute);
+        }
+        continue;
+      }
+      if (!entry.isFile() || !SOURCE_EXTENSIONS.has(path.extname(entry.name))) continue;
+      sourceFilesVisited += 1;
+      if (sourceFilesVisited > MAX_SOURCE_FILES) {
+        warnings.push(`auth setup scan stopped after ${MAX_SOURCE_FILES} source files.`);
+        stopped = true;
+        return;
+      }
+
+      const risk = await inspectAuthSetupCandidate(projectRoot, absolute);
+      if (risk) {
+        authRisks.push(risk);
+      }
+    }
+  }
+
+  await visit(projectRoot);
+  authRisks.sort((a, b) => (a.relativePath ?? "").localeCompare(b.relativePath ?? ""));
+  return { authRisks, warnings };
+}
+
 async function inspectFixtureCandidate(
   projectRoot: string,
   absolutePath: string
@@ -212,12 +328,45 @@ async function inspectFixtureCandidate(
   };
 }
 
+async function inspectAuthSetupCandidate(
+  projectRoot: string,
+  absolutePath: string
+): Promise<AuthSetupRisk | undefined> {
+  const stat = await fs.stat(absolutePath);
+  if (stat.size > SOURCE_FILE_SIZE_CAP_BYTES) return undefined;
+
+  const relativePath = relativeToProject(projectRoot, absolutePath);
+  if (path.basename(relativePath).startsWith("playwright.config.")) {
+    return undefined;
+  }
+  const lowerRelative = relativePath.toLowerCase();
+  const basename = path.basename(relativePath);
+  const looksLikeAuthSetup =
+    AUTH_SETUP_FILE_PATTERN.test(basename) ||
+    (lowerRelative.split("/").some((part) => part.includes("auth")) &&
+      basename.toLowerCase().includes("setup"));
+
+  const text = stripJsComments(await fs.readFile(absolutePath, "utf8"));
+  if (!looksLikeAuthSetup && !/\bstorageState\b/.test(text)) {
+    return undefined;
+  }
+
+  return {
+    signal: "auth-setup-file",
+    severity: /\bstorageState\b/.test(text) ? "warning" : "info",
+    message: "Auth setup-like source file detected; review storageState handling and secret hygiene.",
+    relativePath,
+    source: "heuristic"
+  };
+}
+
 export async function buildConfigSummary(
   request: BuildConfigSummaryRequest
 ): Promise<ProjectConfigSummary> {
   const generatedAt = new Date().toISOString();
   const configRead = await readConfigText(request.configPath);
   const fixtureScan = await scanFixtureFiles(request.projectRoot);
+  const authSetupScan = await scanAuthSetupRisks(request.projectRoot);
   const config = {
     path: request.configPath,
     relativePath: request.configPath
@@ -234,6 +383,10 @@ export async function buildConfigSummary(
     reporters: extractReporters(configRead.text),
     useOptions: extractUseOptions(configRead.text),
     fixtureFiles: fixtureScan.fixtureFiles,
-    warnings: [...configRead.warnings, ...fixtureScan.warnings]
+    authRisks: [
+      ...extractConfigAuthRisks(configRead.text, config.relativePath),
+      ...authSetupScan.authRisks
+    ],
+    warnings: [...configRead.warnings, ...fixtureScan.warnings, ...authSetupScan.warnings]
   };
 }
