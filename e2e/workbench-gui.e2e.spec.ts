@@ -1,10 +1,10 @@
 /**
- * Manual GUI smoke (Phase 1 acceptance §32).
+ * Manual GUI E2E (Phase 1 acceptance §32).
  *
  * Drives the Workbench GUI through Playwright to verify the end-to-end
  * surface that unit + integration tests cannot reach: the React shell,
  * TanStack Query plumbing, the project open form, and the inventory render.
- * This spec is now a CI smoke gate and runs against an already-running
+ * This spec is now a CI E2E gate and runs against an already-running
  * `pnpm dev:agent` + `pnpm dev:web`. The Vite dev server proxy is part of
  * the acceptance surface because the browser app talks to the local Agent
  * through `/api` and `/ws` in Phase 1.
@@ -23,7 +23,8 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const WORKBENCH_URL = process.env.WORKBENCH_URL ?? "http://127.0.0.1:5173";
-const FIXTURE = process.env.FIXTURE_ROOT ?? path.resolve(here, "../fixtures/sample-pw-project");
+const FIXTURE =
+  process.env.FIXTURE_ROOT ?? path.resolve(here, "../tests/fixtures/sample-pw-project");
 const ARTIFACT_DIR = path.resolve(here, "_artifacts");
 
 test("Workbench GUI: open project + render inventory", async ({ page }) => {
@@ -53,9 +54,9 @@ test("Workbench GUI: open project + render inventory", async ({ page }) => {
 
   await page.getByRole("radio", { name: "Light" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await page.screenshot({ path: path.join(ARTIFACT_DIR, "gui-smoke-light.png"), fullPage: true });
+  await page.screenshot({ path: path.join(ARTIFACT_DIR, "gui-e2e-light.png"), fullPage: true });
 
   await page.getByRole("radio", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.screenshot({ path: path.join(ARTIFACT_DIR, "gui-smoke-dark.png"), fullPage: true });
+  await page.screenshot({ path: path.join(ARTIFACT_DIR, "gui-e2e-dark.png"), fullPage: true });
 });

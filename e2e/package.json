@@ -1,0 +1,15 @@
+{
+  "name": "@pwqa-e2e/workbench-gui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test --config=playwright.config.ts workbench-gui.e2e.spec.ts",
+    "e2e:allure": "playwright test --config=playwright.config.ts workbench-allure.e2e.spec.ts",
+    "smoke": "pnpm e2e",
+    "smoke:allure": "pnpm e2e:allure"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}

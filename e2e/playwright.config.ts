@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: "**/*.smoke.spec.ts",
+  testMatch: "**/*.e2e.spec.ts",
   reporter: [["list"]],
   use: {
     headless: true,

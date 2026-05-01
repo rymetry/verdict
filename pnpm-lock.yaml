@@ -177,7 +177,7 @@ importers:
         specifier: ^1.55.0
         version: 1.59.1
 
-  tests/smoke:
+  e2e:
     devDependencies:
       '@playwright/test':
         specifier: ^1.55.0
