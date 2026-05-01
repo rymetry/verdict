@@ -44,6 +44,10 @@ describe("default Phase 1 command policy", () => {
       "pnpm",
       ["exec", "playwright", "test", "--project", "chromium", "tests/example.spec.ts"]
     ],
+    [
+      "pnpm",
+      ["exec", "playwright", "test", "--retries", "2", "--workers", "4"]
+    ],
     ["npx", ["--no-install", "playwright", "test", "--reporter=list,json,html"]],
     ["yarn", ["playwright", "test", "--list", "--reporter=json"]]
   ])("allows approved %s Playwright command shapes", (executableName, args) => {
@@ -71,7 +75,11 @@ describe("default Phase 1 command policy", () => {
     ["pnpm", ["exec", "playwright", "test", "tests/example.spec.ts\0"]],
     ["pnpm", ["exec", "playwright", "test", "--grep", "x".repeat(4_097)]],
     ["pnpm", ["exec", "playwright", "test", "--reporter=list,json,html,allure-playwright"]],
-    ["pnpm", ["exec", "playwright", "test", "--grep", "--headed"]]
+    ["pnpm", ["exec", "playwright", "test", "--grep", "--headed"]],
+    ["pnpm", ["exec", "playwright", "test", "--retries", "--headed"]],
+    ["pnpm", ["exec", "playwright", "test", "--retries", "1.5"]],
+    ["pnpm", ["exec", "playwright", "test", "--workers", "0"]],
+    ["pnpm", ["exec", "playwright", "test", "--workers", "00"]]
   ])("rejects unsafe command shape for %s", (executableName, args) => {
     expect(validate(executableName, args).ok).toBe(false);
   });
@@ -81,6 +89,7 @@ describe("default Phase 1 command policy", () => {
     [["exec", "playwright", "test", "%25252e%25252e/outside.spec.ts"], "path-traversal"],
     [["exec", "playwright", "test", "%2fetc%2fpasswd"], "absolute-path"],
     [["exec", "playwright", "test", "--grep", "--headed"], "missing-flag-value"],
+    [["exec", "playwright", "test", "--workers", "00"], "invalid-numeric-value"],
     [["exec", "playwright", "test", "--config", "/tmp/x"], "disallowed-flag"]
   ])("returns stable validator code %#", (args, code) => {
     const result = validate("pnpm", args);

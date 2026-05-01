@@ -15,6 +15,7 @@ import {
   RunCancelledPayloadSchema,
   RunErrorPayloadSchema,
   RunListItemSchema,
+  RunRequestSchema,
   RunQueuedPayloadSchema,
   RunStartedPayloadSchema,
   SnapshotPayloadSchema,
@@ -24,6 +25,26 @@ import {
 } from "@pwqa/shared";
 
 describe("shared run warning schemas", () => {
+  it("validates RunRequest retries and workers controls", () => {
+    expect(
+      RunRequestSchema.parse({
+        projectId: "project-1",
+        headed: true,
+        projectNames: ["chromium"],
+        retries: 1,
+        workers: 2
+      })
+    ).toEqual({
+      projectId: "project-1",
+      headed: true,
+      projectNames: ["chromium"],
+      retries: 1,
+      workers: 2
+    });
+    expect(() => RunRequestSchema.parse({ projectId: "project-1", retries: -1 })).toThrow();
+    expect(() => RunRequestSchema.parse({ projectId: "project-1", workers: 0 })).toThrow();
+  });
+
   it("validates QA inventory metadata on test cases", () => {
     expect(
       QaTestMetadataSchema.parse({

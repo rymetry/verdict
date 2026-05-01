@@ -67,6 +67,10 @@ export function useStartRunMutation(): StartRunMutation {
         projectId: variables.projectId,
         specPath: variables.specPath,
         grep: variables.grep,
+        projectNames: variables.projectNames,
+        headed: variables.headed,
+        retries: variables.retries,
+        workers: variables.workers,
         error
       });
     }

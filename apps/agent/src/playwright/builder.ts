@@ -48,6 +48,12 @@ export function buildPlaywrightTestCommand(input: PlaywrightCommandInput): {
   for (const projectName of input.request.projectNames ?? []) {
     args.push("--project", projectName);
   }
+  if (input.request.retries !== undefined) {
+    args.push("--retries", String(input.request.retries));
+  }
+  if (input.request.workers !== undefined) {
+    args.push("--workers", String(input.request.workers));
+  }
 
   // testIds and grep map onto Playwright's --grep, which only honours the last
   // occurrence. Combine them into a single alternation regex.

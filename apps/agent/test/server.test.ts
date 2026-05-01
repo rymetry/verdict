@@ -1324,6 +1324,43 @@ describe("HTTP API surface", () => {
     expect(response.status).toBe(400);
   });
 
+  it("rejects /runs RunRequest with invalid retries or workers", async () => {
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: workdir })
+    });
+
+    const invalidRetries = await app.request("/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: workdir,
+        retries: -1
+      })
+    });
+    expect(invalidRetries.status).toBe(400);
+
+    const invalidWorkers = await app.request("/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: workdir,
+        workers: 0
+      })
+    });
+    expect(invalidWorkers.status).toBe(400);
+  });
+
   it("only echoes Access-Control-Allow-Origin for allowed origins", async () => {
     const { app } = buildApp({
       env: {

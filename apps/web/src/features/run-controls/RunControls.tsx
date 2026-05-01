@@ -49,6 +49,10 @@ const QUALITY_GATE_PROFILE_OPTIONS: ReadonlyArray<{
 export function RunControls({ project }: RunControlsProps): React.ReactElement {
   const [specPath, setSpecPath] = React.useState("");
   const [grep, setGrep] = React.useState("");
+  const [projectNames, setProjectNames] = React.useState("");
+  const [headed, setHeaded] = React.useState(false);
+  const [retries, setRetries] = React.useState("");
+  const [workers, setWorkers] = React.useState("");
   const [qualityGateProfile, setQualityGateProfile] =
     React.useState<QualityGateProfile>("local-review");
 
@@ -97,7 +101,10 @@ export function RunControls({ project }: RunControlsProps): React.ReactElement {
       projectId: project.id,
       specPath: specPath.trim() || undefined,
       grep: grep.trim() || undefined,
-      headed: false,
+      projectNames: parseProjectNames(projectNames),
+      headed,
+      retries: parseOptionalInteger(retries),
+      workers: parseOptionalInteger(workers),
       // Only include the profile when it deviates from the agent default
       // ("local-review"). Sending the default explicitly is harmless but the
       // field is conceptually "override default", so omitting it keeps the
@@ -144,6 +151,67 @@ export function RunControls({ project }: RunControlsProps): React.ReactElement {
             />
           </div>
           <div className="flex flex-col gap-1.5">
+            <Label htmlFor="project-names">Project names (comma-separated; optional)</Label>
+            <Input
+              id="project-names"
+              placeholder="chromium, webkit"
+              value={projectNames}
+              onChange={(event) => {
+                setProjectNames(event.target.value);
+                clearErrorOnEdit();
+              }}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="retries">Retries</Label>
+              <Input
+                id="retries"
+                type="number"
+                min={0}
+                step={1}
+                placeholder="default"
+                value={retries}
+                onChange={(event) => {
+                  setRetries(event.target.value);
+                  clearErrorOnEdit();
+                }}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="workers">Workers</Label>
+              <Input
+                id="workers"
+                type="number"
+                min={1}
+                step={1}
+                placeholder="default"
+                value={workers}
+                onChange={(event) => {
+                  setWorkers(event.target.value);
+                  clearErrorOnEdit();
+                }}
+              />
+            </div>
+            <label
+              htmlFor="headed"
+              className="flex h-9 items-center gap-2 self-end rounded-md border border-[var(--line-strong)] bg-[var(--bg-elev)] px-3 text-sm text-[var(--ink-1)]"
+            >
+              <input
+                id="headed"
+                type="checkbox"
+                checked={headed}
+                onChange={(event) => {
+                  setHeaded(event.target.checked);
+                  clearErrorOnEdit();
+                }}
+              />
+              Headed
+            </label>
+          </div>
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="quality-gate-profile">Quality Gate profile</Label>
             <select
               id="quality-gate-profile"
@@ -185,4 +253,17 @@ export function RunControls({ project }: RunControlsProps): React.ReactElement {
       </CardContent>
     </Card>
   );
+}
+
+function parseProjectNames(value: string): string[] | undefined {
+  const names = value
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  return names.length > 0 ? names : undefined;
+}
+
+function parseOptionalInteger(value: string): number | undefined {
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : Number(trimmed);
 }
