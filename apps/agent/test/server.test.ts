@@ -12,6 +12,7 @@ import {
 import { PlaywrightCommandBuildError } from "../src/playwright/builder.js";
 import type { DetectedPackageManager, ProjectSummary } from "@pwqa/shared";
 import { runPathsFor } from "../src/storage/paths.js";
+import { PatchValidationError, type PatchManager } from "../src/git/patchManager.js";
 
 let workdir: string;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -81,6 +82,150 @@ describe("HTTP API surface", () => {
     const body = await response.json();
     expect(body.ok).toBe(true);
     expect(body.service).toBe("playwright-workbench-agent");
+  });
+
+  it("checks patches for the currently opened project", async () => {
+    const patchManager: PatchManager = {
+      check: vi.fn().mockResolvedValue({
+        ok: true,
+        filesTouched: ["src/example.ts"],
+        dirtyFiles: [],
+        diagnostics: "ok"
+      }),
+      applyTemporary: vi.fn(),
+      revertTemporary: vi.fn()
+    };
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      },
+      patchManagerFactory: () => patchManager
+    });
+    projectStore.set({
+      summary: fakeProjectSummary(workdir),
+      packageManager: fakePackageManager()
+    });
+
+    const response = await app.request("/patches/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: workdir,
+        patch: "diff --git a/src/example.ts b/src/example.ts\n"
+      })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(patchManager.check).toHaveBeenCalledWith({
+      projectRoot: workdir,
+      patch: "diff --git a/src/example.ts b/src/example.ts\n"
+    });
+  });
+
+  it("rejects malformed patch API requests before touching git", async () => {
+    const patchManager: PatchManager = {
+      check: vi.fn(),
+      applyTemporary: vi.fn(),
+      revertTemporary: vi.fn()
+    };
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      },
+      patchManagerFactory: () => patchManager
+    });
+
+    const response = await app.request("/patches/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: workdir, patch: "" })
+    });
+
+    expect(response.status).toBe(400);
+    expect(patchManager.check).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for patch requests when the project is not open", async () => {
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+
+    const response = await app.request("/patches/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: workdir, patch: "diff --git a/a b/a\n" })
+    });
+
+    expect(response.status).toBe(404);
+  });
+
+  it("maps temporary patch apply and validation failures to sanitized HTTP responses", async () => {
+    const patchManager: PatchManager = {
+      check: vi.fn(),
+      applyTemporary: vi
+        .fn()
+        .mockResolvedValueOnce({
+          applied: false,
+          filesTouched: ["src/example.ts"],
+          diagnostics: "Patch target files have uncommitted changes."
+        })
+        .mockRejectedValueOnce(
+          new PatchValidationError("Patch must contain at least one git diff header.")
+        ),
+      revertTemporary: vi.fn()
+    };
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      },
+      patchManagerFactory: () => patchManager
+    });
+    projectStore.set({
+      summary: fakeProjectSummary(workdir),
+      packageManager: fakePackageManager()
+    });
+
+    const blocked = await app.request("/patches/apply-temporary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: workdir,
+        patch: "diff --git a/src/example.ts b/src/example.ts\n"
+      })
+    });
+    const invalid = await app.request("/patches/apply-temporary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: workdir,
+        patch: "diff --git a/src/example.ts b/src/example.ts\n"
+      })
+    });
+
+    expect(blocked.status).toBe(409);
+    expect((await blocked.json()).error.code).toBe("PATCH_APPLY_FAILED");
+    expect(invalid.status).toBe(400);
+    expect((await invalid.json()).error.code).toBe("PATCH_INVALID");
   });
 
   it("returns Allure history JSONL entries via /projects/:id/allure-history (§1.3)", async () => {

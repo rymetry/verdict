@@ -24,7 +24,8 @@ export type CommandArgsValidationCode =
   | "missing-results-dir"
   | "missing-output-flag"
   | "missing-history-path-flag"
-  | "invalid-json-schema";
+  | "invalid-json-schema"
+  | "disallowed-operand";
 
 export type CommandArgsValidationResult =
   | { ok: true }
@@ -730,6 +731,59 @@ export function createAiCommandPolicy(cwdBoundary: string): CommandPolicy {
   return {
     allowedExecutables: ["claude"],
     argValidator: validateAiArgs,
+    cwdBoundary: fs.realpathSync(cwdBoundary),
+    envAllowlist: DEFAULT_ENV_ALLOWLIST
+  };
+}
+
+/* ----------------------------------------------------------------- */
+/* T600-1: Git patch API command policy                              */
+/* ----------------------------------------------------------------- */
+
+export function validateGitPatchArgs({
+  executableName,
+  args
+}: {
+  executableName: string;
+  args: ReadonlyArray<string>;
+}): CommandArgsValidationResult {
+  if (executableName !== "git") {
+    return argsInvalid(
+      "unsupported-executable",
+      `Executable '${executableName}' is not supported by the Git patch policy.`
+    );
+  }
+  for (const arg of args) {
+    const valueError = validateArgValue(arg);
+    if (!valueError.ok) return valueError;
+  }
+  if (isAllowedGitApplyShape(args)) return argsValid;
+  if (args[0] === "status" && args[1] === "--porcelain" && args[2] === "--") {
+    if (args.length === 3) {
+      return argsInvalid("disallowed-operand", "git status must receive at least one path.");
+    }
+    for (const operand of args.slice(3)) {
+      const operandResult = validateProjectRelativeOperand(operand);
+      if (!operandResult.ok) return operandResult;
+    }
+    return argsValid;
+  }
+  return argsInvalid("invalid-prefix", "Git patch policy allows only status and apply shapes.");
+}
+
+function isAllowedGitApplyShape(args: ReadonlyArray<string>): boolean {
+  const joined = args.join("\u0000");
+  return (
+    joined === ["apply", "--check", "-"].join("\u0000") ||
+    joined === ["apply", "-"].join("\u0000") ||
+    joined === ["apply", "--reverse", "-"].join("\u0000")
+  );
+}
+
+export function createGitPatchCommandPolicy(cwdBoundary: string): CommandPolicy {
+  return {
+    allowedExecutables: ["git"],
+    argValidator: validateGitPatchArgs,
     cwdBoundary: fs.realpathSync(cwdBoundary),
     envAllowlist: DEFAULT_ENV_ALLOWLIST
   };
