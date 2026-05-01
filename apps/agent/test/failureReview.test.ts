@@ -114,6 +114,29 @@ describe("buildFailureReview", () => {
     expect(review.failedTests[0]?.test.relativeFilePath).toBe("tests/checkout.spec.ts");
     expect(review.failedTests[0]?.test.absoluteFilePath).toBeUndefined();
   });
+
+  it("does not trust traversal relative paths from failed tests or attachments", async () => {
+    const run = makeRun("r5");
+    run.summary!.failedTests[0] = {
+      ...run.summary!.failedTests[0]!,
+      filePath: "../external/secret.spec.ts",
+      relativeFilePath: "../external/secret.spec.ts",
+      attachments: [
+        {
+          kind: "trace",
+          label: "trace",
+          path: path.join(workdir, "trace.zip"),
+          relativePath: "../external/trace.zip"
+        }
+      ]
+    };
+
+    const review = await buildFailureReview({ run, projectRoot: workdir });
+
+    expect(review.failedTests[0]?.test.filePath).toBe("secret.spec.ts");
+    expect(review.failedTests[0]?.test.relativeFilePath).toBe("secret.spec.ts");
+    expect(review.failedTests[0]?.test.attachments[0]?.path).toBe("trace.zip");
+  });
 });
 
 function makeRun(runId: string): RunMetadata {

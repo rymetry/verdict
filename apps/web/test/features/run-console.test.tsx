@@ -1,14 +1,24 @@
 // RunConsole の表示と subscribe/unsubscribe ライフサイクル。
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 import * as React from "react";
 
 import type { EventStream, EventListener, WsConnectionState } from "@/api/events";
+import { WorkbenchApiError, cancelRun } from "@/api/client";
 import { RunConsole } from "@/features/run-console/RunConsole";
+
+vi.mock("@/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/client")>();
+  return {
+    ...actual,
+    cancelRun: vi.fn()
+  };
+});
 
 afterEach(() => {
   cleanup();
+  vi.mocked(cancelRun).mockReset();
 });
 
 interface FakeStream extends EventStream {
@@ -235,6 +245,35 @@ describe("RunConsole", () => {
     });
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.getByText("Cancelled by user request")).toBeInTheDocument();
+  });
+
+  it("running run の Cancel 404 race は benign hint として扱う", async () => {
+    vi.mocked(cancelRun).mockRejectedValue(
+      new WorkbenchApiError("Run r1 is not currently active.", "NOT_ACTIVE", 404)
+    );
+    const stream = makeFakeStream();
+    render(<RunConsole eventStream={stream} activeRunId="r1" />);
+
+    await act(async () => {
+      stream.emit({
+        type: "run.started",
+        runId: "r1",
+        sequence: 1,
+        timestamp: "2026-04-28T00:00:00Z",
+        payload: {
+          command: { executable: "pnpm", args: ["test"] },
+          cwd: "/repo",
+          startedAt: "2026-04-28T00:00:00Z"
+        }
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run r1" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Run already finished.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Cancel request failed/)).not.toBeInTheDocument();
   });
 
   it("run.cancelled with internal reason shows 'Cancelled by workbench'", async () => {

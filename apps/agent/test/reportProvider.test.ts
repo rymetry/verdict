@@ -97,4 +97,40 @@ describe("PlaywrightJsonReportProvider", () => {
       path.join(workdir, "tests", "example.spec.ts")
     );
   });
+
+  it("does not invent root-level paths for unresolved bare spec file names", async () => {
+    const file = path.join(workdir, "results.json");
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        stats: { expected: 0, unexpected: 1, flaky: 0, skipped: 0, duration: 12 },
+        suites: [
+          {
+            file: "missing.spec.ts",
+            specs: [
+              {
+                title: "fails",
+                file: "missing.spec.ts",
+                tests: [
+                  {
+                    id: "t1",
+                    status: "unexpected",
+                    results: [{ status: "failed", error: { message: "boom" } }]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      })
+    );
+    const result = await playwrightJsonReportProvider.readSummary({
+      projectRoot: workdir,
+      runDir: workdir,
+      playwrightJsonPath: file
+    });
+
+    expect(result?.summary.failedTests[0]?.filePath).toBeUndefined();
+    expect(result?.summary.failedTests[0]?.relativeFilePath).toBeUndefined();
+  });
 });

@@ -25,7 +25,7 @@ import {
   type WorkbenchEvent
 } from "@pwqa/shared";
 
-import { cancelRun } from "@/api/client";
+import { cancelRun, WorkbenchApiError } from "@/api/client";
 import type { EventStream } from "@/api/events";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -155,7 +155,7 @@ export function RunConsole({
 }: RunConsoleProps): React.ReactElement {
   const [state, setState] = React.useState<RunConsoleState>(initialRunConsoleState);
   const [cancelPending, setCancelPending] = React.useState(false);
-  const [cancelError, setCancelError] = React.useState(false);
+  const [cancelMessage, setCancelMessage] = React.useState<string | null>(null);
   const stdoutRef = React.useRef<HTMLPreElement>(null);
 
   // activeRunId が変化したら旧 run の log を残さないよう state を毎回リセットする。
@@ -164,7 +164,7 @@ export function RunConsole({
   React.useEffect(() => {
     setState(initialRunConsoleState);
     setCancelPending(false);
-    setCancelError(false);
+    setCancelMessage(null);
   }, [activeRunId]);
 
   React.useEffect(() => {
@@ -195,10 +195,18 @@ export function RunConsole({
   const handleCancel = React.useCallback(() => {
     if (!activeRunId) return;
     setCancelPending(true);
-    setCancelError(false);
+    setCancelMessage(null);
     cancelRun(activeRunId)
       .catch((error) => {
-        setCancelError(true);
+        if (
+          error instanceof WorkbenchApiError &&
+          (error.status === 404 || error.code === "NOT_ACTIVE")
+        ) {
+          setCancelMessage("Run already finished.");
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Unknown error";
+        setCancelMessage(`Cancel request failed: ${message}`);
         // eslint-disable-next-line no-console -- cancel API failure should leave a production trace
         console.error("[RunConsole] cancelRun failed", error);
       })
@@ -245,9 +253,9 @@ export function RunConsole({
           </p>
         ) : null}
         <RunWarningsAlert warnings={state.warnings} />
-        {cancelError ? (
-          <p className="mt-2 text-sm text-[var(--fail)]">
-            Cancel request failed.
+        {cancelMessage ? (
+          <p className="mt-2 text-sm text-[var(--ink-2)]">
+            {cancelMessage}
           </p>
         ) : null}
         {state.artifactLinks.length > 0 ? (

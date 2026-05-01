@@ -141,17 +141,27 @@ async function fileExists(target: string): Promise<boolean> {
   }
 }
 
-async function writeWorkbenchPlaywrightConfig({
+export async function writeWorkbenchPlaywrightConfig({
   projectRoot,
   baseConfigPath,
-  workbenchConfigPath
+  workbenchConfigPath,
+  jsonOutputPath,
+  htmlOutputDir,
+  logger,
+  runId
 }: {
   projectRoot: string;
   baseConfigPath: string;
   workbenchConfigPath: string;
+  jsonOutputPath: string;
+  htmlOutputDir: string;
+  logger?: RunManagerLogger;
+  runId?: string;
 }): Promise<string[]> {
   const baseRel = normalizeImportPath(path.relative(path.dirname(workbenchConfigPath), baseConfigPath));
   const projectRootLiteral = JSON.stringify(projectRoot);
+  const jsonOutputPathLiteral = JSON.stringify(jsonOutputPath);
+  const htmlOutputDirLiteral = JSON.stringify(htmlOutputDir);
   const contents = [
     "import baseConfig from " + JSON.stringify(baseRel) + ";",
     "import { defineConfig } from '@playwright/test';",
@@ -170,10 +180,12 @@ async function writeWorkbenchPlaywrightConfig({
     "",
     "const base = baseConfig ?? {};",
     `const projectRoot = ${projectRootLiteral};`,
+    `const jsonOutputFile = ${jsonOutputPathLiteral};`,
+    `const htmlOutputFolder = ${htmlOutputDirLiteral};`,
     "const reporter = [",
     "  ...normalizeReporter(base.reporter),",
-    "  ['json', { outputFile: process.env.PLAYWRIGHT_JSON_OUTPUT_NAME }],",
-    "  ['html', { outputFolder: process.env.PLAYWRIGHT_HTML_REPORT, open: 'never' }],",
+    "  ['json', { outputFile: jsonOutputFile }],",
+    "  ['html', { outputFolder: htmlOutputFolder, open: 'never' }],",
     "];",
     "",
     "export default defineConfig({",
@@ -191,6 +203,14 @@ async function writeWorkbenchPlaywrightConfig({
   } catch (error) {
     const code = errorCode(error);
     if (PERSIST_FATAL_CODES.has(code)) throw error;
+    logger?.warn?.(
+      {
+        runId,
+        artifactKind: "playwright-json" satisfies ArtifactKind,
+        ...errorLogFields(error)
+      },
+      "failed to write Workbench Playwright config"
+    );
     return [
       `Workbench Playwright config could not be written; run-scoped JSON reporter injection skipped. code=${code}`
     ];
@@ -473,7 +493,11 @@ export function createRunManager({
       ? await writeWorkbenchPlaywrightConfig({
           projectRoot: params.projectRoot,
           baseConfigPath: params.playwrightConfigPath,
-          workbenchConfigPath
+          workbenchConfigPath,
+          jsonOutputPath: paths.playwrightJson,
+          htmlOutputDir: paths.playwrightHtml,
+          logger,
+          runId
         })
       : [];
 
@@ -905,6 +929,14 @@ async function materializePlaywrightJsonSafely({
     try {
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       await fs.copyFile(legacyPath, targetPath);
+      logger?.warn?.(
+        {
+          runId,
+          artifactKind: "playwright-json" satisfies ArtifactKind,
+          source: "project-root-fallback"
+        },
+        "copied project-root playwright-results.json into run directory"
+      );
       return [
         "Playwright JSON was not produced in the run directory; copied project-root playwright-results.json as fallback."
       ];

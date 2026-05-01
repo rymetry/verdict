@@ -189,6 +189,7 @@ function resolveSpecFilePath(file: string | undefined, projectRoot: string): str
   if (!file.includes("/") && !file.includes("\\")) {
     const underTests = path.join(projectRoot, "tests", file);
     if (fs.existsSync(underTests)) return underTests;
+    return undefined;
   }
   return direct;
 }

@@ -65,10 +65,18 @@ export class AiAnalysisError extends Error {
       | "AI_CLI_QUOTA"
       | "AI_CLI_OUTPUT_INVALID"
       | "AI_CLI_TIMED_OUT"
-      | "AI_CLI_CANCELLED"
+      | "AI_CLI_CANCELLED",
+    cause?: unknown
   ) {
     super(message);
     this.name = "AiAnalysisError";
+    if (cause !== undefined) {
+      Object.defineProperty(this, "cause", {
+        value: cause,
+        enumerable: false,
+        configurable: true
+      });
+    }
   }
 }
 
@@ -157,9 +165,13 @@ async function runAiCli(
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String(error.code) : "";
     if (code === "ENOENT") {
-      throw new AiAnalysisError("Claude Code CLI was not found on PATH.", "AI_CLI_NOT_FOUND");
+      throw new AiAnalysisError(
+        "Claude Code CLI was not found on PATH.",
+        "AI_CLI_NOT_FOUND",
+        error
+      );
     }
-    throw new AiAnalysisError("AI CLI failed before returning a result.", "AI_CLI_FAILED");
+    throw new AiAnalysisError("AI CLI failed before returning a result.", "AI_CLI_FAILED", error);
   }
 }
 
@@ -168,12 +180,7 @@ function classifyNonZeroExit(stderr: string): AiAnalysisError {
   if (lower.includes("unknown option") || lower.includes("unknown flag") || lower.includes("invalid option")) {
     return new AiAnalysisError("AI CLI rejected the configured flags.", "AI_CLI_UNSUPPORTED_FLAG");
   }
-  if (
-    lower.includes("auth") ||
-    lower.includes("login") ||
-    lower.includes("logged in") ||
-    lower.includes("permission denied")
-  ) {
+  if (/\b(auth|authentication|login|logged in)\b/.test(lower) || lower.includes("permission denied")) {
     return new AiAnalysisError("AI CLI authentication failed.", "AI_CLI_AUTH");
   }
   if (

@@ -55,7 +55,8 @@ function relativeFailedTest(test: FailedTest, projectRoot: string): FailedTest {
   const relative = sourcePath ? projectRelativePath(sourcePath, projectRoot) : undefined;
   const attachments = test.attachments.map((artifact) => {
     const artifactRelative =
-      artifact.relativePath ?? projectRelativePath(artifact.path, projectRoot);
+      projectRelativePath(artifact.relativePath ?? "", projectRoot) ??
+      projectRelativePath(artifact.path, projectRoot);
     const artifactDisplay = artifactRelative ?? safeDisplayPath(artifact.path) ?? artifact.label;
     return {
       ...artifact,
@@ -66,8 +67,14 @@ function relativeFailedTest(test: FailedTest, projectRoot: string): FailedTest {
   });
   return {
     ...test,
-    filePath: relative ?? safeDisplayPath(test.filePath),
-    relativeFilePath: relative ?? safeDisplayPath(test.filePath),
+    filePath:
+      projectRelativePath(test.relativeFilePath ?? "", projectRoot) ??
+      relative ??
+      safeDisplayPath(test.filePath),
+    relativeFilePath:
+      projectRelativePath(test.relativeFilePath ?? "", projectRoot) ??
+      relative ??
+      safeDisplayPath(test.filePath),
     absoluteFilePath: undefined,
     attachments
   };
@@ -77,7 +84,11 @@ function projectRelativePath(filePath: string, projectRoot: string): string | un
   if (!filePath) return undefined;
   const windowsRelative = windowsProjectRelativePath(filePath, projectRoot);
   if (windowsRelative) return windowsRelative;
-  if (!path.isAbsolute(filePath)) return normalizePath(filePath);
+  if (!path.isAbsolute(filePath)) {
+    const parts = filePath.split(/[\\/]+/);
+    if (parts.some((part) => part === "..")) return undefined;
+    return parts.filter(Boolean).join("/");
+  }
   const relative = path.relative(projectRoot, filePath);
   if (relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
   return normalizePath(relative);
@@ -86,7 +97,11 @@ function projectRelativePath(filePath: string, projectRoot: string): string | un
 function safeDisplayPath(filePath: string | undefined): string | undefined {
   if (!filePath) return undefined;
   if (/^[A-Za-z]:[\\/]/.test(filePath)) return basenameAny(filePath);
-  if (!path.isAbsolute(filePath)) return normalizePath(filePath);
+  if (!path.isAbsolute(filePath)) {
+    return filePath.split(/[\\/]+/).some((part) => part === "..")
+      ? basenameAny(filePath)
+      : normalizePath(filePath);
+  }
   return basenameAny(filePath);
 }
 

@@ -49,6 +49,19 @@ describe("buildAiAnalysisContext", () => {
     expect(context.failures[0]?.attachments[0]?.path).toBe("outside.spec.ts");
   });
 
+  it("drops traversal relative paths from AI context", async () => {
+    const run = makeRun("r4");
+    const review = makeFailureReview(run, {
+      filePath: "../external/secret.spec.ts",
+      attachmentPath: "../external/trace.zip"
+    });
+    const context = await buildAiAnalysisContext({ run, failureReview: review });
+
+    expect(context.failures[0]?.location).toBeUndefined();
+    expect(context.failures[0]?.attachments[0]?.path).toBe("trace.zip");
+    expect(JSON.stringify(context)).not.toContain("../external");
+  });
+
   it("returns bounded log tails", async () => {
     const run = makeRun("r3");
     fs.mkdirSync(run.paths.runDir, { recursive: true });

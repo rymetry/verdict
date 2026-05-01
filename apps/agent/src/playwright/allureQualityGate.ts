@@ -131,10 +131,7 @@ export async function evaluateAllureQualityGate(
 ): Promise<AllureQualityGateOutcome> {
   const { runner, projectRoot, allureResultsDest, profile } = input;
   const allureBinAbs = path.join(projectRoot, ALLURE_BIN_REL);
-  const ruleEvaluations = await evaluateRulesFromAllureResults(
-    allureResultsDest,
-    input.rules
-  );
+  const enforcement = profile === "local-review" ? "advisory" : "blocking";
 
   if (!fsSync.existsSync(allureBinAbs)) {
     return {
@@ -153,6 +150,10 @@ export async function evaluateAllureQualityGate(
     ? path.relative(projectRoot, input.knownIssuesPath)
     : undefined;
   const args = buildQualityGateArgs(resultsDirRel, input.rules, knownIssuesRel);
+  const {
+    rules: ruleEvaluations,
+    warnings: ruleEvaluationWarnings
+  } = await evaluateRulesFromAllureResultsSafely(allureResultsDest, input.rules);
 
   const startedAt = Date.now();
   const handle = runner.run({
@@ -188,7 +189,7 @@ export async function evaluateAllureQualityGate(
   //   0 = pass, 1 = fail. Treat anything else as an error condition.
   let status: QualityGateResult["status"];
   let failureMode: AllureQualityGateFailureMode | undefined;
-  let warnings: string[] = [];
+  let warnings: string[] = [...ruleEvaluationWarnings];
   if (result.timedOut) {
     status = "error";
     failureMode = "timeout";
@@ -206,15 +207,18 @@ export async function evaluateAllureQualityGate(
       `Allure quality-gate exited with unexpected code. exitCode=${result.exitCode ?? "null"}; signal=${result.signal ?? "null"}`
     ];
   }
-  if (status === "passed" && ruleEvaluations.some((rule) => rule.status === "fail")) {
+  const failedRules = ruleEvaluations.filter((rule) => rule.status === "fail");
+  if (status === "passed" && failedRules.length > 0) {
     status = "failed";
     warnings = [
       ...warnings,
       "Workbench quality-gate rule evaluation failed although the Allure CLI exited 0."
     ];
   }
-  const failedRules = ruleEvaluations.filter((rule) => rule.status === "fail");
-  const enforcement = profile === "local-review" ? "advisory" : "blocking";
+  const persistedStatus =
+    enforcement === "advisory" && status === "failed" && failedRules.length > 0
+      ? "passed"
+      : status;
 
   // Persist-ready QG result. Stdout/stderr are part of the schema
   // (PLAN.v2 §23 raw-first preservation policy) — written verbatim
@@ -223,7 +227,7 @@ export async function evaluateAllureQualityGate(
   // shipped to log aggregators, so the path-redaction policy concerns
   // do not apply here in the same way as run-warning text.
   const persisted: QualityGateResult = {
-    status,
+    status: persistedStatus,
     profile,
     enforcement,
     evaluatedAt: new Date().toISOString(),
@@ -235,7 +239,7 @@ export async function evaluateAllureQualityGate(
     warnings
   };
   return {
-    status,
+    status: persistedStatus,
     exitCode: result.exitCode,
     durationMs,
     failureMode,
@@ -331,6 +335,26 @@ async function evaluateRulesFromAllureResults(
     });
   }
   return evaluations;
+}
+
+async function evaluateRulesFromAllureResultsSafely(
+  allureResultsDest: string,
+  rules: AllureQualityGateInput["rules"]
+): Promise<{ rules: QualityGateRuleEvaluation[]; warnings: string[] }> {
+  try {
+    return {
+      rules: await evaluateRulesFromAllureResults(allureResultsDest, rules),
+      warnings: []
+    };
+  } catch (error) {
+    const code = errorCodeOf(error) ?? (error instanceof Error ? error.name : "UNKNOWN");
+    return {
+      rules: [],
+      warnings: [
+        `Workbench quality-gate rule evaluation could not read allure-results. code=${code}`
+      ]
+    };
+  }
 }
 
 function formatPercent(value: number): string {

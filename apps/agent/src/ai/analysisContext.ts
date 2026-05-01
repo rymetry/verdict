@@ -201,7 +201,11 @@ function projectRelativePath(filePath: string, projectRoot: string): string | un
   if (!filePath) return undefined;
   const windowsRelative = windowsProjectRelativePath(filePath, projectRoot);
   if (windowsRelative) return windowsRelative;
-  if (!path.isAbsolute(filePath)) return filePath.split(/[\\/]+/).join("/");
+  if (!path.isAbsolute(filePath)) {
+    const parts = filePath.split(/[\\/]+/);
+    if (parts.some((part) => part === "..")) return undefined;
+    return parts.filter(Boolean).join("/");
+  }
   const absolute = path.resolve(filePath);
   const relative = path.relative(projectRoot, absolute);
   if (relative.startsWith("..") || path.isAbsolute(relative)) return undefined;

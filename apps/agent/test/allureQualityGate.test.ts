@@ -75,6 +75,20 @@ function setupAllureBinary(): { allureResultsDest: string } {
   return { allureResultsDest };
 }
 
+function writeAllureResult(
+  allureResultsDest: string,
+  status: "passed" | "failed" | "broken" | "skipped" = "failed"
+): void {
+  fs.writeFileSync(
+    path.join(allureResultsDest, `${status}-result.json`),
+    JSON.stringify({
+      uuid: `${status}-uuid`,
+      name: `${status} test`,
+      status
+    })
+  );
+}
+
 describe("buildQualityGateArgs", () => {
   it("emits the bare invocation when rules and known-issues are absent", () => {
     expect(buildQualityGateArgs("results")).toEqual(["quality-gate", "results"]);
@@ -146,6 +160,29 @@ describe("evaluateAllureQualityGate", () => {
     expect(spawned).toHaveLength(0);
   });
 
+  it("skips when binary is missing even if allure-results cannot be read", async () => {
+    const allureResultsDest = path.join(workdir, ".playwright-workbench/runs/r1/missing-results");
+    const { runner, spawned } = fakeRunner({
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 0
+    });
+
+    const outcome = await evaluateAllureQualityGate({
+      runner,
+      projectRoot: workdir,
+      allureResultsDest,
+      profile: "local-review",
+      rules: { maxFailures: 0 }
+    });
+
+    expect(outcome.status).toBe("skipped");
+    expect(outcome.failureMode).toBe("binary-missing");
+    expect(spawned).toHaveLength(0);
+  });
+
   it("returns status='passed' on exit 0 and a persistable QualityGateResult", async () => {
     const { allureResultsDest } = setupAllureBinary();
     const { runner, spawned } = fakeRunner({
@@ -201,6 +238,31 @@ describe("evaluateAllureQualityGate", () => {
     expect(outcome.persisted?.status).toBe("failed");
     expect(outcome.persisted?.profile).toBe("release-smoke");
     expect(outcome.persisted?.stderr).toBe("Gate failed");
+  });
+
+  it("persists local-review rule failures as advisory passed with failedRules", async () => {
+    const { allureResultsDest } = setupAllureBinary();
+    writeAllureResult(allureResultsDest, "failed");
+    const { runner } = fakeRunner({
+      exitCode: 1,
+      signal: null,
+      stdout: "",
+      stderr: "Gate failed",
+      durationMs: 200
+    });
+
+    const outcome = await evaluateAllureQualityGate({
+      runner,
+      projectRoot: workdir,
+      allureResultsDest,
+      profile: "local-review",
+      rules: { maxFailures: 0, minTestsCount: 1 }
+    });
+
+    expect(outcome.status).toBe("passed");
+    expect(outcome.persisted?.status).toBe("passed");
+    expect(outcome.persisted?.enforcement).toBe("advisory");
+    expect(outcome.persisted?.failedRules?.map((rule) => rule.id)).toEqual(["maxFailures"]);
   });
 
   it("returns status='error' with exit-other failure mode on unexpected exit codes", async () => {

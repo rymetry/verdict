@@ -87,6 +87,17 @@ describe("createAiCliAdapter", () => {
       })
     ).rejects.toMatchObject({ code: "AI_CLI_QUOTA" });
   });
+
+  it("classifies spawn ENOENT as AI_CLI_NOT_FOUND", async () => {
+    const adapter = createAiCliAdapter(fakeSpawnErrorRunner("ENOENT"));
+    await expect(
+      adapter.analyze({
+        provider: "claude-code",
+        projectRoot: "/tmp/project",
+        context: baseContext()
+      })
+    ).rejects.toMatchObject({ code: "AI_CLI_NOT_FOUND" });
+  });
 });
 
 function fakeRunner(output: (spec: CommandSpec) => string): CommandRunner {
@@ -130,6 +141,17 @@ function fakeFailingRunner(stderr: string): CommandRunner {
       };
       return {
         result: Promise.resolve(result),
+        cancel() {}
+      } satisfies CommandHandle;
+    }
+  };
+}
+
+function fakeSpawnErrorRunner(code: string): CommandRunner {
+  return {
+    run() {
+      return {
+        result: Promise.reject(Object.assign(new Error(code), { code })),
         cancel() {}
       } satisfies CommandHandle;
     }
