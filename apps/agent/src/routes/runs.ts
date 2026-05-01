@@ -6,6 +6,9 @@ import {
   AiAnalysisRequestSchema,
   AiAnalysisResponseSchema,
   type AiAnalysisResponse,
+  AiTestGenerationRequestSchema,
+  AiTestGenerationResponseSchema,
+  type AiTestGenerationResponse,
   CiArtifactImportRequestSchema,
   QmoSummarySchema,
   ReleaseReviewDraftRequestSchema,
@@ -296,6 +299,96 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
         c,
         "AI_ANALYSIS_FAILED",
         "AI analysis could not be completed.",
+        500
+      );
+    }
+  });
+
+  router.post("/runs/:runId/ai-test-generation", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = AiTestGenerationRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return apiError(
+        c,
+        "INVALID_INPUT",
+        parsed.error.issues.map((i) => i.message).join("; "),
+        400
+      );
+    }
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    const { run } = result;
+    if (run.status === "queued" || run.status === "running") {
+      return apiError(
+        c,
+        "AI_TEST_GENERATION_NOT_READY",
+        "AI test generation requires a completed run.",
+        409
+      );
+    }
+    const adapter = aiAdapterForProject(run.projectRoot);
+    if (!adapter.generateTests) {
+      return apiError(
+        c,
+        "AI_TEST_GENERATION_UNAVAILABLE",
+        "AI adapter does not support test generation.",
+        501
+      );
+    }
+    try {
+      const failureReview = await buildFailureReview({ run, projectRoot: run.projectRoot });
+      const analysisContext = await buildAiAnalysisContext({ run, failureReview });
+      const generationContext = {
+        mode: parsed.data.mode,
+        objective: parsed.data.objective,
+        targetFiles: parsed.data.targetFiles,
+        analysisContext
+      };
+      const generated = await adapter.generateTests({
+        provider: parsed.data.provider,
+        projectRoot: run.projectRoot,
+        context: generationContext
+      });
+      const response = AiTestGenerationResponseSchema.parse({
+        runId: run.runId,
+        projectId: analysisContext.projectId,
+        provider: parsed.data.provider,
+        mode: parsed.data.mode,
+        generatedAt: new Date().toISOString(),
+        result: generated,
+        warnings: analysisContext.warnings
+      } satisfies AiTestGenerationResponse);
+      return c.json(response);
+    } catch (error) {
+      logger?.error(
+        {
+          runId: run.runId,
+          artifactKind: "ai-analysis",
+          ...errorLogFields(error)
+        },
+        "ai-test-generation failed"
+      );
+      if (error instanceof CommandPolicyError) {
+        return apiError(
+          c,
+          "AI_COMMAND_REJECTED",
+          "AI command was rejected before spawn.",
+          400
+        );
+      }
+      if (error instanceof AiAnalysisError) {
+        const status = error.code === "AI_CLI_TIMED_OUT" ? 504 : 502;
+        return apiError(
+          c,
+          error.code,
+          "AI test generation could not be completed.",
+          status
+        );
+      }
+      return apiError(
+        c,
+        "AI_TEST_GENERATION_FAILED",
+        "AI test generation could not be completed.",
         500
       );
     }

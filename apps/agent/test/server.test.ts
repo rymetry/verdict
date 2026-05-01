@@ -1557,6 +1557,58 @@ describe("HTTP API surface", () => {
     expect(persisted.analysis.rootCause).toBe("Assertion expected stale checkout copy.");
   });
 
+  it("runs AI test generation through the redacted gateway context", async () => {
+    const run = fakeRunMetadata(workdir, "run-ai-gen-11111111", 1);
+    writeRunMetadata(run);
+    let capturedObjective: string | undefined;
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      },
+      aiAdapterFactory: () => ({
+        async analyze() {
+          throw new Error("not used");
+        },
+        async generateTests(input) {
+          capturedObjective = input.context.objective;
+          expect(input.context.mode).toBe("healer");
+          expect(input.context.targetFiles).toEqual(["tests/generated.spec.ts"]);
+          expect(JSON.stringify(input.context)).not.toContain(workdir);
+          return {
+            plan: ["Add generated coverage"],
+            proposedPatch: "diff --git a/tests/generated.spec.ts b/tests/generated.spec.ts\n",
+            filesTouched: ["tests/generated.spec.ts"],
+            evidence: ["failure context includes checkout"],
+            risk: ["test-only change"],
+            confidence: 0.72,
+            requiresHumanDecision: false
+          };
+        }
+      })
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+
+    const response = await app.request(`/runs/${run.runId}/ai-test-generation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "healer",
+        objective: "Generate a regression test for checkout failure.",
+        targetFiles: ["tests/generated.spec.ts"]
+      })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(capturedObjective).toBe("Generate a regression test for checkout failure.");
+    expect(body.mode).toBe("healer");
+    expect(body.result.filesTouched).toEqual(["tests/generated.spec.ts"]);
+  });
+
   /* -------------------------------------------------------------- */
   /* T208-1: GET /runs/:runId/qmo-summary{,.md}                     */
   /* -------------------------------------------------------------- */

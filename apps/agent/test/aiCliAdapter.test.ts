@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAiCliAdapter } from "../src/ai/cliAdapter.js";
 import type { CommandHandle, CommandResult, CommandRunner, CommandSpec } from "../src/commands/runner.js";
-import type { AiAnalysisContext } from "@pwqa/shared";
+import type { AiAnalysisContext, AiTestGenerationContext } from "@pwqa/shared";
 
 describe("createAiCliAdapter", () => {
   it("sends context through stdin and validates Claude JSON result output", async () => {
@@ -33,6 +33,27 @@ describe("createAiCliAdapter", () => {
         context: baseContext()
       })
     ).rejects.toMatchObject({ code: "AI_CLI_OUTPUT_INVALID" });
+  });
+
+  it("sends generation context through stdin and validates generated test output", async () => {
+    let captured: CommandSpec | undefined;
+    const adapter = createAiCliAdapter(fakeRunner((spec) => {
+      captured = spec;
+      return JSON.stringify({
+        result: JSON.stringify(validGeneratedTests())
+      });
+    }));
+
+    const generated = await adapter.generateTests?.({
+      provider: "claude-code",
+      projectRoot: "/tmp/project",
+      context: baseGenerationContext()
+    });
+
+    expect(generated?.filesTouched).toEqual(["tests/generated.spec.ts"]);
+    expect(captured?.label).toBe("ai-test-generation:claude-code");
+    expect(captured?.stdin).toContain('"mode": "generator"');
+    expect(captured?.stdin).toContain("unified git diff");
   });
 });
 
@@ -83,5 +104,26 @@ function baseContext(): AiAnalysisContext {
     failures: [],
     logs: [],
     warnings: []
+  };
+}
+
+function validGeneratedTests() {
+  return {
+    plan: ["Add coverage for checkout retry behavior."],
+    proposedPatch: "diff --git a/tests/generated.spec.ts b/tests/generated.spec.ts\n",
+    filesTouched: ["tests/generated.spec.ts"],
+    evidence: ["failure context references checkout retry"],
+    risk: ["test-only change"],
+    confidence: 0.76,
+    requiresHumanDecision: false
+  };
+}
+
+function baseGenerationContext(): AiTestGenerationContext {
+  return {
+    mode: "generator",
+    objective: "Add coverage for checkout retry behavior.",
+    targetFiles: ["tests/generated.spec.ts"],
+    analysisContext: baseContext()
   };
 }

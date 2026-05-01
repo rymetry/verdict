@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   AiAnalysisContextSchema,
   AiAnalysisOutputSchema,
+  AiTestGenerationOutputSchema,
+  AiTestGenerationRequestSchema,
+  AiTestGenerationResponseSchema,
   CiArtifactImportRequestSchema,
   CiArtifactImportResponseSchema,
   CiArtifactLinkSchema,
@@ -318,6 +321,73 @@ describe("shared AI analysis schemas", () => {
         requiresHumanDecision: true
       }).classification
     ).toBe("test-bug");
+  });
+});
+
+describe("shared AI test generation schemas", () => {
+  it("defaults provider, mode, and target files for generation requests", () => {
+    const request = AiTestGenerationRequestSchema.parse({
+      objective: "Add coverage for checkout retries."
+    });
+
+    expect(request.provider).toBe("claude-code");
+    expect(request.mode).toBe("generator");
+    expect(request.targetFiles).toEqual([]);
+  });
+
+  it("rejects unsafe target file paths", () => {
+    expect(() =>
+      AiTestGenerationRequestSchema.parse({
+        objective: "invalid",
+        targetFiles: ["../secret.spec.ts"]
+      })
+    ).toThrow(/target file/);
+
+    expect(() =>
+      AiTestGenerationRequestSchema.parse({
+        objective: "invalid",
+        targetFiles: ["/tmp/secret.spec.ts"]
+      })
+    ).toThrow(/project-relative/);
+
+    expect(() =>
+      AiTestGenerationRequestSchema.parse({
+        objective: "invalid",
+        targetFiles: ["C:\\tmp\\secret.spec.ts"]
+      })
+    ).toThrow(/project-relative/);
+
+    expect(() =>
+      AiTestGenerationRequestSchema.parse({
+        objective: "invalid",
+        targetFiles: ["\\\\server\\share\\secret.spec.ts"]
+      })
+    ).toThrow(/project-relative/);
+  });
+
+  it("validates generation outputs and responses", () => {
+    const result = AiTestGenerationOutputSchema.parse({
+      plan: ["Add a retry test"],
+      proposedPatch: "diff --git a/tests/example.spec.ts b/tests/example.spec.ts\n",
+      filesTouched: ["tests/example.spec.ts"],
+      evidence: ["failure review shows checkout retry gap"],
+      risk: ["test-only change"],
+      confidence: 0.7,
+      requiresHumanDecision: false
+    });
+    expect(result.filesTouched).toEqual(["tests/example.spec.ts"]);
+
+    expect(
+      AiTestGenerationResponseSchema.parse({
+        runId: "run-1",
+        projectId: "project-1",
+        provider: "claude-code",
+        mode: "generator",
+        generatedAt: "2026-05-01T00:00:00.000Z",
+        result,
+        warnings: []
+      }).mode
+    ).toBe("generator");
   });
 });
 
