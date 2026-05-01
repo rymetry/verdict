@@ -539,6 +539,37 @@ export const AiAnalysisResponseSchema = z.object({
 });
 export type AiAnalysisResponse = z.infer<typeof AiAnalysisResponseSchema>;
 
+export const PatchRequestSchema = z.object({
+  projectId: z.string(),
+  patch: z.string().min(1)
+});
+export type PatchRequest = z.infer<typeof PatchRequestSchema>;
+
+export const PatchCheckResponseSchema = z.object({
+  ok: z.boolean(),
+  filesTouched: z.array(z.string()),
+  dirtyFiles: z.array(z.string()),
+  diagnostics: z.string(),
+  reason: z
+    .enum(["dirty-worktree", "apply-check-failed"])
+    .optional()
+});
+export type PatchCheckResponse = z.infer<typeof PatchCheckResponseSchema>;
+
+export const PatchApplyResponseSchema = z.object({
+  applied: z.boolean(),
+  filesTouched: z.array(z.string()),
+  diagnostics: z.string()
+});
+export type PatchApplyResponse = z.infer<typeof PatchApplyResponseSchema>;
+
+export const PatchRevertResponseSchema = z.object({
+  reverted: z.boolean(),
+  filesTouched: z.array(z.string()),
+  diagnostics: z.string()
+});
+export type PatchRevertResponse = z.infer<typeof PatchRevertResponseSchema>;
+
 /* ----------------------------------------------------------------------- */
 /* WebSocket event envelope (PLAN.v2 §20)                                  */
 /* ----------------------------------------------------------------------- */

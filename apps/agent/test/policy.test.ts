@@ -6,9 +6,11 @@ import {
   createAiCommandPolicy,
   createAllureCommandPolicy,
   createDefaultCommandPolicy,
+  createGitPatchCommandPolicy,
   validateAiArgs,
   validateAllureArgs,
   validateAllureGenerateArgs,
+  validateGitPatchArgs,
   validatePhase1PlaywrightArgs
 } from "../src/commands/policy.js";
 import { CommandPolicyError, createNodeCommandRunner } from "../src/commands/runner.js";
@@ -132,6 +134,37 @@ describe("AI CLI command policy (T500-2)", () => {
     const fs = await import("node:fs");
     const policy = createAiCommandPolicy(os.tmpdir());
     expect(policy.allowedExecutables).toEqual(["claude"]);
+    expect(policy.cwdBoundary).toBe(fs.realpathSync(os.tmpdir()));
+  });
+});
+
+describe("Git patch command policy (T600-1)", () => {
+  it.each([
+    [["apply", "--check", "-"]],
+    [["apply", "-"]],
+    [["apply", "--reverse", "-"]],
+    [["status", "--porcelain", "--", "src/example.ts"]],
+    [["status", "--porcelain", "--", "src/example.ts", "tests/example.spec.ts"]]
+  ])("allows approved git invocation %#", (args) => {
+    expect(validateGitPatchArgs({ executableName: "git", args }).ok).toBe(true);
+  });
+
+  it.each([
+    ["node", ["apply", "-"], "unsupported-executable"],
+    ["git", ["apply", "--index", "-"], "invalid-prefix"],
+    ["git", ["status", "--porcelain", "--"], "disallowed-operand"],
+    ["git", ["status", "--porcelain", "--", "/tmp/file.ts"], "absolute-path"],
+    ["git", ["status", "--porcelain", "--", "../outside.ts"], "path-traversal"],
+    ["git", ["status", "--porcelain", "--", "-n"], "flag-like-operand"]
+  ])("rejects unsafe git invocation for %s", (executableName, args, code) => {
+    const result = validateGitPatchArgs({ executableName, args });
+    expect(result).toEqual(expect.objectContaining({ ok: false, code }));
+  });
+
+  it("returns a policy that only allows git", async () => {
+    const fs = await import("node:fs");
+    const policy = createGitPatchCommandPolicy(os.tmpdir());
+    expect(policy.allowedExecutables).toEqual(["git"]);
     expect(policy.cwdBoundary).toBe(fs.realpathSync(os.tmpdir()));
   });
 });

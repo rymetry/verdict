@@ -23,10 +23,12 @@ import {
   createAiCommandPolicy,
   createAllureCommandPolicy,
   createDefaultCommandPolicy,
+  createGitPatchCommandPolicy,
   type CommandPolicy
 } from "./commands/policy.js";
 import { createAiCliAdapter, type AiAnalysisAdapter } from "./ai/cliAdapter.js";
 import { createEventBus, type EventBus } from "./events/bus.js";
+import { createPatchManager, type PatchManager } from "./git/patchManager.js";
 import { errorLogFields, projectIdHash } from "./lib/structuredLog.js";
 import {
   createRunManager,
@@ -35,6 +37,7 @@ import {
 } from "./playwright/runManager.js";
 import { createProjectStore, type ProjectStore } from "./project/store.js";
 import { projectsRoutes } from "./routes/projects.js";
+import { patchesRoutes } from "./routes/patches.js";
 import { runsRoutes } from "./routes/runs.js";
 import { scanProject } from "./project/scanner.js";
 import { workbenchPaths } from "./storage/paths.js";
@@ -59,6 +62,7 @@ export interface BuildAppOptions {
    */
   logger?: RunManagerLogger;
   aiAdapterFactory?: (projectRoot: string) => AiAnalysisAdapter;
+  patchManagerFactory?: (projectRoot: string) => PatchManager;
 }
 
 export interface BuildAppResult {
@@ -67,6 +71,7 @@ export interface BuildAppResult {
   bus: EventBus;
   runnerForProject: (projectRoot: string) => CommandRunner;
   aiAdapterForProject: (projectRoot: string) => AiAnalysisAdapter;
+  patchManagerForProject: (projectRoot: string) => PatchManager;
   runManager: RunManager;
   projectStore: ProjectStore;
 }
@@ -259,6 +264,16 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
   const aiAdapterForProject = (projectRoot: string): AiAnalysisAdapter =>
     options.aiAdapterFactory?.(projectRoot) ?? createAiCliAdapter(aiRunnerForProject(projectRoot));
 
+  const gitPatchRunnerForProject = (projectRoot: string): CommandRunner =>
+    createNodeCommandRunner({
+      policy: createGitPatchCommandPolicy(projectRoot),
+      audit: buildAuditHandler(projectRoot)
+    });
+
+  const patchManagerForProject = (projectRoot: string): PatchManager =>
+    options.patchManagerFactory?.(projectRoot) ??
+    createPatchManager(gitPatchRunnerForProject(projectRoot));
+
   const projectStore = createProjectStore();
   const runManager = createRunManager({
     runnerForProject,
@@ -274,6 +289,7 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
     "/",
     projectsRoutes({ projectStore, runnerForProject, allowedRoots: env.allowedRoots })
   );
+  app.route("/", patchesRoutes({ projectStore, patchManagerForProject, logger }));
   app.route("/", runsRoutes({ projectStore, runManager, logger, aiAdapterForProject }));
   const injectWebSocket = attachWebSocket(app, bus, logger);
 
@@ -299,7 +315,16 @@ export function buildApp(options: BuildAppOptions): BuildAppResult {
       });
   }
 
-  return { app, injectWebSocket, bus, runnerForProject, aiAdapterForProject, runManager, projectStore };
+  return {
+    app,
+    injectWebSocket,
+    bus,
+    runnerForProject,
+    aiAdapterForProject,
+    patchManagerForProject,
+    runManager,
+    projectStore
+  };
 }
 
 async function main(): Promise<void> {
