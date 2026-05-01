@@ -459,6 +459,68 @@ export const FailureReviewResponseSchema = z.object({
 });
 export type FailureReviewResponse = z.infer<typeof FailureReviewResponseSchema>;
 
+export const AiAnalysisLogExcerptSchema = z.object({
+  stream: z.enum(["stdout", "stderr"]),
+  text: z.string(),
+  truncated: z.boolean(),
+  redactions: z.number().int().nonnegative()
+});
+export type AiAnalysisLogExcerpt = z.infer<typeof AiAnalysisLogExcerptSchema>;
+
+export const AiAnalysisFailureContextSchema = z.object({
+  testId: z.string().optional(),
+  title: z.string(),
+  fullTitle: z.string().optional(),
+  status: z.string(),
+  location: z
+    .object({
+      relativePath: z.string(),
+      line: z.number().int().positive().optional(),
+      column: z.number().int().nonnegative().optional()
+    })
+    .optional(),
+  message: z.string().optional(),
+  stack: z.string().optional(),
+  attachments: z.array(EvidenceArtifactSchema),
+  history: z.array(FailureReviewHistoryEntrySchema),
+  knownIssues: z.array(FailureReviewKnownIssueSchema),
+  flaky: FailureReviewFlakySignalSchema
+});
+export type AiAnalysisFailureContext = z.infer<typeof AiAnalysisFailureContextSchema>;
+
+export const AiAnalysisContextSchema = z.object({
+  runId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  status: RunStatusSchema,
+  command: CommandTemplateSchema,
+  requested: RunRequestSchema,
+  summary: TestResultSummarySchema.optional(),
+  failures: z.array(AiAnalysisFailureContextSchema),
+  logs: z.array(AiAnalysisLogExcerptSchema),
+  warnings: z.array(z.string())
+});
+export type AiAnalysisContext = z.infer<typeof AiAnalysisContextSchema>;
+
+export const AiAnalysisOutputSchema = z.object({
+  classification: z.enum([
+    "product-bug",
+    "test-bug",
+    "environment",
+    "flaky",
+    "unknown"
+  ]),
+  rootCause: z.string(),
+  evidence: z.array(z.string()),
+  risk: z.array(z.string()),
+  proposedPatch: z.string().optional(),
+  filesTouched: z.array(z.string()),
+  rerunCommand: z.string().optional(),
+  confidence: z.number().min(0).max(1),
+  requiresHumanDecision: z.boolean()
+});
+export type AiAnalysisOutput = z.infer<typeof AiAnalysisOutputSchema>;
+
 /* ----------------------------------------------------------------------- */
 /* WebSocket event envelope (PLAN.v2 §20)                                  */
 /* ----------------------------------------------------------------------- */
