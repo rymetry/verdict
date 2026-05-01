@@ -3,8 +3,13 @@ import {
   AllureHistoryResponseSchema,
   FailureReviewResponseSchema,
   HealthResponseSchema,
+  PatchApplyResponseSchema,
+  PatchCheckResponseSchema,
+  PatchRevertResponseSchema,
   ProjectSummarySchema,
   QmoSummarySchema,
+  RepairComparisonSchema,
+  RepairRerunResponseSchema,
   RunListResponseSchema,
   RunMetadataSchema,
   TestInventorySchema,
@@ -13,8 +18,13 @@ import {
   type AiAnalysisResponse,
   type FailureReviewResponse,
   type HealthResponse,
+  type PatchApplyResponse,
+  type PatchCheckResponse,
+  type PatchRevertResponse,
   type ProjectSummary,
   type QmoSummary,
+  type RepairComparison,
+  type RepairRerunResponse,
   type RunListResponse,
   type RunMetadata,
   type RunRequest,
@@ -111,6 +121,65 @@ export async function runAiAnalysis(runId: string): Promise<AiAnalysisResponse> 
   });
   const body = await parseJson<unknown>(response);
   return AiAnalysisResponseSchema.parse(body);
+}
+
+export async function checkPatch(
+  projectId: string,
+  patch: string
+): Promise<PatchCheckResponse> {
+  const response = await fetch(`${BASE}/patches/check`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId, patch })
+  });
+  const body = await parseJson<unknown>(response);
+  return PatchCheckResponseSchema.parse(body);
+}
+
+export async function applyPatchTemporary(
+  projectId: string,
+  patch: string
+): Promise<PatchApplyResponse> {
+  const response = await fetch(`${BASE}/patches/apply-temporary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId, patch })
+  });
+  const body = await parseJson<unknown>(response);
+  return PatchApplyResponseSchema.parse(body);
+}
+
+export async function revertPatchTemporary(
+  projectId: string,
+  patch: string
+): Promise<PatchRevertResponse> {
+  const response = await fetch(`${BASE}/patches/revert-temporary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId, patch })
+  });
+  const body = await parseJson<unknown>(response);
+  return PatchRevertResponseSchema.parse(body);
+}
+
+export async function startRepairRerun(runId: string): Promise<RepairRerunResponse> {
+  const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/repair-rerun`, {
+    method: "POST"
+  });
+  const body = await parseJson<unknown>(response);
+  return RepairRerunResponseSchema.parse(body);
+}
+
+export async function fetchRepairComparison(
+  runId: string,
+  rerunId: string
+): Promise<RepairComparison | null> {
+  const response = await fetch(
+    `${BASE}/runs/${encodeURIComponent(runId)}/repair-comparison/${encodeURIComponent(rerunId)}`
+  );
+  if (response.status === 409) return null;
+  const body = await parseJson<unknown>(response);
+  return RepairComparisonSchema.parse(body);
 }
 
 export async function cancelRun(runId: string): Promise<void> {
