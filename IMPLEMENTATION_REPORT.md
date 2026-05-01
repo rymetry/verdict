@@ -1,5 +1,38 @@
 # Implementation Report — PLAN.v2 Progress
 
+## Phase 1.5 Bun Feasibility Spike (2026-05-01)
+
+### 実装サマリ
+
+- **完了タスク数**: 1 (T400)
+- **目的**: PLAN.v2 §30 の Bun feasibility spike を完了し、Bun を標準実行対象に昇格する条件を明確化する。
+
+### T400: Bun feasibility spike report
+
+- **変更ファイル**: `docs/design/T400.md`, `docs/operations/bun-feasibility-report.md`, `IMPLEMENTATION_REPORT.md`
+- **主要設計判断**: Bun 検出時の `experimental-bun` block は維持する。`bunx --no-install` は auto-install 抑止には有効だが、現行 pnpm workspace fixture では `playwright` / `allure` local binary を解決できなかったため、BunCommandRunner の production 実装は専用 Bun fixture と CI 検証が揃うまで延期する。
+- **特記事項**: bare `bunx` は公式 docs 上 npm auto-install fallback があるため、Workbench の暗黙 install 禁止方針に従って実行していない。
+
+### 実行したテスト
+
+- `bun --version`
+- `bunx --no-install --bun playwright --version`
+- `bunx --no-install playwright --version`
+- `bunx --no-install --bun allure --version`
+- `pnpm typecheck`
+- `pnpm test` (agent 411 / web 387)
+- `pnpm build`
+
+`pnpm typecheck` / `pnpm test` は初回 `node_modules` 不在で失敗したため、`pnpm install --frozen-lockfile` を実行して再検証した。sandbox DNS 制限により install は一度失敗し、許可付きで再実行して成功。
+
+### セキュリティ確認事項
+
+- Bare `bunx` による network / global cache 副作用を避けた。
+- production command policy は変更していない。
+- Bun 対応の graduation conditions に local binary only、argv validator、cwd boundary、audit log 継承を明記した。
+
+---
+
 ## Phase 2 Failure Review Workbench Update (2026-05-01)
 
 ### 実装サマリ
