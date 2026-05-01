@@ -8,6 +8,7 @@ import {
   PatchApplyResponseSchema,
   PatchCheckResponseSchema,
   PatchRevertResponseSchema,
+  PlaywrightLaunchCommandResponseSchema,
   ProjectSummarySchema,
   ProjectConfigSummarySchema,
   QmoSummarySchema,
@@ -29,6 +30,8 @@ import {
   type PatchApplyResponse,
   type PatchCheckResponse,
   type PatchRevertResponse,
+  type PlaywrightLaunchCommandRequest,
+  type PlaywrightLaunchCommandResponse,
   type ProjectSummary,
   type ProjectConfigSummary,
   type QmoSummary,
@@ -99,6 +102,22 @@ export async function fetchConfigSummary(projectId: string): Promise<ProjectConf
   );
   const body = await parseJson<unknown>(response);
   return ProjectConfigSummarySchema.parse(body);
+}
+
+export async function createPlaywrightLaunchCommand(
+  projectId: string,
+  request: PlaywrightLaunchCommandRequest
+): Promise<PlaywrightLaunchCommandResponse> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/playwright-launch-command`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request)
+    }
+  );
+  const body = await parseJson<unknown>(response);
+  return PlaywrightLaunchCommandResponseSchema.parse(body);
 }
 
 export async function startRun(request: RunRequest): Promise<{ runId: string; metadata: RunMetadata }> {

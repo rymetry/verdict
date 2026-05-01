@@ -11,9 +11,9 @@ import { createInitialRunState, useRunStore } from "@/store/run-store";
 
 vi.mock("@/api/client", async () => {
   const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
-  return { ...actual, startRun: vi.fn() };
+  return { ...actual, createPlaywrightLaunchCommand: vi.fn(), startRun: vi.fn() };
 });
-import { startRun } from "@/api/client";
+import { createPlaywrightLaunchCommand, startRun } from "@/api/client";
 
 afterEach(() => {
   cleanup();
@@ -63,6 +63,7 @@ function renderControls(project: ProjectSummary | null): {
 beforeEach(() => {
   useRunStore.setState(createInitialRunState(), false);
   vi.mocked(startRun).mockReset();
+  vi.mocked(createPlaywrightLaunchCommand).mockReset();
 });
 
 describe("RunControls", () => {
@@ -299,5 +300,35 @@ describe("RunControls", () => {
     await user.click(button);
     await user.click(button);
     expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
+  });
+
+  it("UI Mode launch command を生成して表示する", async () => {
+    vi.mocked(createPlaywrightLaunchCommand).mockResolvedValue({
+      projectId: "p1",
+      kind: "ui-mode",
+      command: { executable: "pnpm", args: ["exec", "playwright", "test", "--ui"] },
+      warnings: []
+    });
+    const { user } = renderControls(makeProject());
+
+    await user.click(screen.getByRole("button", { name: /UI Mode/ }));
+
+    await waitFor(() => {
+      expect(vi.mocked(createPlaywrightLaunchCommand)).toHaveBeenCalledWith("p1", {
+        kind: "ui-mode"
+      });
+    });
+    expect(screen.getByTestId("playwright-launch-command")).toHaveTextContent(
+      "pnpm exec playwright test --ui"
+    );
+  });
+
+  it("Trace Viewer は trace path 未入力なら API を呼ばず警告する", async () => {
+    const { user } = renderControls(makeProject());
+
+    await user.click(screen.getByRole("button", { name: /Trace Viewer/ }));
+
+    expect(vi.mocked(createPlaywrightLaunchCommand)).not.toHaveBeenCalled();
+    expect(screen.getByText(/Trace Viewer requires a project-relative .zip path/)).toBeInTheDocument();
   });
 });

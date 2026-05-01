@@ -626,6 +626,69 @@ describe("HTTP API surface", () => {
     expect(response.status).toBe(404);
   });
 
+  it("builds safe Playwright launch commands for the opened project", async () => {
+    const packageManager = fakePackageManager({
+      executable: "pnpm",
+      args: ["exec", "playwright", "test"]
+    });
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir, packageManager), packageManager });
+
+    const response = await app.request(
+      `/projects/${encodeURIComponent(workdir)}/playwright-launch-command`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "trace-viewer", tracePath: "test-results/trace.zip" })
+      }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.command).toEqual({
+      executable: "pnpm",
+      args: ["exec", "playwright", "show-trace", "test-results/trace.zip"]
+    });
+  });
+
+  it("rejects unsafe Playwright launch command inputs before command generation", async () => {
+    const packageManager = fakePackageManager({
+      executable: "pnpm",
+      args: ["exec", "playwright", "test"]
+    });
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir, packageManager), packageManager });
+
+    const response = await app.request(
+      `/projects/${encodeURIComponent(workdir)}/playwright-launch-command`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "trace-viewer", tracePath: "../trace.zip" })
+      }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("INVALID_INPUT");
+  });
+
   it("opens a project and exposes it via /projects/current", async () => {
     const { app } = buildApp({
       env: {
