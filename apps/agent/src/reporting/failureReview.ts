@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type {
   AllureHistoryEntry,
   FailedTest,
@@ -32,7 +33,7 @@ export async function buildFailureReview(
   ]);
 
   const failedTests = (input.run.summary?.failedTests ?? []).map((test) =>
-    enrichFailedTest(test, allureResults, history, knownIssues)
+    enrichFailedTest(relativeFailedTest(test, input.projectRoot), allureResults, history, knownIssues)
   );
 
   if (!input.run.summary) {
@@ -47,6 +48,83 @@ export async function buildFailureReview(
     failedTests,
     warnings
   };
+}
+
+function relativeFailedTest(test: FailedTest, projectRoot: string): FailedTest {
+  const sourcePath = test.absoluteFilePath ?? test.filePath;
+  const relative = sourcePath ? projectRelativePath(sourcePath, projectRoot) : undefined;
+  const attachments = test.attachments.map((artifact) => {
+    // Treat producer-supplied relativePath as tainted; unsafe values are demoted to a basename.
+    const artifactRelative =
+      projectRelativePath(artifact.relativePath ?? "", projectRoot) ??
+      projectRelativePath(artifact.path, projectRoot);
+    const artifactDisplay = artifactRelative ?? safeDisplayPath(artifact.path) ?? artifact.label;
+    return {
+      ...artifact,
+      path: artifactDisplay,
+      relativePath: artifactDisplay,
+      absolutePath: undefined
+    };
+  });
+  return {
+    ...test,
+    filePath:
+      projectRelativePath(test.relativeFilePath ?? "", projectRoot) ??
+      relative ??
+      safeDisplayPath(test.filePath),
+    relativeFilePath:
+      projectRelativePath(test.relativeFilePath ?? "", projectRoot) ??
+      relative ??
+      safeDisplayPath(test.filePath),
+    absoluteFilePath: undefined,
+    attachments
+  };
+}
+
+function projectRelativePath(filePath: string, projectRoot: string): string | undefined {
+  if (!filePath) return undefined;
+  const windowsRelative = windowsProjectRelativePath(filePath, projectRoot);
+  if (windowsRelative) return windowsRelative;
+  if (!path.isAbsolute(filePath)) {
+    const parts = filePath.split(/[\\/]+/);
+    if (parts.some((part) => part === "..")) return undefined;
+    return parts.filter(Boolean).join("/");
+  }
+  const relative = path.relative(projectRoot, filePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
+  return normalizePath(relative);
+}
+
+function safeDisplayPath(filePath: string | undefined): string | undefined {
+  if (!filePath) return undefined;
+  if (/^[A-Za-z]:[\\/]/.test(filePath)) return basenameAny(filePath);
+  if (!path.isAbsolute(filePath)) {
+    return filePath.split(/[\\/]+/).some((part) => part === "..")
+      ? basenameAny(filePath)
+      : normalizePath(filePath);
+  }
+  return basenameAny(filePath);
+}
+
+function normalizePath(filePath: string): string {
+  return filePath.split(/[\\/]+/).join("/");
+}
+
+function basenameAny(filePath: string): string {
+  return normalizePath(filePath).split("/").filter(Boolean).at(-1) ?? filePath;
+}
+
+function windowsProjectRelativePath(filePath: string, projectRoot: string): string | undefined {
+  if (!/^[A-Za-z]:[\\/]/.test(filePath) || !/^[A-Za-z]:[\\/]/.test(projectRoot)) {
+    return undefined;
+  }
+  const normalizedRoot = normalizePath(projectRoot).replace(/\/+$/, "");
+  const normalizedPath = normalizePath(filePath);
+  if (normalizedPath.toLowerCase() === normalizedRoot.toLowerCase()) return undefined;
+  if (!normalizedPath.toLowerCase().startsWith(`${normalizedRoot.toLowerCase()}/`)) {
+    return undefined;
+  }
+  return normalizedPath.slice(normalizedRoot.length + 1);
 }
 
 async function readRunAllureResults(

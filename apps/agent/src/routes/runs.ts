@@ -193,7 +193,8 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
         // (T203-1) so RunManager's archive/copy lifecycle activates when
         // the project uses allure-playwright. Undefined → lifecycle no-op.
         allureResultsDir: current.summary.allureResultsDir,
-        hasAllurePlaywright: current.summary.hasAllurePlaywright
+        hasAllurePlaywright: current.summary.hasAllurePlaywright,
+        playwrightConfigPath: current.summary.playwrightConfigPath
       });
       return c.json({ runId: handle.runId, metadata: handle.metadata }, 202);
     } catch (error) {
@@ -396,7 +397,7 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
         return apiError(
           c,
           error.code,
-          "AI analysis could not be completed.",
+          aiErrorMessage(error),
           status
         );
       }
@@ -486,7 +487,7 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
         return apiError(
           c,
           error.code,
-          "AI test generation could not be completed.",
+          aiErrorMessage(error),
           status
         );
       }
@@ -762,7 +763,8 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
         packageManager: current.packageManager,
         request: { ...run.requested, projectId: current.summary.id },
         allureResultsDir: current.summary.allureResultsDir,
-        hasAllurePlaywright: current.summary.hasAllurePlaywright
+        hasAllurePlaywright: current.summary.hasAllurePlaywright,
+        playwrightConfigPath: current.summary.playwrightConfigPath
       });
       const comparisonPath = repairComparisonPathFor(run, handle.runId);
       void handle.finished
@@ -856,6 +858,27 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
 
 function aiAnalysisPathFor(run: RunMetadata): string {
   return path.join(run.paths.runDir, "ai-analysis.json");
+}
+
+function aiErrorMessage(error: AiAnalysisError): string {
+  switch (error.code) {
+    case "AI_CLI_NOT_FOUND":
+      return "Claude Code CLI was not found on PATH.";
+    case "AI_CLI_UNSUPPORTED_FLAG":
+      return "Claude Code CLI does not support the required non-interactive JSON flags.";
+    case "AI_CLI_AUTH":
+      return "Claude Code CLI is not authenticated. Run the Claude login flow before retrying.";
+    case "AI_CLI_QUOTA":
+      return "Claude Code CLI quota, billing, or rate limit prevented analysis.";
+    case "AI_CLI_TIMED_OUT":
+      return "AI CLI timed out before returning a result.";
+    case "AI_CLI_CANCELLED":
+      return "AI CLI run was cancelled.";
+    case "AI_CLI_OUTPUT_INVALID":
+      return "AI CLI returned output that did not match the expected JSON schema.";
+    case "AI_CLI_FAILED":
+      return "AI CLI exited with a non-zero status.";
+  }
 }
 
 function toListItem(run: RunMetadata): RunListItem {

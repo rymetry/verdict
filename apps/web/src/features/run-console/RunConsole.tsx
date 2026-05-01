@@ -25,8 +25,10 @@ import {
   type WorkbenchEvent
 } from "@pwqa/shared";
 
+import { cancelRun, WorkbenchApiError } from "@/api/client";
 import type { EventStream } from "@/api/events";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { RunWarningsAlert } from "./RunWarningsAlert";
@@ -152,6 +154,8 @@ export function RunConsole({
   runSnapshot = null
 }: RunConsoleProps): React.ReactElement {
   const [state, setState] = React.useState<RunConsoleState>(initialRunConsoleState);
+  const [cancelPending, setCancelPending] = React.useState(false);
+  const [cancelMessage, setCancelMessage] = React.useState<string | null>(null);
   const stdoutRef = React.useRef<HTMLPreElement>(null);
 
   // activeRunId が変化したら旧 run の log を残さないよう state を毎回リセットする。
@@ -159,6 +163,8 @@ export function RunConsole({
   // 走らないため、reset と subscribe を分離する。
   React.useEffect(() => {
     setState(initialRunConsoleState);
+    setCancelPending(false);
+    setCancelMessage(null);
   }, [activeRunId]);
 
   React.useEffect(() => {
@@ -186,13 +192,49 @@ export function RunConsole({
   const statusLabel = activeRunId
     ? `Run ${activeRunId.slice(0, 12)} · ${state.status}`
     : "Idle — テスト実行は左カラムから開始します。";
+  const handleCancel = React.useCallback(() => {
+    if (!activeRunId) return;
+    setCancelPending(true);
+    setCancelMessage(null);
+    cancelRun(activeRunId)
+      .catch((error) => {
+        if (
+          error instanceof WorkbenchApiError &&
+          (error.status === 404 || error.code === "NOT_ACTIVE")
+        ) {
+          setCancelMessage("Run already finished.");
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Unknown error";
+        setCancelMessage(`Cancel request failed: ${message}`);
+        // eslint-disable-next-line no-console -- cancel API failure should leave a production trace
+        console.error("[RunConsole] cancelRun failed", error);
+      })
+      .finally(() => {
+        setCancelPending(false);
+      });
+  }, [activeRunId]);
 
   return (
     <Card className="overflow-hidden">
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span>Run console</span>
-          <RunStatusBadge status={state.status} />
+          <span className="flex items-center gap-2">
+            {activeRunId && state.status === "running" ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleCancel}
+                disabled={cancelPending}
+                aria-label={`Cancel run ${activeRunId}`}
+              >
+                {cancelPending ? "Cancelling…" : "Cancel"}
+              </Button>
+            ) : null}
+            <RunStatusBadge status={state.status} />
+          </span>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -211,6 +253,11 @@ export function RunConsole({
           </p>
         ) : null}
         <RunWarningsAlert warnings={state.warnings} />
+        {cancelMessage ? (
+          <p className="mt-2 text-sm text-[var(--ink-2)]">
+            {cancelMessage}
+          </p>
+        ) : null}
         {state.artifactLinks.length > 0 ? (
           <ul
             className="mt-3 flex flex-wrap gap-2"

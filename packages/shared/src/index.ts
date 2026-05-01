@@ -331,6 +331,8 @@ export type EvidenceArtifactKind = z.infer<typeof EvidenceArtifactKindSchema>;
 export const EvidenceArtifactSchema = z.object({
   kind: EvidenceArtifactKindSchema,
   path: z.string(),
+  relativePath: z.string().optional(),
+  absolutePath: z.string().optional(),
   label: z.string()
 });
 export type EvidenceArtifact = z.infer<typeof EvidenceArtifactSchema>;
@@ -340,6 +342,8 @@ export const FailedTestSchema = z.object({
   title: z.string(),
   fullTitle: z.string().optional(),
   filePath: z.string().optional(),
+  relativeFilePath: z.string().optional(),
+  absoluteFilePath: z.string().optional(),
   line: z.number().int().positive().optional(),
   column: z.number().int().nonnegative().optional(),
   status: z.string(),
@@ -439,15 +443,32 @@ export const QualityGateProfileSchema = z.enum([
   "full-regression"
 ]);
 export type QualityGateProfile = z.infer<typeof QualityGateProfileSchema>;
+export const QualityGateEnforcementSchema = z.enum(["advisory", "blocking"]);
+export type QualityGateEnforcement = z.infer<typeof QualityGateEnforcementSchema>;
+
+export const QualityGateRuleEvaluationSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  threshold: z.string(),
+  actual: z.string(),
+  status: z.enum(["pass", "fail"]),
+  message: z.string()
+});
+export type QualityGateRuleEvaluation = z.infer<
+  typeof QualityGateRuleEvaluationSchema
+>;
 
 export const QualityGateResultSchema = z.object({
   status: z.enum(["passed", "failed", "skipped", "error"]),
   profile: QualityGateProfileSchema,
+  enforcement: QualityGateEnforcementSchema.optional(),
   evaluatedAt: z.string(),
   exitCode: z.number().int().nullable(),
   stdout: z.string(),
   stderr: z.string(),
   reportPath: z.string().optional(),
+  rules: z.array(QualityGateRuleEvaluationSchema).optional(),
+  failedRules: z.array(QualityGateRuleEvaluationSchema).optional(),
   warnings: z.array(z.string())
 });
 export type QualityGateResult = z.infer<typeof QualityGateResultSchema>;
@@ -478,7 +499,10 @@ export const QmoSummarySchema = z.object({
     .object({
       status: z.enum(["passed", "failed", "skipped", "error"]),
       profile: z.string(),
+      enforcement: QualityGateEnforcementSchema.optional(),
       exitCode: z.number().int().nullable(),
+      rules: z.array(QualityGateRuleEvaluationSchema).optional(),
+      failedRules: z.array(QualityGateRuleEvaluationSchema).optional(),
       warnings: z.array(z.string())
     })
     .optional(),

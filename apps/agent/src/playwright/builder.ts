@@ -19,6 +19,8 @@ export interface PlaywrightCommandInput {
   htmlOutputDir: string;
   /** Project root used to compute relative paths. */
   projectRoot: string;
+  /** Generated config path that extends the user's config and appends Workbench reporters. */
+  workbenchConfigPath?: string;
 }
 
 const REPORTERS = ["list", "json", "html"] as const;
@@ -37,12 +39,15 @@ export function buildPlaywrightTestCommand(input: PlaywrightCommandInput): {
   const base = input.packageManager.commandTemplates.playwrightTest;
   const args = [...base.args];
 
+  const reporterMode = input.reporterMode ?? "workbench-default";
   // Allure project は playwright.config の reporter option (resultsDir 等) が source of truth。
-  // CLI reporter を渡すと config 側 reporter が Playwright に上書きされるため、PoC の
-  // allure-results 生成経路では project-config mode を使う。
-  if ((input.reporterMode ?? "workbench-default") === "workbench-default") {
+  // CLI reporter を渡すと config 側 reporter が Playwright に上書きされるため、project-config
+  // mode では生成 config に reporter を追加して `--config` で読み込ませる。
+  if (reporterMode === "workbench-default") {
     // 追加 reporter は専用 adapter policy で許可し、既定の reporter セットは広げない。
     args.push(`--reporter=${REPORTERS.join(",")}`);
+  } else if (input.workbenchConfigPath) {
+    args.push("--config", path.relative(input.projectRoot, input.workbenchConfigPath));
   }
 
   if (input.request.headed) {

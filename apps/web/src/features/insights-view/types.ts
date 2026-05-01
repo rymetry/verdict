@@ -81,6 +81,7 @@ export type QualityGateStatus =
   | "skipped"
   | "error"
   | "not-evaluated";
+export type QualityGateEnforcement = "advisory" | "blocking";
 
 /**
  * Allure サマリ rule 1 行 (Quality Gate と同じ shape だが意味は trend なので別 type で意図分離)。
@@ -130,6 +131,7 @@ export interface InsightsSummary {
   readonly topFlaky: ReadonlyArray<FlakyItem>;
   readonly ai: AiSummary;
   readonly qualityGateStatus: QualityGateStatus;
+  readonly qualityGateEnforcement?: QualityGateEnforcement;
   readonly qualityGate: ReadonlyArray<QualityGateRule>;
   readonly allureSummary: ReadonlyArray<AllureSummaryRow>;
   readonly recentRuns: ReadonlyArray<RecentRun>;

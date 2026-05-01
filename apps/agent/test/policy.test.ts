@@ -91,7 +91,7 @@ describe("default Phase 1 command policy", () => {
     [["exec", "playwright", "test", "%2fetc%2fpasswd"], "absolute-path"],
     [["exec", "playwright", "test", "--grep", "--headed"], "missing-flag-value"],
     [["exec", "playwright", "test", "--workers", "00"], "invalid-numeric-value"],
-    [["exec", "playwright", "test", "--config", "/tmp/x"], "disallowed-flag"]
+    [["exec", "playwright", "test", "--config", "/tmp/x"], "absolute-path"]
   ])("returns stable validator code %#", (args, code) => {
     const result = validate("pnpm", args);
     expect(result).toEqual(expect.objectContaining({ ok: false, code }));
@@ -140,20 +140,7 @@ describe("Playwright launch command policy (T800-3)", () => {
 });
 
 describe("AI CLI command policy (T500-2)", () => {
-  const schema = JSON.stringify({ type: "object", properties: { ok: { type: "boolean" } } });
-  const approvedArgs = [
-    "--bare",
-    "--print",
-    "--input-format",
-    "text",
-    "--output-format",
-    "json",
-    "--tools",
-    "",
-    "--no-session-persistence",
-    "--json-schema",
-    schema
-  ];
+  const approvedArgs = ["--print", "--output-format", "json"];
 
   it("accepts the approved Claude Code non-interactive JSON invocation", () => {
     expect(validateAiArgs({ executableName: "claude", args: approvedArgs }).ok).toBe(true);
@@ -162,9 +149,13 @@ describe("AI CLI command policy (T500-2)", () => {
   it.each([
     ["codex", approvedArgs],
     ["claude", ["--print", "--output-format", "text"]],
-    ["claude", [...approvedArgs.slice(0, -1), "{not-json}"]]
+    ["claude", ["--bare", "--print", "--output-format", "json"]]
   ])("rejects unsafe AI invocation for %s", (executableName, args) => {
     expect(validateAiArgs({ executableName, args }).ok).toBe(false);
+  });
+
+  it("rejects Claude capability checks; Workbench classifies real invocation stderr instead", () => {
+    expect(validateAiArgs({ executableName: "claude", args: ["--help"] }).ok).toBe(false);
   });
 
   it("returns a policy that only allows Claude Code", async () => {

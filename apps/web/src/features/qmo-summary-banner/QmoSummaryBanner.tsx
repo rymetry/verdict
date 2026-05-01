@@ -133,7 +133,7 @@ function QmoSummaryBannerLoaded({ summary }: { summary: QmoSummary }): React.Rea
       )}
       {qg && (
         <span data-testid="qmo-summary-banner-qg" className="font-mono text-xs">
-          QG: {qg.status} ({qg.profile})
+          QG: {qualityGateDisplay(qg)}
         </span>
       )}
       {summary.runDurationMs !== undefined && (
@@ -165,6 +165,13 @@ function QmoSummaryBannerLoaded({ summary }: { summary: QmoSummary }): React.Rea
       )}
     </div>
   );
+}
+
+function qualityGateDisplay(qg: NonNullable<QmoSummary["qualityGate"]>): string {
+  if (qg.enforcement === "advisory") {
+    return `evaluated · advisory (${qg.profile})`;
+  }
+  return `${qg.status} (${qg.profile})`;
 }
 
 function toFileHref(filePath: string): string {

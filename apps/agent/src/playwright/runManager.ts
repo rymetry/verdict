@@ -64,6 +64,8 @@ export interface RunStartParams {
    * injecting Workbench's CLI reporter override.
    */
   hasAllurePlaywright?: boolean;
+  /** Absolute path to the detected project Playwright config, if any. */
+  playwrightConfigPath?: string;
 }
 
 export interface ActiveRunHandle {
@@ -137,6 +139,87 @@ async function fileExists(target: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function writeWorkbenchPlaywrightConfig({
+  projectRoot,
+  baseConfigPath,
+  workbenchConfigPath,
+  jsonOutputPath,
+  htmlOutputDir,
+  logger,
+  runId
+}: {
+  projectRoot: string;
+  baseConfigPath: string;
+  workbenchConfigPath: string;
+  jsonOutputPath: string;
+  htmlOutputDir: string;
+  logger?: RunManagerLogger;
+  runId?: string;
+}): Promise<string[]> {
+  const baseRel = normalizeImportPath(path.relative(path.dirname(workbenchConfigPath), baseConfigPath));
+  const projectRootLiteral = JSON.stringify(projectRoot);
+  const jsonOutputPathLiteral = JSON.stringify(jsonOutputPath);
+  const htmlOutputDirLiteral = JSON.stringify(htmlOutputDir);
+  const contents = [
+    "import baseConfig from " + JSON.stringify(baseRel) + ";",
+    "import { defineConfig } from '@playwright/test';",
+    "import path from 'node:path';",
+    "",
+    "function normalizeReporter(reporter) {",
+    "  if (reporter === undefined) return [];",
+    "  if (Array.isArray(reporter) && (reporter.length === 0 || Array.isArray(reporter[0]))) return reporter;",
+    "  return [reporter];",
+    "}",
+    "",
+    "function absolutizeProjectPath(value) {",
+    "  if (value === undefined) return undefined;",
+    "  return path.isAbsolute(value) ? value : path.join(projectRoot, value);",
+    "}",
+    "",
+    "const base = baseConfig ?? {};",
+    `const projectRoot = ${projectRootLiteral};`,
+    `const jsonOutputFile = ${jsonOutputPathLiteral};`,
+    `const htmlOutputFolder = ${htmlOutputDirLiteral};`,
+    "const reporter = [",
+    "  ...normalizeReporter(base.reporter),",
+    "  ['json', { outputFile: jsonOutputFile }],",
+    "  ['html', { outputFolder: htmlOutputFolder, open: 'never' }],",
+    "];",
+    "",
+    "export default defineConfig({",
+    "  ...base,",
+    "  testDir: absolutizeProjectPath(base.testDir),",
+    "  outputDir: absolutizeProjectPath(base.outputDir),",
+    "  reporter,",
+    "});",
+    ""
+  ].join("\n");
+  try {
+    await fs.mkdir(path.dirname(workbenchConfigPath), { recursive: true });
+    await fs.writeFile(workbenchConfigPath, contents, "utf8");
+    return [];
+  } catch (error) {
+    const code = errorCode(error);
+    if (PERSIST_FATAL_CODES.has(code)) throw error;
+    logger?.warn?.(
+      {
+        runId,
+        artifactKind: "playwright-json" satisfies ArtifactKind,
+        ...errorLogFields(error)
+      },
+      "failed to write Workbench Playwright config"
+    );
+    return [
+      `Workbench Playwright config could not be written; run-scoped JSON reporter injection skipped. code=${code}`
+    ];
+  }
+}
+
+function normalizeImportPath(relativePath: string): string {
+  const normalized = relativePath.split(path.sep).join("/");
+  return normalized.startsWith(".") ? normalized : `./${normalized}`;
 }
 
 function newRunId(): string {
@@ -402,13 +485,30 @@ export function createRunManager({
       logger
     });
 
+    const workbenchConfigPath =
+      params.hasAllurePlaywright && params.playwrightConfigPath
+        ? path.join(paths.runDir, "playwright.workbench.config.ts")
+        : undefined;
+    const configWarnings = workbenchConfigPath && params.playwrightConfigPath
+      ? await writeWorkbenchPlaywrightConfig({
+          projectRoot: params.projectRoot,
+          baseConfigPath: params.playwrightConfigPath,
+          workbenchConfigPath,
+          jsonOutputPath: paths.playwrightJson,
+          htmlOutputDir: paths.playwrightHtml,
+          logger,
+          runId
+        })
+      : [];
+
     const { command, env } = buildPlaywrightTestCommand({
       packageManager: params.packageManager,
       request: params.request,
       reporterMode: params.hasAllurePlaywright ? "project-config" : "workbench-default",
       jsonOutputPath: paths.playwrightJson,
       htmlOutputDir: paths.playwrightHtml,
-      projectRoot: params.projectRoot
+      projectRoot: params.projectRoot,
+      workbenchConfigPath
     });
 
     const startedAt = new Date();
@@ -422,7 +522,7 @@ export function createRunManager({
       cwd: params.projectRoot,
       requested: params.request,
       paths,
-      warnings: [...params.packageManager.warnings, ...archiveWarnings],
+      warnings: [...params.packageManager.warnings, ...archiveWarnings, ...configWarnings],
       exitCode: null,
       signal: null
     };
@@ -551,6 +651,12 @@ export function createRunManager({
         const logWriteWarnings = await logWriter.flush();
         await logStreams.closeAll();
 
+        const playwrightJsonWarnings = await materializePlaywrightJsonSafely({
+          projectRoot: params.projectRoot,
+          targetPath: paths.playwrightJson,
+          logger,
+          runId
+        });
         const redactionWarning = await redactPlaywrightResultsSafely({
           artifactsStore,
           logger,
@@ -639,6 +745,7 @@ export function createRunManager({
           ...latestReportWarnings,
           ...supplementalAllureWarnings,
           ...qualityGateWarnings,
+          ...playwrightJsonWarnings,
           ...streamRedactor.flush(),
           ...flushStreamPublishWarnings(),
           ...(summary?.warnings ?? [])
@@ -803,6 +910,55 @@ export function createRunManager({
   }
 
   return { startRun, listRuns, cancelRun };
+}
+
+async function materializePlaywrightJsonSafely({
+  projectRoot,
+  targetPath,
+  logger,
+  runId
+}: {
+  projectRoot: string;
+  targetPath: string;
+  logger?: RunManagerLogger;
+  runId: string;
+}): Promise<string[]> {
+  if (await fileExists(targetPath)) return [];
+  const legacyPath = path.join(projectRoot, "playwright-results.json");
+  if (await fileExists(legacyPath)) {
+    try {
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.copyFile(legacyPath, targetPath);
+      logger?.warn?.(
+        {
+          runId,
+          artifactKind: "playwright-json" satisfies ArtifactKind,
+          source: "project-root-fallback"
+        },
+        "copied project-root playwright-results.json into run directory"
+      );
+      return [
+        "Playwright JSON was not produced in the run directory; copied project-root playwright-results.json as fallback."
+      ];
+    } catch (error) {
+      const code = errorCode(error);
+      if (PERSIST_FATAL_CODES.has(code)) throw error;
+      logger?.error(
+        {
+          runId,
+          artifactKind: "playwright-json" satisfies ArtifactKind,
+          ...errorLogFields(error)
+        },
+        "failed to copy fallback playwright-results.json"
+      );
+      return [
+        `Playwright JSON was not produced in the run directory and fallback copy failed. code=${code}`
+      ];
+    }
+  }
+  return [
+    "Playwright JSON was not produced for this run. Ensure the project config includes a json reporter or allow Workbench reporter injection."
+  ];
 }
 
 async function redactPlaywrightResultsSafely({

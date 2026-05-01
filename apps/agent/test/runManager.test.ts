@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { unsafelyAllowAnyArgsValidator } from "../src/commands/policy.js";
 import { createNodeCommandRunner } from "../src/commands/runner.js";
 import { createEventBus, type EventBus } from "../src/events/bus.js";
-import { createRunManager } from "../src/playwright/runManager.js";
+import {
+  createRunManager,
+  writeWorkbenchPlaywrightConfig
+} from "../src/playwright/runManager.js";
 import { runArtifactsStore } from "../src/playwright/runArtifactsStore.js";
 import {
   RunCancelledPayloadSchema,
@@ -38,6 +41,17 @@ process.exit(0);
 `;
 
 const STUB_FAILURE_SCRIPT = `process.exit(1);`;
+const STUB_ROOT_JSON_SCRIPT = `
+const fs = require('node:fs');
+fs.writeFileSync(
+  'playwright-results.json',
+  JSON.stringify({
+    stats: { expected: 1, unexpected: 0, flaky: 0, skipped: 0, duration: 5 },
+    suites: []
+  })
+);
+process.exit(0);
+`;
 
 beforeEach(() => {
   workdir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-runmgr-")));
@@ -72,6 +86,37 @@ function writeStub(name: string, source: string): string {
 }
 
 describe("RunManager", () => {
+  it("writes Workbench config that preserves project reporters and embeds run-scoped outputs", async () => {
+    const baseConfig = path.join(workdir, "playwright.config.ts");
+    const workbenchConfig = path.join(
+      workdir,
+      ".playwright-workbench",
+      "runs",
+      "r1",
+      "playwright.workbench.config.ts"
+    );
+    fs.writeFileSync(
+      baseConfig,
+      "export default { reporter: [['line'], ['allure-playwright', { resultsDir: 'allure-results' }]], testDir: './tests' };"
+    );
+
+    const warnings = await writeWorkbenchPlaywrightConfig({
+      projectRoot: workdir,
+      baseConfigPath: baseConfig,
+      workbenchConfigPath: workbenchConfig,
+      jsonOutputPath: path.join(workdir, ".playwright-workbench/runs/r1/playwright-results.json"),
+      htmlOutputDir: path.join(workdir, ".playwright-workbench/runs/r1/playwright-report")
+    });
+
+    const generated = fs.readFileSync(workbenchConfig, "utf8");
+    expect(warnings).toEqual([]);
+    expect(generated).toContain("...normalizeReporter(base.reporter)");
+    expect(generated).toContain(".playwright-workbench/runs/r1/playwright-results.json");
+    expect(generated).toContain(".playwright-workbench/runs/r1/playwright-report");
+    expect(generated).not.toContain("process.env.PLAYWRIGHT_JSON_OUTPUT_NAME");
+    expect(generated).not.toContain("process.env.PLAYWRIGHT_HTML_REPORT");
+  });
+
   it("publishes start/stdout/completed events for a successful run", async () => {
     const bus = createEventBus();
     const runner = createNodeCommandRunner({
@@ -154,6 +199,36 @@ describe("RunManager", () => {
 
     expect(completed.status).toBe("passed");
     expect(completed.command.args).not.toContain("--reporter=list,json,html");
+  });
+
+  it("copies project-root playwright-results.json into the run directory as fallback", async () => {
+    const runner = createNodeCommandRunner({
+      policy: {
+        allowedExecutables: ["node"],
+        argValidator: unsafelyAllowAnyArgsValidator,
+        cwdBoundary: workdir,
+        envAllowlist: ["PATH", "HOME"]
+      }
+    });
+    const manager = createRunManager({ runnerForProject: () => runner, bus: createEventBus() });
+    const stubPath = writeStub("root-json.js", STUB_ROOT_JSON_SCRIPT);
+    const pm = fakePackageManager();
+    pm.commandTemplates.playwrightTest = { executable: "node", args: [stubPath] };
+
+    const handle = await manager.startRun({
+      projectId: workdir,
+      projectRoot: workdir,
+      packageManager: pm,
+      request: { projectId: workdir, headed: false }
+    });
+    const completed = await handle.finished;
+
+    expect(fs.existsSync(completed.paths.playwrightJson)).toBe(true);
+    expect(completed.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("copied project-root playwright-results.json")
+      ])
+    );
   });
 
   it("publishes run.completed with status 'failed' on non-zero exit", async () => {

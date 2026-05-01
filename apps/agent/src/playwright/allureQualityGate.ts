@@ -1,8 +1,13 @@
 import * as fs from "node:fs/promises";
 import * as fsSync from "node:fs";
 import * as path from "node:path";
-import type { QualityGateProfile, QualityGateResult } from "@pwqa/shared";
+import type {
+  QualityGateProfile,
+  QualityGateResult,
+  QualityGateRuleEvaluation
+} from "@pwqa/shared";
 import type { CommandRunner } from "../commands/runner.js";
+import { readAllureResults } from "../reporting/allureResultsReader.js";
 
 /**
  * Phase 1.2 / T205-2: subprocess wrapper around `allure quality-gate`.
@@ -126,6 +131,7 @@ export async function evaluateAllureQualityGate(
 ): Promise<AllureQualityGateOutcome> {
   const { runner, projectRoot, allureResultsDest, profile } = input;
   const allureBinAbs = path.join(projectRoot, ALLURE_BIN_REL);
+  const enforcement = profile === "local-review" ? "advisory" : "blocking";
 
   if (!fsSync.existsSync(allureBinAbs)) {
     return {
@@ -144,6 +150,10 @@ export async function evaluateAllureQualityGate(
     ? path.relative(projectRoot, input.knownIssuesPath)
     : undefined;
   const args = buildQualityGateArgs(resultsDirRel, input.rules, knownIssuesRel);
+  const {
+    rules: ruleEvaluations,
+    warnings: ruleEvaluationWarnings
+  } = await evaluateRulesFromAllureResultsSafely(allureResultsDest, input.rules);
 
   const startedAt = Date.now();
   const handle = runner.run({
@@ -179,11 +189,12 @@ export async function evaluateAllureQualityGate(
   //   0 = pass, 1 = fail. Treat anything else as an error condition.
   let status: QualityGateResult["status"];
   let failureMode: AllureQualityGateFailureMode | undefined;
-  let warnings: string[] = [];
+  let warnings: string[] = [...ruleEvaluationWarnings];
   if (result.timedOut) {
     status = "error";
     failureMode = "timeout";
     warnings = [
+      ...warnings,
       `Allure quality-gate timed out after ${input.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms.`
     ];
   } else if (result.exitCode === 0) {
@@ -194,9 +205,22 @@ export async function evaluateAllureQualityGate(
     status = "error";
     failureMode = "exit-other";
     warnings = [
+      ...warnings,
       `Allure quality-gate exited with unexpected code. exitCode=${result.exitCode ?? "null"}; signal=${result.signal ?? "null"}`
     ];
   }
+  const failedRules = ruleEvaluations.filter((rule) => rule.status === "fail");
+  if (status === "passed" && failedRules.length > 0) {
+    status = "failed";
+    warnings = [
+      ...warnings,
+      "Workbench quality-gate rule evaluation failed although the Allure CLI exited 0."
+    ];
+  }
+  const persistedStatus =
+    enforcement === "advisory" && status === "failed" && failedRules.length > 0
+      ? "passed"
+      : status;
 
   // Persist-ready QG result. Stdout/stderr are part of the schema
   // (PLAN.v2 §23 raw-first preservation policy) — written verbatim
@@ -205,22 +229,138 @@ export async function evaluateAllureQualityGate(
   // shipped to log aggregators, so the path-redaction policy concerns
   // do not apply here in the same way as run-warning text.
   const persisted: QualityGateResult = {
-    status,
+    status: persistedStatus,
     profile,
+    enforcement,
     evaluatedAt: new Date().toISOString(),
     exitCode: result.exitCode,
     stdout: result.stdout,
     stderr: result.stderr,
+    rules: ruleEvaluations,
+    failedRules,
     warnings
   };
   return {
-    status,
+    status: persistedStatus,
     exitCode: result.exitCode,
     durationMs,
     failureMode,
     warnings,
     persisted
   };
+}
+
+async function evaluateRulesFromAllureResults(
+  allureResultsDest: string,
+  rules: AllureQualityGateInput["rules"]
+): Promise<QualityGateRuleEvaluation[]> {
+  if (!rules) return [];
+  const read = await readAllureResults(allureResultsDest);
+  const totals = read.results.reduce(
+    (acc, result) => {
+      switch (result.status) {
+        case "passed":
+          acc.passed += 1;
+          acc.total += 1;
+          break;
+        case "failed":
+        case "broken":
+          acc.failed += 1;
+          acc.total += 1;
+          break;
+        case "skipped":
+          acc.skipped += 1;
+          acc.total += 1;
+          break;
+        case "unknown":
+          acc.unknown += 1;
+          break;
+      }
+      return acc;
+    },
+    { total: 0, passed: 0, failed: 0, skipped: 0, unknown: 0 }
+  );
+  const evaluations: QualityGateRuleEvaluation[] = [];
+  if (rules.maxFailures !== undefined) {
+    const status = totals.failed <= rules.maxFailures ? "pass" : "fail";
+    evaluations.push({
+      id: "maxFailures",
+      name: "Max failures",
+      threshold: `<= ${rules.maxFailures}`,
+      actual: String(totals.failed),
+      status,
+      message:
+        status === "pass"
+          ? `${totals.failed} failure(s) within threshold.`
+          : `${totals.failed} failure(s) exceed threshold ${rules.maxFailures}.`
+    });
+  }
+  if (rules.minTestsCount !== undefined) {
+    const status = totals.total >= rules.minTestsCount ? "pass" : "fail";
+    evaluations.push({
+      id: "minTestsCount",
+      name: "Minimum tests",
+      threshold: `>= ${rules.minTestsCount}`,
+      actual: String(totals.total),
+      status,
+      message:
+        status === "pass"
+          ? `${totals.total} counted test(s) meet minimum.`
+          : `${totals.total} counted test(s) below minimum ${rules.minTestsCount}.`
+    });
+  }
+  if (rules.successRate !== undefined) {
+    const rate = totals.total > 0 ? (totals.passed / totals.total) * 100 : 0;
+    const status = rate >= rules.successRate ? "pass" : "fail";
+    evaluations.push({
+      id: "successRate",
+      name: "Success rate",
+      threshold: `>= ${formatPercent(rules.successRate)}`,
+      actual: formatPercent(rate),
+      status,
+      message:
+        status === "pass"
+          ? `${formatPercent(rate)} success rate meets threshold.`
+          : `${formatPercent(rate)} success rate below threshold ${formatPercent(rules.successRate)}.`
+    });
+  }
+  if (rules.fastFail !== undefined) {
+    evaluations.push({
+      id: "fastFail",
+      name: "Fast fail",
+      threshold: rules.fastFail ? "enabled" : "disabled",
+      actual: rules.fastFail ? "enabled" : "disabled",
+      status: "pass",
+      message: rules.fastFail
+        ? "Allure CLI was invoked with --fast-fail."
+        : "Allure CLI fast-fail is disabled for this profile."
+    });
+  }
+  return evaluations;
+}
+
+async function evaluateRulesFromAllureResultsSafely(
+  allureResultsDest: string,
+  rules: AllureQualityGateInput["rules"]
+): Promise<{ rules: QualityGateRuleEvaluation[]; warnings: string[] }> {
+  try {
+    return {
+      rules: await evaluateRulesFromAllureResults(allureResultsDest, rules),
+      warnings: []
+    };
+  } catch (error) {
+    const code = errorCodeOf(error) ?? (error instanceof Error ? error.name : "UNKNOWN");
+    return {
+      rules: [],
+      warnings: [
+        `Workbench quality-gate rule evaluation could not read allure-results. code=${code}`
+      ]
+    };
+  }
+}
+
+function formatPercent(value: number): string {
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}%`;
 }
 
 /**

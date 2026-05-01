@@ -7,7 +7,7 @@ import {
   type AiTestGenerationContext,
   type AiTestGenerationOutput
 } from "@pwqa/shared";
-import type { CommandRunner } from "../commands/runner.js";
+import type { CommandResult, CommandRunner } from "../commands/runner.js";
 
 const AI_ANALYSIS_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -59,12 +59,24 @@ export class AiAnalysisError extends Error {
     message: string,
     readonly code:
       | "AI_CLI_FAILED"
+      | "AI_CLI_NOT_FOUND"
+      | "AI_CLI_UNSUPPORTED_FLAG"
+      | "AI_CLI_AUTH"
+      | "AI_CLI_QUOTA"
       | "AI_CLI_OUTPUT_INVALID"
       | "AI_CLI_TIMED_OUT"
-      | "AI_CLI_CANCELLED"
+      | "AI_CLI_CANCELLED",
+    cause?: unknown
   ) {
     super(message);
     this.name = "AiAnalysisError";
+    if (cause !== undefined) {
+      Object.defineProperty(this, "cause", {
+        value: cause,
+        enumerable: false,
+        configurable: true
+      });
+    }
   }
 }
 
@@ -88,18 +100,14 @@ export interface AiAnalysisAdapter {
 export function createAiCliAdapter(runner: CommandRunner): AiAnalysisAdapter {
   return {
     async analyze(input) {
-      const schema = JSON.stringify(AI_OUTPUT_JSON_SCHEMA);
-      const handle = runner.run(
-        {
-          executable: executableFor(input.provider),
-          args: argsFor(input.provider, schema),
-          cwd: input.projectRoot,
-          timeoutMs: AI_ANALYSIS_TIMEOUT_MS,
-          label: `ai-analysis:${input.provider}`,
-          stdin: buildPrompt(input.context)
-        }
-      );
-      const result = await handle.result;
+      const result = await runAiCli(runner, {
+        executable: executableFor(input.provider),
+        args: argsFor(input.provider),
+        cwd: input.projectRoot,
+        timeoutMs: AI_ANALYSIS_TIMEOUT_MS,
+        label: `ai-analysis:${input.provider}`,
+        stdin: buildPrompt(input.context)
+      });
       if (result.timedOut) {
         throw new AiAnalysisError("AI CLI timed out before returning analysis.", "AI_CLI_TIMED_OUT");
       }
@@ -107,23 +115,19 @@ export function createAiCliAdapter(runner: CommandRunner): AiAnalysisAdapter {
         throw new AiAnalysisError("AI CLI run was cancelled.", "AI_CLI_CANCELLED");
       }
       if (result.exitCode !== 0) {
-        throw new AiAnalysisError("AI CLI exited with a non-zero status.", "AI_CLI_FAILED");
+        throw classifyNonZeroExit(result.stderr);
       }
       return parseAiOutput(result.stdout);
     },
     async generateTests(input) {
-      const schema = JSON.stringify(AI_TEST_GENERATION_OUTPUT_JSON_SCHEMA);
-      const handle = runner.run(
-        {
-          executable: executableFor(input.provider),
-          args: argsFor(input.provider, schema),
-          cwd: input.projectRoot,
-          timeoutMs: AI_ANALYSIS_TIMEOUT_MS,
-          label: `ai-test-generation:${input.provider}`,
-          stdin: buildTestGenerationPrompt(input.context)
-        }
-      );
-      const result = await handle.result;
+      const result = await runAiCli(runner, {
+        executable: executableFor(input.provider),
+        args: argsFor(input.provider),
+        cwd: input.projectRoot,
+        timeoutMs: AI_ANALYSIS_TIMEOUT_MS,
+        label: `ai-test-generation:${input.provider}`,
+        stdin: buildTestGenerationPrompt(input.context)
+      });
       if (result.timedOut) {
         throw new AiAnalysisError("AI CLI timed out before returning generated tests.", "AI_CLI_TIMED_OUT");
       }
@@ -131,7 +135,7 @@ export function createAiCliAdapter(runner: CommandRunner): AiAnalysisAdapter {
         throw new AiAnalysisError("AI CLI run was cancelled.", "AI_CLI_CANCELLED");
       }
       if (result.exitCode !== 0) {
-        throw new AiAnalysisError("AI CLI exited with a non-zero status.", "AI_CLI_FAILED");
+        throw classifyNonZeroExit(result.stderr);
       }
       return parseAiTestGenerationOutput(result.stdout);
     }
@@ -145,23 +149,49 @@ function executableFor(provider: AiAnalysisProvider): string {
   }
 }
 
-function argsFor(provider: AiAnalysisProvider, schema: string): string[] {
+function argsFor(provider: AiAnalysisProvider): string[] {
   switch (provider) {
     case "claude-code":
-      return [
-        "--bare",
-        "--print",
-        "--input-format",
-        "text",
-        "--output-format",
-        "json",
-        "--tools",
-        "",
-        "--no-session-persistence",
-        "--json-schema",
-        schema
-      ];
+      return ["--print", "--output-format", "json"];
   }
+}
+
+async function runAiCli(
+  runner: CommandRunner,
+  spec: Parameters<CommandRunner["run"]>[0]
+): Promise<CommandResult> {
+  try {
+    return await runner.run(spec).result;
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? String(error.code) : "";
+    if (code === "ENOENT") {
+      throw new AiAnalysisError(
+        "Claude Code CLI was not found on PATH.",
+        "AI_CLI_NOT_FOUND",
+        error
+      );
+    }
+    throw new AiAnalysisError("AI CLI failed before returning a result.", "AI_CLI_FAILED", error);
+  }
+}
+
+function classifyNonZeroExit(stderr: string): AiAnalysisError {
+  const lower = stderr.toLowerCase();
+  if (lower.includes("unknown option") || lower.includes("unknown flag") || lower.includes("invalid option")) {
+    return new AiAnalysisError("AI CLI rejected the configured flags.", "AI_CLI_UNSUPPORTED_FLAG");
+  }
+  if (/\b(auth|authentication|login|logged in)\b/.test(lower) || lower.includes("permission denied")) {
+    return new AiAnalysisError("AI CLI authentication failed.", "AI_CLI_AUTH");
+  }
+  if (
+    lower.includes("quota") ||
+    lower.includes("rate limit") ||
+    lower.includes("billing") ||
+    lower.includes("payment")
+  ) {
+    return new AiAnalysisError("AI CLI quota or billing limit prevented analysis.", "AI_CLI_QUOTA");
+  }
+  return new AiAnalysisError("AI CLI exited with a non-zero status.", "AI_CLI_FAILED");
 }
 
 function buildPrompt(context: AiAnalysisContext): string {
@@ -170,6 +200,9 @@ function buildPrompt(context: AiAnalysisContext): string {
     "Return only the structured JSON object requested by the schema.",
     "Do not edit files, run commands, or request additional tools.",
     "If evidence is insufficient, set classification to unknown and requiresHumanDecision to true.",
+    "",
+    "JSON schema:",
+    JSON.stringify(AI_OUTPUT_JSON_SCHEMA, null, 2),
     "",
     JSON.stringify({ context }, null, 2)
   ].join("\n");
@@ -182,6 +215,9 @@ function buildTestGenerationPrompt(context: AiTestGenerationContext): string {
     "Do not edit files, run commands, or request additional tools.",
     "If you propose changes, put them in proposedPatch as a unified git diff.",
     "If evidence is insufficient, leave proposedPatch undefined and set requiresHumanDecision to true.",
+    "",
+    "JSON schema:",
+    JSON.stringify(AI_TEST_GENERATION_OUTPUT_JSON_SCHEMA, null, 2),
     "",
     JSON.stringify({ context }, null, 2)
   ].join("\n");

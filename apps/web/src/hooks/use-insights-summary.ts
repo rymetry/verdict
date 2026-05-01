@@ -18,19 +18,25 @@
 //   - useLatestQmoSummary は内部で fetchRuns + fetchQmoSummary を
 //     既に組み合わせている。ここで再実装はしない。
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type {
   AllureHistoryEntry,
   AllureHistoryResponse,
-  QmoSummary
+  FailureReviewResponse,
+  QmoSummary,
+  RunListItem
 } from "@pwqa/shared";
 
+import { fetchFailureReview, fetchRuns } from "@/api/client";
 import { useAllureHistoryQuery } from "@/hooks/use-allure-history-query";
 import { useCurrentProjectQuery } from "@/hooks/use-current-project-query";
 import { useLatestQmoSummary } from "@/hooks/use-latest-qmo-summary";
+import { pickLatestRun } from "@/hooks/use-latest-qmo-summary";
 import type {
   AllureSummaryRow,
   FailureItem,
   InsightsSummary,
+  RecentRun,
   ReleaseReadiness,
   RunStat
 } from "@/features/insights-view/types";
@@ -48,6 +54,16 @@ export interface InsightsSummaryQueryResult {
 export function useInsightsSummary(): InsightsSummaryQueryResult {
   const project = useCurrentProjectQuery();
   const latest = useLatestQmoSummary();
+  const runs = useQuery({
+    queryKey: ["runs", "list"],
+    queryFn: fetchRuns
+  });
+  const latestRun = runs.data ? pickLatestRun(runs.data.runs) : undefined;
+  const failureReview = useQuery({
+    queryKey: ["runs", latestRun?.runId, "failure-review"],
+    queryFn: () => fetchFailureReview(latestRun?.runId ?? ""),
+    enabled: typeof latestRun?.runId === "string" && latestRun.runId.length > 0
+  });
   const history = useAllureHistoryQuery(project.data?.id ?? null);
 
   const summary = useMemo<InsightsSummary | null>(() => {
@@ -57,8 +73,13 @@ export function useInsightsSummary(): InsightsSummaryQueryResult {
     if (!haveQmo && !haveHistory) {
       return null;
     }
-    return buildSummary(latest.summary ?? null, history.data ?? null);
-  }, [latest.summary, history.data]);
+    return buildSummary(
+      latest.summary ?? null,
+      history.data ?? null,
+      runs.data?.runs ?? [],
+      failureReview.data ?? null
+    );
+  }, [latest.summary, history.data, runs.data, failureReview.data]);
 
   return {
     summary,
@@ -68,14 +89,18 @@ export function useInsightsSummary(): InsightsSummaryQueryResult {
     // resolve (even to empty), the caller can stop showing a spinner.
     isLoading:
       history.isPending ||
+      runs.isPending ||
+      failureReview.isFetching ||
       (latest.summary === undefined && !latest.isError && !latest.isEmpty),
-    isError: latest.isError || history.isError
+    isError: latest.isError || history.isError || runs.isError || failureReview.isError
   };
 }
 
 function buildSummary(
   qmo: QmoSummary | null,
-  history: AllureHistoryResponse | null
+  history: AllureHistoryResponse | null,
+  runs: ReadonlyArray<RunListItem>,
+  failureReview: FailureReviewResponse | null
 ): InsightsSummary {
   const readiness = buildReadiness(qmo, history);
   const stats = buildStats(qmo);
@@ -85,17 +110,14 @@ function buildSummary(
     readiness,
     stats,
     criticalFailures,
-    knownIssues: [],
-    topFlaky: [],
-    ai: {
-      adapterLabel: "—",
-      body: "AI release readiness commentary is deferred to Phase 5.",
-      verdictLine: ""
-    },
+    knownIssues: buildKnownIssues(failureReview),
+    topFlaky: buildTopFlaky(failureReview),
+    ai: buildStaticAiSummary(qmo),
     qualityGateStatus: qmo?.qualityGate?.status ?? "not-evaluated",
-    qualityGate: [],
+    qualityGateEnforcement: qmo?.qualityGate?.enforcement,
+    qualityGate: buildQualityGateRules(qmo),
     allureSummary,
-    recentRuns: []
+    recentRuns: buildRecentRuns(runs)
   };
 }
 
@@ -189,6 +211,98 @@ function buildCriticalFailures(qmo: QmoSummary | null): FailureItem[] {
       .filter(Boolean)
       .join(" · ")
   }));
+}
+
+function buildKnownIssues(review: FailureReviewResponse | null): FailureItem[] {
+  const entries = review?.failedTests ?? [];
+  return entries
+    .flatMap((entry) =>
+      entry.knownIssues.map((issue) => ({
+        id: issue.id,
+        scope: entry.test.filePath?.split("/").slice(-2).join("/") ?? "known issue",
+        title: issue.title ?? issue.id,
+        meta: [issue.status, issue.historyId, issue.testCaseId].filter(Boolean).join(" · ")
+      }))
+    )
+    .slice(0, 5);
+}
+
+function buildTopFlaky(review: FailureReviewResponse | null): FailureItem[] {
+  const entries = review?.failedTests ?? [];
+  return entries
+    .filter((entry) => entry.flaky.isCandidate)
+    .sort((a, b) => {
+      const aFails = a.flaky.failedRuns + a.flaky.brokenRuns;
+      const bFails = b.flaky.failedRuns + b.flaky.brokenRuns;
+      return bFails - aFails;
+    })
+    .slice(0, 5)
+    .map((entry, index) => ({
+      id: entry.test.testId ?? `flaky-${index}`,
+      scope: entry.test.filePath?.split("/").slice(-2).join("/") ?? "test",
+      title: entry.test.title,
+      meta: `pass ${entry.flaky.passedRuns} · fail ${entry.flaky.failedRuns + entry.flaky.brokenRuns}`
+    }));
+}
+
+function buildStaticAiSummary(qmo: QmoSummary | null) {
+  if (!qmo) {
+    return {
+      adapterLabel: "Workbench",
+      body: "Run data is not available yet.",
+      verdictLine: "推奨: Run 実行後に Release Readiness を確認してください。"
+    };
+  }
+  const verdict =
+    qmo.outcome === "ready"
+      ? "本番昇格可能"
+      : qmo.outcome === "conditional"
+        ? "条件付きで確認継続"
+        : "本番昇格不可";
+  const failedRules = qmo.qualityGate?.failedRules?.length ?? 0;
+  const failedTests = qmo.testSummary?.failed ?? 0;
+  return {
+    adapterLabel: "Workbench",
+    body: `${failedTests} failed test(s), ${failedRules} failed Quality Gate rule(s).`,
+    verdictLine: `推奨: ${verdict}。`
+  };
+}
+
+function buildQualityGateRules(qmo: QmoSummary | null) {
+  return (qmo?.qualityGate?.rules ?? []).map((rule) => ({
+    name: rule.name,
+    threshold: rule.threshold,
+    actual: rule.actual,
+    status: rule.status
+  }));
+}
+
+function buildRecentRuns(runs: ReadonlyArray<RunListItem>): RecentRun[] {
+  return runs.slice(0, 5).map((run, index) => {
+    const passRate = run.summary && run.summary.total > 0
+      ? `${((run.summary.passed / run.summary.total) * 100).toFixed(1)}%`
+      : "—";
+    const previous = runs[index + 1];
+    const currentRate = run.summary && run.summary.total > 0 ? run.summary.passed / run.summary.total : undefined;
+    const previousRate = previous?.summary && previous.summary.total > 0
+      ? previous.summary.passed / previous.summary.total
+      : undefined;
+    const status: RecentRun["status"] =
+      run.status === "passed" ? "passed" : run.status === "failed" ? "failed" : "flaky";
+    const trend: RecentRun["trend"] =
+      currentRate === undefined || previousRate === undefined || currentRate === previousRate
+        ? "flat"
+        : currentRate > previousRate
+          ? "up"
+          : "down";
+    return {
+      id: run.runId,
+      timestamp: run.startedAt.replace("T", " ").slice(0, 16),
+      status,
+      passRate,
+      trend
+    };
+  });
 }
 
 function buildAllureSummary(

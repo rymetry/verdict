@@ -51,6 +51,7 @@ export function InsightsView({ summary }: InsightsViewProps): React.ReactElement
         </main>
         <SidebarPanels
           qualityGateStatus={summary.qualityGateStatus}
+          qualityGateEnforcement={summary.qualityGateEnforcement}
           qualityGate={summary.qualityGate}
           allureSummary={summary.allureSummary}
           recentRuns={summary.recentRuns}

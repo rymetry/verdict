@@ -211,14 +211,15 @@ function toFailedTest(
   projectRoot: string,
   durationMs: number | undefined
 ): FailedTest {
-  // Allure の labels から file path を取り出す。allure-playwright は
-  // `package` ラベルに `tests/example.spec.ts` 形式で spec の relative path
-  // を入れることが多いが、未提供の場合もあるため optional 扱い。
+  // Stack trace carries the most reliable project-relative spec path in
+  // allure-playwright output. The `package` label may be just a basename
+  // (`example.spec.ts`), so only use it when it includes a directory segment.
   const packageLabel = result.labels.find((l) => l.name === "package");
-  const filePath = packageLabel?.value
-    ? path.isAbsolute(packageLabel.value)
-      ? packageLabel.value
-      : path.join(projectRoot, packageLabel.value)
+  const filePath =
+    filePathFromStack(result.statusDetails?.trace, projectRoot) ??
+    filePathFromPackageLabel(packageLabel?.value, projectRoot);
+  const relativeFilePath = filePath
+    ? normalizeRelativePath(path.relative(projectRoot, filePath))
     : undefined;
 
   return {
@@ -226,6 +227,8 @@ function toFailedTest(
     title: result.name ?? result.fullName ?? result.uuid,
     fullTitle: result.fullName ?? result.name ?? result.uuid,
     filePath,
+    relativeFilePath,
+    absoluteFilePath: filePath,
     line: undefined,
     column: undefined,
     status: result.status,
@@ -244,9 +247,51 @@ function toFailedTest(
       .map((a) => ({
         kind: classifyAttachmentKind(a.name, a.type),
         path: a.source,
+        relativePath: normalizeRelativePath(a.source),
         label: a.name,
       })),
   };
+}
+
+function filePathFromPackageLabel(
+  label: string | undefined,
+  projectRoot: string
+): string | undefined {
+  if (!label) return undefined;
+  if (path.isAbsolute(label)) return label;
+  if (!label.includes("/") && !label.includes("\\")) return undefined;
+  return path.join(projectRoot, label);
+}
+
+function filePathFromStack(
+  trace: string | undefined,
+  projectRoot: string
+): string | undefined {
+  if (!trace) return undefined;
+  const normalizedRoot = projectRoot.split(path.sep).map(escapeRegex).join("[/\\\\]");
+  const absoluteMatches = Array.from(
+    trace.matchAll(new RegExp(`(${normalizedRoot}[/\\\\][^\\s:)]+)`, "g"))
+  )
+    .map((match) => match[1])
+    .filter((value): value is string => Boolean(value))
+    .filter((value) => !/[\\/]node_modules[\\/]/.test(value));
+  const deepest = absoluteMatches.at(-1);
+  if (deepest) {
+    return deepest.replace(/\\/g, path.sep);
+  }
+  const relativeMatch = trace.match(/(?:^|\s)([A-Za-z0-9_.@/-]*tests[/\\][^\s:)]+\.spec\.[cm]?[tj]sx?)/m);
+  if (relativeMatch?.[1]) {
+    return path.join(projectRoot, relativeMatch[1]);
+  }
+  return undefined;
+}
+
+function normalizeRelativePath(value: string): string {
+  return value.split(/[\\/]+/).join("/");
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function classifyAttachmentKind(

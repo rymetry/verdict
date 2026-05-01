@@ -71,7 +71,9 @@ function sanitizeSummary(
       testId: sanitizeOptional(test.testId, projectRoot),
       title: sanitizeText(test.title, projectRoot),
       fullTitle: sanitizeOptional(test.fullTitle, projectRoot),
-      filePath: projectRelativePath(test.filePath ?? "", projectRoot),
+      filePath: test.relativeFilePath ?? projectRelativePath(test.filePath ?? "", projectRoot),
+      relativeFilePath: test.relativeFilePath ?? projectRelativePath(test.filePath ?? "", projectRoot),
+      absoluteFilePath: undefined,
       message: sanitizeOptional(test.message, projectRoot),
       stack: sanitizeOptional(test.stack, projectRoot),
       attachments: test.attachments.map((artifact) => sanitizeArtifact(artifact, projectRoot))
@@ -112,8 +114,7 @@ function toFailureContext(
 }
 
 function locationFor(test: FailedTest, projectRoot: string): AiAnalysisFailureContext["location"] {
-  if (!test.filePath) return undefined;
-  const relativePath = projectRelativePath(test.filePath, projectRoot);
+  const relativePath = test.relativeFilePath ?? projectRelativePath(test.filePath ?? "", projectRoot);
   if (!relativePath) return undefined;
   return {
     relativePath,
@@ -123,11 +124,14 @@ function locationFor(test: FailedTest, projectRoot: string): AiAnalysisFailureCo
 }
 
 function sanitizeArtifact(artifact: EvidenceArtifact, projectRoot: string): EvidenceArtifact {
-  const relativePath = projectRelativePath(artifact.path, projectRoot);
+  const relativePath = artifact.relativePath ?? projectRelativePath(artifact.path, projectRoot);
+  const displayPath = relativePath ?? path.basename(artifact.path);
   return {
     kind: artifact.kind,
     label: sanitizeText(artifact.label, projectRoot),
-    path: relativePath ?? path.basename(artifact.path)
+    path: displayPath,
+    relativePath: displayPath,
+    absolutePath: undefined
   };
 }
 
@@ -194,10 +198,34 @@ function limitText(value: string): string {
 }
 
 function projectRelativePath(filePath: string, projectRoot: string): string | undefined {
+  if (!filePath) return undefined;
+  const windowsRelative = windowsProjectRelativePath(filePath, projectRoot);
+  if (windowsRelative) return windowsRelative;
+  if (!path.isAbsolute(filePath)) {
+    const parts = filePath.split(/[\\/]+/);
+    if (parts.some((part) => part === "..")) return undefined;
+    return parts.filter(Boolean).join("/");
+  }
   const absolute = path.resolve(filePath);
   const relative = path.relative(projectRoot, absolute);
   if (relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
-  return relative;
+  return relative.split(path.sep).join("/");
+}
+
+function windowsProjectRelativePath(filePath: string, projectRoot: string): string | undefined {
+  if (!/^[A-Za-z]:[\\/]/.test(filePath) || !/^[A-Za-z]:[\\/]/.test(projectRoot)) {
+    return undefined;
+  }
+  const normalizedRoot = filePathSeparators(projectRoot).replace(/\/+$/, "");
+  const normalizedPath = filePathSeparators(filePath);
+  if (!normalizedPath.toLowerCase().startsWith(`${normalizedRoot.toLowerCase()}/`)) {
+    return undefined;
+  }
+  return normalizedPath.slice(normalizedRoot.length + 1);
+}
+
+function filePathSeparators(filePath: string): string {
+  return filePath.split(/[\\/]+/).join("/");
 }
 
 function errorCodeOf(error: unknown): string {

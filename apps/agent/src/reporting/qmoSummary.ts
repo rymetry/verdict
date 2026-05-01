@@ -70,7 +70,10 @@ export function buildQmoSummary(input: BuildQmoSummaryInput): QmoSummary {
       ? {
           status: qualityGateResult.status,
           profile: qualityGateResult.profile,
+          enforcement: qualityGateResult.enforcement,
           exitCode: qualityGateResult.exitCode,
+          rules: qualityGateResult.rules,
+          failedRules: qualityGateResult.failedRules,
           warnings: qualityGateResult.warnings
         }
       : undefined,
@@ -92,8 +95,13 @@ function deriveOutcome(
   // Failed tests dominate everything else — if a test failed the run is
   // definitively not ready, regardless of QG.
   if ((testSummary?.failed ?? 0) > 0) return "not-ready";
-  // QG failed / errored → not ready.
-  if (qualityGate?.status === "failed" || qualityGate?.status === "error") {
+  // Blocking QG failed / errored → not ready. local-review remains
+  // advisory so operators see failed rules without making an ad-hoc
+  // review gate look like a release gate.
+  if (
+    (qualityGate?.status === "failed" || qualityGate?.status === "error") &&
+    qualityGate.enforcement !== "advisory"
+  ) {
     return "not-ready";
   }
   // QG was attempted but skipped (binary missing during a run with
@@ -138,7 +146,7 @@ export function renderQmoSummaryMarkdown(summary: QmoSummary): string {
   lines.push("");
   lines.push(`- **Outcome**: \`${summary.outcome}\``);
   lines.push(`- **Run**: \`${summary.runId}\``);
-  lines.push(`- **Project**: \`${summary.projectId}\``);
+  lines.push(`- **Project**: \`${basenameAny(summary.projectId)}\``);
   lines.push(`- **Generated**: ${summary.generatedAt}`);
   if (summary.runDurationMs !== undefined) {
     lines.push(`- **Duration**: ${summary.runDurationMs} ms`);
@@ -164,7 +172,10 @@ export function renderQmoSummaryMarkdown(summary: QmoSummary): string {
       for (const failed of t.failedTests) {
         const title = failed.fullTitle ?? failed.title;
         const statusBadge = `[${failed.status}]`;
-        lines.push(`- \`${statusBadge}\` ${title}`);
+        const location = failed.filePath
+          ? ` (${displayPath(failed.filePath, summary.projectId)}${failed.line ? `:${failed.line}` : ""})`
+          : "";
+        lines.push(`- \`${statusBadge}\` ${title}${location}`);
       }
     }
   } else {
@@ -179,7 +190,21 @@ export function renderQmoSummaryMarkdown(summary: QmoSummary): string {
     const qg = summary.qualityGate;
     lines.push(`- Status: \`${qg.status}\``);
     lines.push(`- Profile: \`${qg.profile}\``);
+    if (qg.enforcement) {
+      lines.push(`- Enforcement: \`${qg.enforcement}\``);
+    }
     lines.push(`- Exit Code: ${qg.exitCode ?? "null"}`);
+    const rules = qg.rules ?? [];
+    if (rules.length > 0) {
+      lines.push("");
+      lines.push("| Rule | Threshold | Actual | Status |");
+      lines.push("|---|---:|---:|---|");
+      for (const rule of rules) {
+        lines.push(
+          `| ${rule.name} | ${rule.threshold} | ${rule.actual} | ${rule.status} |`
+        );
+      }
+    }
     if (qg.warnings.length > 0) {
       lines.push("- QG Warnings:");
       for (const w of qg.warnings) {
@@ -205,14 +230,50 @@ export function renderQmoSummaryMarkdown(summary: QmoSummary): string {
   lines.push("## Artifacts");
   lines.push("");
   if (summary.reportLinks.allureReportDir) {
-    lines.push(`- Allure HTML Report: \`${summary.reportLinks.allureReportDir}\``);
+    lines.push(
+      `- Allure HTML Report: \`${displayPath(summary.reportLinks.allureReportDir, summary.projectId)}\``
+    );
   }
   if (summary.reportLinks.qualityGateResultPath) {
-    lines.push(`- Quality Gate Result: \`${summary.reportLinks.qualityGateResultPath}\``);
+    lines.push(
+      `- Quality Gate Result: \`${displayPath(summary.reportLinks.qualityGateResultPath, summary.projectId)}\``
+    );
   }
   lines.push("");
 
   return lines.join("\n");
+}
+
+function displayPath(filePath: string, projectRoot: string): string {
+  const windowsRelative = windowsProjectRelativePath(filePath, projectRoot);
+  if (windowsRelative) return windowsRelative;
+  if (/^[A-Za-z]:[\\/]/.test(filePath)) return basenameAny(filePath);
+  if (!path.isAbsolute(filePath)) return normalizeSeparators(filePath);
+  const relative = path.relative(projectRoot, filePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return basenameAny(filePath);
+  }
+  return normalizeSeparators(relative || ".");
+}
+
+function windowsProjectRelativePath(filePath: string, projectRoot: string): string | undefined {
+  if (!/^[A-Za-z]:[\\/]/.test(filePath) || !/^[A-Za-z]:[\\/]/.test(projectRoot)) {
+    return undefined;
+  }
+  const normalizedRoot = normalizeSeparators(projectRoot).replace(/\/+$/, "");
+  const normalizedPath = normalizeSeparators(filePath);
+  if (!normalizedPath.toLowerCase().startsWith(`${normalizedRoot.toLowerCase()}/`)) {
+    return undefined;
+  }
+  return normalizedPath.slice(normalizedRoot.length + 1);
+}
+
+function basenameAny(filePath: string): string {
+  return normalizeSeparators(filePath).split("/").filter(Boolean).at(-1) ?? filePath;
+}
+
+function normalizeSeparators(filePath: string): string {
+  return filePath.split(/[\\/]+/).join("/");
 }
 
 /**

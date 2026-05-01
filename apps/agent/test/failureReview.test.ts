@@ -97,6 +97,46 @@ describe("buildFailureReview", () => {
     const review = await buildFailureReview({ run, projectRoot: workdir });
     expect(review.warnings.some((warning) => warning.includes("Known issues file"))).toBe(true);
   });
+
+  it("returns project-relative paths for Windows-style failed test paths", async () => {
+    const run = makeRun("r4");
+    run.projectId = "C:\\repo";
+    run.projectRoot = "C:\\repo";
+    run.summary!.failedTests[0] = {
+      ...run.summary!.failedTests[0]!,
+      filePath: "C:\\repo\\tests\\checkout.spec.ts",
+      absoluteFilePath: "C:\\repo\\tests\\checkout.spec.ts"
+    };
+
+    const review = await buildFailureReview({ run, projectRoot: "C:\\repo" });
+
+    expect(review.failedTests[0]?.test.filePath).toBe("tests/checkout.spec.ts");
+    expect(review.failedTests[0]?.test.relativeFilePath).toBe("tests/checkout.spec.ts");
+    expect(review.failedTests[0]?.test.absoluteFilePath).toBeUndefined();
+  });
+
+  it("does not trust traversal relative paths from failed tests or attachments", async () => {
+    const run = makeRun("r5");
+    run.summary!.failedTests[0] = {
+      ...run.summary!.failedTests[0]!,
+      filePath: "../external/secret.spec.ts",
+      relativeFilePath: "../external/secret.spec.ts",
+      attachments: [
+        {
+          kind: "trace",
+          label: "trace",
+          path: path.join(workdir, "trace.zip"),
+          relativePath: "../external/trace.zip"
+        }
+      ]
+    };
+
+    const review = await buildFailureReview({ run, projectRoot: workdir });
+
+    expect(review.failedTests[0]?.test.filePath).toBe("secret.spec.ts");
+    expect(review.failedTests[0]?.test.relativeFilePath).toBe("secret.spec.ts");
+    expect(review.failedTests[0]?.test.attachments[0]?.path).toBe("trace.zip");
+  });
 });
 
 function makeRun(runId: string): RunMetadata {
