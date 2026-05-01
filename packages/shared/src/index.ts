@@ -397,7 +397,9 @@ export type GitHubIssueLink = z.infer<typeof GitHubIssueLinkSchema>;
 
 export const CiArtifactKindSchema = z.enum([
   "playwright-report",
+  "playwright-results",
   "allure-report",
+  "allure-results",
   "quality-gate",
   "qmo-summary",
   "log",
@@ -422,6 +424,36 @@ export const CiArtifactLinkSchema = z.object({
   sizeBytes: z.number().int().nonnegative().optional()
 });
 export type CiArtifactLink = z.infer<typeof CiArtifactLinkSchema>;
+
+export const CiArtifactImportSourceSchema = z.object({
+  name: z.string().min(1),
+  url: HttpUrlStringSchema,
+  source: CiArtifactSourceSchema.default("github-actions"),
+  workflowRunId: z.number().int().positive().optional(),
+  sizeBytes: z.number().int().nonnegative().optional()
+});
+export type CiArtifactImportSource = z.input<typeof CiArtifactImportSourceSchema>;
+
+export const CiArtifactImportRequestSchema = z.object({
+  artifacts: z.array(CiArtifactImportSourceSchema)
+});
+export type CiArtifactImportRequest = z.input<typeof CiArtifactImportRequestSchema>;
+
+export const CiArtifactImportSkippedSchema = z.object({
+  name: z.string(),
+  url: HttpUrlStringSchema.optional(),
+  reason: z.enum(["unsupported-kind"])
+});
+export type CiArtifactImportSkipped = z.infer<typeof CiArtifactImportSkippedSchema>;
+
+export const CiArtifactImportResponseSchema = z.object({
+  runId: z.string(),
+  projectId: z.string(),
+  imported: z.array(CiArtifactLinkSchema),
+  skipped: z.array(CiArtifactImportSkippedSchema),
+  warnings: z.array(z.string())
+});
+export type CiArtifactImportResponse = z.infer<typeof CiArtifactImportResponseSchema>;
 
 export const ReleaseReviewDraftRequestSchema = z.object({
   pullRequest: GitHubPullRequestLinkSchema.optional(),
