@@ -169,7 +169,57 @@ describe("TestInventoryPanel", () => {
     expect(screen.getByText("should login")).toBeInTheDocument();
     expect(screen.getByText("L12")).toBeInTheDocument();
     expect(screen.getByText("@smoke")).toBeInTheDocument();
+    expect(screen.getAllByText("playwright-list-json · low")).toHaveLength(2);
     // header の summary
     expect(screen.getByText(/1 files · 2 tests/)).toBeInTheDocument();
+  });
+
+  it("QA metadata の目的・操作ステップ・期待結果を表示する", async () => {
+    const inv: TestInventory = {
+      projectId: "p1",
+      source: "playwright-list-json",
+      generatedAt: "2026-04-28T00:00:00Z",
+      specs: [
+        {
+          filePath: "/p/tests/checkout.spec.ts",
+          relativePath: "tests/checkout.spec.ts",
+          tests: [
+            {
+              id: "checkout-1",
+              title: "completes purchase",
+              fullTitle: "checkout > completes purchase",
+              filePath: "/p/tests/checkout.spec.ts",
+              relativePath: "tests/checkout.spec.ts",
+              line: 18,
+              column: 0,
+              describePath: ["checkout"],
+              tags: ["@critical"],
+              qaMetadata: {
+                purpose: "購入者が決済完了まで進めることを確認する",
+                steps: [
+                  { title: "商品をカートに入れる", line: 20 },
+                  { title: "決済フォームを送信する", line: 24 }
+                ],
+                expectations: [{ title: "注文完了メッセージが表示される", line: 28 }],
+                source: "static-analysis",
+                confidence: "medium"
+              }
+            }
+          ]
+        }
+      ],
+      totals: { specFiles: 1, tests: 1 },
+      warnings: []
+    };
+    vi.mocked(fetchInventory).mockResolvedValue(inv);
+    renderPanel(makeProject());
+
+    expect(await screen.findByText(/購入者が決済完了まで進めることを確認する/)).toBeInTheDocument();
+    expect(screen.getByText("static-analysis · medium")).toBeInTheDocument();
+    expect(screen.getByText("Steps")).toBeInTheDocument();
+    expect(screen.getByText("商品をカートに入れる")).toBeInTheDocument();
+    expect(screen.getByText("決済フォームを送信する")).toBeInTheDocument();
+    expect(screen.getByText("Expected")).toBeInTheDocument();
+    expect(screen.getByText("注文完了メッセージが表示される")).toBeInTheDocument();
   });
 });

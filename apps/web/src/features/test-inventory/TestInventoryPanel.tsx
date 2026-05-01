@@ -10,7 +10,7 @@
 import * as React from "react";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ProjectSummary, SpecFile, TestInventory } from "@pwqa/shared";
+import type { ProjectSummary, SpecFile, TestCase, TestInventory, TestStep } from "@pwqa/shared";
 
 import { fetchInventory } from "@/api/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -127,17 +127,92 @@ function SpecRow({ spec }: { spec: SpecFile }): React.ReactElement {
       </div>
       <ul className="flex flex-col gap-1.5">
         {spec.tests.map((test) => (
-          <li key={test.id} className="flex flex-wrap items-baseline gap-1.5 text-sm">
-            <span className="text-[var(--ink-0)]">{test.title}</span>
-            <span className="font-mono text-[11px] text-[var(--ink-3)]">L{test.line}</span>
-            {test.tags.length > 0 ? (
-              <span className="font-mono text-[11px] text-[var(--accent)]">
-                {test.tags.join(" ")}
+          <TestRow key={test.id} test={test} />
+        ))}
+      </ul>
+    </li>
+  );
+}
+
+function TestRow({ test }: { test: TestCase }): React.ReactElement {
+  return (
+    <li className="rounded-sm border border-[var(--line-faint)] bg-[var(--bg-elev)] p-2">
+      <div className="flex flex-wrap items-baseline gap-1.5 text-sm">
+        <span className="text-[var(--ink-0)]">{test.title}</span>
+        <span className="font-mono text-[11px] text-[var(--ink-3)]">L{test.line}</span>
+        {test.tags.length > 0 ? (
+          <span className="font-mono text-[11px] text-[var(--accent)]">
+            {test.tags.join(" ")}
+          </span>
+        ) : null}
+      </div>
+      <QaMetadataView test={test} />
+    </li>
+  );
+}
+
+function QaMetadataView({ test }: { test: TestCase }): React.ReactElement {
+  const { qaMetadata } = test;
+  const hasSteps = qaMetadata.steps.length > 0;
+  const hasExpectations = qaMetadata.expectations.length > 0;
+  const shouldShowPurpose =
+    qaMetadata.confidence !== "low" || !qaMetadata.purpose.includes(test.title);
+
+  return (
+    <div className="mt-2 flex flex-col gap-2 border-t border-[var(--line-faint)] pt-2">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        {shouldShowPurpose ? (
+          <div className="min-w-0 flex-1">
+            <p className="m-0 break-words text-sm text-[var(--ink-1)]">
+              <span className="text-[11px] font-semibold uppercase tracking-normal text-[var(--ink-3)]">
+                Purpose ·{" "}
+              </span>
+              {qaMetadata.purpose}
+            </p>
+          </div>
+        ) : null}
+        <Badge variant={qaMetadata.confidence === "low" ? "outline" : "info"}>
+          {qaMetadata.source} · {qaMetadata.confidence}
+        </Badge>
+      </div>
+      {hasSteps || hasExpectations ? (
+        <div className="grid grid-cols-1 gap-2 text-xs md:grid-cols-2">
+          {hasSteps ? (
+            <QaStepList title="Steps" steps={qaMetadata.steps} />
+          ) : null}
+          {hasExpectations ? (
+            <QaStepList title="Expected" steps={qaMetadata.expectations} />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function QaStepList({
+  title,
+  steps
+}: {
+  title: string;
+  steps: TestStep[];
+}): React.ReactElement {
+  return (
+    <section className="rounded-sm bg-[var(--bg-2)] p-2">
+      <h4 className="m-0 text-[11px] font-semibold uppercase tracking-normal text-[var(--ink-3)]">
+        {title}
+      </h4>
+      <ol className="m-0 mt-1 flex list-decimal flex-col gap-1 pl-4 text-[var(--ink-1)]">
+        {steps.map((step, index) => (
+          <li key={`${step.title}-${step.line ?? index}`} className="break-words">
+            <span>{step.title}</span>
+            {step.line ? (
+              <span className="ml-1 font-mono text-[10.5px] text-[var(--ink-3)]">
+                L{step.line}
               </span>
             ) : null}
           </li>
         ))}
-      </ul>
-    </li>
+      </ol>
+    </section>
   );
 }
