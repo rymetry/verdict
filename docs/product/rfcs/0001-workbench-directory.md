@@ -533,8 +533,8 @@ migration tool (`workbench migrate`) を提供する (Phase 1.5-δ)。
 ### 6.2 既存 project への adoption
 
 ```bash
-# Workbench Agent CLI で初期化
-npx playwright-workbench init
+# Verdict Agent CLI で初期化 (現状の binary 名は playwright-workbench、ブランド rename と同期で移行)
+npx verdict init  # alias of: npx playwright-workbench init
 # → .workbench/ skeleton + sample AGENTS.md / rules / skills を生成
 # → .gitignore 提案
 # → 既存 spec を読んで rule violation を検出
