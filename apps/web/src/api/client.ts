@@ -1,4 +1,5 @@
 import {
+  AiAnalysisResponseSchema,
   AllureHistoryResponseSchema,
   FailureReviewResponseSchema,
   HealthResponseSchema,
@@ -9,6 +10,7 @@ import {
   TestInventorySchema,
   type AllureHistoryResponse,
   type ApiError,
+  type AiAnalysisResponse,
   type FailureReviewResponse,
   type HealthResponse,
   type ProjectSummary,
@@ -99,6 +101,16 @@ export async function fetchFailureReview(runId: string): Promise<FailureReviewRe
   const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/failure-review`);
   const body = await parseJson<unknown>(response);
   return FailureReviewResponseSchema.parse(body);
+}
+
+export async function runAiAnalysis(runId: string): Promise<AiAnalysisResponse> {
+  const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/ai-analysis`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({})
+  });
+  const body = await parseJson<unknown>(response);
+  return AiAnalysisResponseSchema.parse(body);
 }
 
 export async function cancelRun(runId: string): Promise<void> {
