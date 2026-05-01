@@ -231,8 +231,10 @@ if re.search(r"\bgit\s+(commit|push|merge|rebase|pull)\b.*--no-verify", cmd):
     emit_warning("--no-verify bypasses commit hooks. Confirm with the user before retrying.")
 
 # W3. plain `git push origin main` (this repo lands changes via PR).
-if re.search(r"\bgit\s+push\b", cmd) and re.search(r"\bmain\b", cmd):
-    if not force_pattern.search(cmd):
+# When a force flag is present, B1 already blocked above; this warning
+# fires only on the non-force path.
+if push_pattern.search(cmd) and re.search(r"\bmain\b", cmd):
+    if not any_force_pattern.search(cmd):
         emit_warning("direct push to main detected. Confirm this is not a feature branch first.")
 
 sys.exit(0)
