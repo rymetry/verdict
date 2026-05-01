@@ -63,9 +63,18 @@ describe("parsePlaywrightListJson", () => {
     expect(auth.tests).toHaveLength(2);
     const [first, second] = auth.tests;
     expect(first!.title).toBe("logs in with valid credentials");
+    expect(first!.fullTitle).toBe("logs in with valid credentials");
     expect(first!.tags).toContain("@smoke");
     expect(first!.projectName).toBe("chromium");
     expect(second!.describePath).toEqual(["errors"]);
+    expect(second!.fullTitle).toBe("errors > rejects invalid password");
+    expect(second!.qaMetadata).toEqual({
+      purpose: "errors > rejects invalid password",
+      steps: [],
+      expectations: [],
+      source: "playwright-list-json",
+      confidence: "low"
+    });
     expect(second!.projectName).toBe("webkit");
   });
 

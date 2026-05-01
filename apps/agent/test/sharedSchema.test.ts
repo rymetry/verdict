@@ -9,6 +9,7 @@ import {
   CiArtifactImportResponseSchema,
   CiArtifactLinkSchema,
   GitHubPullRequestLinkSchema,
+  QaTestMetadataSchema,
   ReleaseReviewDraftRequestSchema,
   RunCompletedPayloadSchema,
   RunCancelledPayloadSchema,
@@ -17,11 +18,51 @@ import {
   RunQueuedPayloadSchema,
   RunStartedPayloadSchema,
   SnapshotPayloadSchema,
+  TestCaseSchema,
   WorkbenchEventSchema,
   terminalStatusMatchesEvent
 } from "@pwqa/shared";
 
 describe("shared run warning schemas", () => {
+  it("validates QA inventory metadata on test cases", () => {
+    expect(
+      QaTestMetadataSchema.parse({
+        purpose: "checkout > completes purchase",
+        steps: [{ title: "Fill cart", line: 12 }],
+        expectations: [{ title: "Order confirmation is visible" }],
+        source: "static-analysis",
+        confidence: "medium"
+      })
+    ).toEqual({
+      purpose: "checkout > completes purchase",
+      steps: [{ title: "Fill cart", line: 12 }],
+      expectations: [{ title: "Order confirmation is visible" }],
+      source: "static-analysis",
+      confidence: "medium"
+    });
+
+    expect(() =>
+      TestCaseSchema.parse({
+        id: "t1",
+        title: "completes purchase",
+        fullTitle: "checkout > completes purchase",
+        filePath: "/repo/tests/checkout.spec.ts",
+        relativePath: "tests/checkout.spec.ts",
+        line: 12,
+        column: 0,
+        describePath: ["checkout"],
+        tags: [],
+        qaMetadata: {
+          purpose: "checkout > completes purchase",
+          steps: [],
+          expectations: [],
+          source: "unknown-source",
+          confidence: "low"
+        }
+      })
+    ).toThrow();
+  });
+
   it("preserves warnings in terminal payloads and run list items", () => {
     const warnings = [
       "stdout log write failed; websocket stream was still delivered. code=ENOSPC; failures=1"
