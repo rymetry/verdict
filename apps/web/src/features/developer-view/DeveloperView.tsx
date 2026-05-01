@@ -24,6 +24,11 @@ interface DeveloperViewProps {
   locator: LocatorState;
   consoleEntries: ReadonlyArray<ConsoleEntry>;
   runMetadata: ReadonlyArray<RunMetadataRow>;
+  fileTreeBadgeLabel?: string | null;
+  sourceTabsBadgeLabel?: string | null;
+  locatorBadgeLabel?: string | null;
+  consoleBadgeLabel?: string | null;
+  runMetadataBadgeLabel?: string | null;
 }
 
 export function DeveloperView({
@@ -33,7 +38,12 @@ export function DeveloperView({
   terminal,
   locator,
   consoleEntries,
-  runMetadata
+  runMetadata,
+  fileTreeBadgeLabel,
+  sourceTabsBadgeLabel,
+  locatorBadgeLabel,
+  consoleBadgeLabel,
+  runMetadataBadgeLabel
 }: DeveloperViewProps): React.ReactElement {
   return (
     <div
@@ -41,15 +51,23 @@ export function DeveloperView({
       className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.95fr)]"
     >
       <div className="flex flex-col gap-4">
-        <FileTreeCard groups={fileTreeGroups} />
+        <FileTreeCard groups={fileTreeGroups} badgeLabel={fileTreeBadgeLabel} />
       </div>
       <div className="flex flex-col gap-4">
-        <SourceTabsCard source={source} diff={diff} terminal={terminal} />
+        <SourceTabsCard
+          source={source}
+          diff={diff}
+          terminal={terminal}
+          badgeLabel={sourceTabsBadgeLabel}
+        />
       </div>
       <InspectorPanel
         locator={locator}
         consoleEntries={consoleEntries}
         runMetadata={runMetadata}
+        locatorBadgeLabel={locatorBadgeLabel}
+        consoleBadgeLabel={consoleBadgeLabel}
+        runMetadataBadgeLabel={runMetadataBadgeLabel}
       />
     </div>
   );

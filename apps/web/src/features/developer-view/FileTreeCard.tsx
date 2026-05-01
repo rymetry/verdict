@@ -26,9 +26,13 @@ interface FileTreeCardProps {
    *  - 空配列を許容すると "API 障害" と "本当にゼロ件" の区別がつかなくなる (silent failure)。
    */
   groups: ReadonlyArray<FileTreeGroup>;
+  badgeLabel?: string | null;
 }
 
-export function FileTreeCard({ groups }: FileTreeCardProps): React.ReactElement {
+export function FileTreeCard({
+  groups,
+  badgeLabel = DEFERRED_PLACEHOLDER_LABEL
+}: FileTreeCardProps): React.ReactElement {
   const total = groups.reduce((acc, g) => acc + g.items.length, 0);
 
   return (
@@ -38,7 +42,7 @@ export function FileTreeCard({ groups }: FileTreeCardProps): React.ReactElement 
           <span>{DEVELOPER_VIEW_LABELS.fileTree}</span>
           <span className="flex items-center gap-2">
             <span className="text-xs font-medium text-[var(--ink-3)]">{total}</span>
-            <Badge variant="info">{DEFERRED_PLACEHOLDER_LABEL}</Badge>
+            {badgeLabel ? <Badge variant="info">{badgeLabel}</Badge> : null}
           </span>
         </CardTitle>
       </CardHeader>

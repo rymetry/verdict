@@ -6,6 +6,8 @@ import type {
   ConfigUseOption,
   FixtureEntry,
   FixtureSignal,
+  PomEntry,
+  PomLocatorSignal,
   ProjectConfigSummary
 } from "@pwqa/shared";
 
@@ -20,6 +22,8 @@ const SOURCE_FILE_SIZE_CAP_BYTES = 200 * 1024;
 const MAX_DIRECTORY_ENTRIES = 1_000;
 const MAX_SOURCE_FILES = 500;
 const MAX_FIXTURE_FILES = 100;
+const MAX_POM_FILES = 100;
+const MAX_POM_LOCATOR_SAMPLES_PER_FILE = 20;
 
 const SKIPPED_DIRECTORIES = new Set([
   ".git", ".playwright-workbench", "allure-report", "allure-results", "coverage",
@@ -30,6 +34,10 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
 const KNOWN_REPORTERS = [
   "list", "json", "html", "line", "dot", "github", "blob", "junit", "allure-playwright"
 ] as const;
+const POM_PATH_PATTERN = /(^|\/)(pages?|page-objects?|pom)(\/|$)|\.page\./i;
+const CLASS_NAME_PATTERN = /\bclass\s+([A-Za-z_$][\w$]*)/g;
+const LOCATOR_CALL_PATTERN =
+  /\b(?:page|this\.page|locator|[\w.]+)\.(getByRole|getByText|getByLabel|getByTestId|getByPlaceholder|getByAltText|getByTitle|locator)\s*\(/g;
 
 const BLOCK_COMMENT_PATTERN = /\/\*[\s\S]*?\*\//g;
 const LINE_COMMENT_PATTERN = /\/\/.*$/gm;
@@ -41,6 +49,10 @@ function stripJsComments(text: string): string {
 
 function relativeToProject(projectRoot: string, absolutePath: string): string {
   return path.relative(projectRoot, absolutePath).split(path.sep).join("/");
+}
+
+function compactSourceLine(line: string): string {
+  return line.trim().replace(/\s+/g, " ").slice(0, 240);
 }
 
 function configFormat(configPath: string | undefined): ProjectConfigSummary["config"]["format"] {
@@ -244,6 +256,67 @@ async function scanFixtureFiles(projectRoot: string): Promise<{
   return { fixtureFiles, warnings };
 }
 
+async function scanPomFiles(projectRoot: string): Promise<{
+  pomFiles: PomEntry[];
+  warnings: string[];
+}> {
+  const pomFiles: PomEntry[] = [];
+  const warnings: string[] = [];
+  let directoriesVisited = 0;
+  let sourceFilesVisited = 0;
+  let stopped = false;
+
+  async function visit(directory: string): Promise<void> {
+    if (stopped) return;
+    directoriesVisited += 1;
+    if (directoriesVisited > MAX_DIRECTORY_ENTRIES) {
+      warnings.push(`POM scan stopped after ${MAX_DIRECTORY_ENTRIES} directories.`);
+      stopped = true;
+      return;
+    }
+
+    let entries: Array<import("node:fs").Dirent>;
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      warnings.push(`POM scan skipped unreadable directory ${relativeToProject(projectRoot, directory)}. code=${readErrnoCode(error)}`);
+      return;
+    }
+
+    for (const entry of entries) {
+      if (stopped) return;
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIPPED_DIRECTORIES.has(entry.name)) {
+          await visit(absolute);
+        }
+        continue;
+      }
+      if (!entry.isFile() || !SOURCE_EXTENSIONS.has(path.extname(entry.name))) continue;
+      sourceFilesVisited += 1;
+      if (sourceFilesVisited > MAX_SOURCE_FILES) {
+        warnings.push(`POM scan stopped after ${MAX_SOURCE_FILES} source files.`);
+        stopped = true;
+        return;
+      }
+
+      const pom = await inspectPomCandidate(projectRoot, absolute);
+      if (pom) {
+        pomFiles.push(pom);
+        if (pomFiles.length >= MAX_POM_FILES) {
+          warnings.push(`POM scan stopped after ${MAX_POM_FILES} POM-like files.`);
+          stopped = true;
+          return;
+        }
+      }
+    }
+  }
+
+  await visit(projectRoot);
+  pomFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  return { pomFiles, warnings };
+}
+
 async function scanAuthSetupRisks(projectRoot: string): Promise<{
   authRisks: AuthSetupRisk[];
   warnings: string[];
@@ -298,6 +371,73 @@ async function scanAuthSetupRisks(projectRoot: string): Promise<{
   await visit(projectRoot);
   authRisks.sort((a, b) => (a.relativePath ?? "").localeCompare(b.relativePath ?? ""));
   return { authRisks, warnings };
+}
+
+function extractClassNames(text: string): string[] {
+  const names: string[] = [];
+  for (const match of text.matchAll(CLASS_NAME_PATTERN)) {
+    const name = match[1]!;
+    if (!names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+function extractLocatorSignals(text: string): {
+  count: number;
+  samples: PomLocatorSignal[];
+} {
+  const samples: PomLocatorSignal[] = [];
+  let count = 0;
+  const lines = text.split(/\r?\n/);
+  for (const [index, line] of lines.entries()) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+    for (const match of trimmed.matchAll(LOCATOR_CALL_PATTERN)) {
+      count += 1;
+      if (samples.length >= MAX_POM_LOCATOR_SAMPLES_PER_FILE) continue;
+      const start = match.index ?? 0;
+      const value = compactSourceLine(trimmed.slice(start));
+      if (samples.some((sample) => sample.value === value && sample.line === index + 1)) {
+        continue;
+      }
+      samples.push({ value, line: index + 1, source: "heuristic" });
+    }
+  }
+  return { count, samples };
+}
+
+async function inspectPomCandidate(
+  projectRoot: string,
+  absolutePath: string
+): Promise<PomEntry | undefined> {
+  const stat = await fs.stat(absolutePath);
+  const relativePath = relativeToProject(projectRoot, absolutePath);
+  const pathLooksLikePom = POM_PATH_PATTERN.test(relativePath);
+  if (stat.size > SOURCE_FILE_SIZE_CAP_BYTES) {
+    if (!pathLooksLikePom) return undefined;
+    return {
+      relativePath,
+      kind: "page-like-file",
+      classNames: [],
+      locatorCount: 0,
+      locatorSamples: [],
+      sizeBytes: stat.size
+    };
+  }
+
+  const text = stripJsComments(await fs.readFile(absolutePath, "utf8"));
+  const classNames = extractClassNames(text);
+  const classLooksLikePom = classNames.some((name) => /Page(?:Object)?$/i.test(name));
+  if (!pathLooksLikePom && !classLooksLikePom) return undefined;
+  const locatorSignals = extractLocatorSignals(text);
+  return {
+    relativePath,
+    kind: classLooksLikePom ? "page-object" : "page-like-file",
+    classNames,
+    locatorCount: locatorSignals.count,
+    locatorSamples: locatorSignals.samples,
+    sizeBytes: stat.size
+  };
 }
 
 async function inspectFixtureCandidate(
@@ -366,6 +506,7 @@ export async function buildConfigSummary(
   const generatedAt = new Date().toISOString();
   const configRead = await readConfigText(request.configPath);
   const fixtureScan = await scanFixtureFiles(request.projectRoot);
+  const pomScan = await scanPomFiles(request.projectRoot);
   const authSetupScan = await scanAuthSetupRisks(request.projectRoot);
   const config = {
     path: request.configPath,
@@ -383,10 +524,16 @@ export async function buildConfigSummary(
     reporters: extractReporters(configRead.text),
     useOptions: extractUseOptions(configRead.text),
     fixtureFiles: fixtureScan.fixtureFiles,
+    pomFiles: pomScan.pomFiles,
     authRisks: [
       ...extractConfigAuthRisks(configRead.text, config.relativePath),
       ...authSetupScan.authRisks
     ],
-    warnings: [...configRead.warnings, ...fixtureScan.warnings, ...authSetupScan.warnings]
+    warnings: [
+      ...configRead.warnings,
+      ...fixtureScan.warnings,
+      ...pomScan.warnings,
+      ...authSetupScan.warnings
+    ]
   };
 }

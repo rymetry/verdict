@@ -15,6 +15,7 @@ vi.mock("@/api/client", async () => {
   return {
     ...actual,
     fetchHealth: vi.fn(),
+    fetchConfigSummary: vi.fn(),
     fetchCurrentProject: vi.fn(),
     fetchInventory: vi.fn(),
     fetchRun: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("@/api/client", async () => {
 });
 import {
   fetchCurrentProject,
+  fetchConfigSummary,
   fetchHealth,
   fetchInventory,
   fetchRun
@@ -49,6 +51,17 @@ beforeEach(() => {
     timestamp: "2026-04-28T00:00:00Z"
   });
   vi.mocked(fetchCurrentProject).mockResolvedValue(null);
+  vi.mocked(fetchConfigSummary).mockResolvedValue({
+    projectId: "p1",
+    generatedAt: "2026-05-01T00:00:00Z",
+    config: { relativePath: "playwright.config.ts", format: "ts", sizeBytes: 128 },
+    reporters: [],
+    useOptions: [],
+    fixtureFiles: [],
+    pomFiles: [],
+    authRisks: [],
+    warnings: []
+  });
   vi.mocked(fetchInventory).mockResolvedValue({
     projectId: "p1",
     source: "playwright-list-json",
@@ -201,15 +214,125 @@ describe("各 persona route の直接アクセス", () => {
     expect(screen.getByText("Failure review")).toBeInTheDocument();
   });
 
-  it("`/dev` を直接開くと Developer View placeholder が 3-col grid で描画される", async () => {
-    // ε (Issue #12) で `/dev` は 3-col placeholder layout を表示するようになった。
-    // section のラベル ("Developer View") + dev-view-grid + 各カードのタイトルで pin する。
+  it("`/dev` を直接開くとプロジェクト未オープン状態で ProjectPicker が描画される", async () => {
     renderWithRouter({ initialPath: "/dev" });
     expect(await screen.findByTestId("dev-view")).toHaveAttribute("aria-label", "Developer View");
+    expect(
+      await screen.findByLabelText("Absolute path to a Playwright project")
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("dev-view-grid")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Developer", selected: true })).toBeInTheDocument();
+  });
+
+  it("project が open のとき `/dev` は POM と locator の read-only explorer を描画する", async () => {
+    vi.mocked(fetchCurrentProject).mockResolvedValue({
+      id: "p1",
+      rootPath: "/repo",
+      packageJsonPath: "/repo/package.json",
+      packageManager: {
+        name: "pnpm",
+        status: "ok",
+        confidence: "high",
+        reason: "fixture",
+        warnings: [],
+        errors: [],
+        lockfiles: ["pnpm-lock.yaml"],
+        commandTemplates: {
+          playwrightTest: { executable: "pnpm", args: ["exec", "playwright", "test"] }
+        },
+        hasPlaywrightDevDependency: true,
+        localBinaryUsable: true,
+        blockingExecution: false
+      },
+      hasAllurePlaywright: false,
+      hasAllureCli: false,
+      warnings: [],
+      blockingExecution: false
+    });
+    vi.mocked(fetchConfigSummary).mockResolvedValue({
+      projectId: "p1",
+      generatedAt: "2026-05-01T00:00:00Z",
+      config: { relativePath: "playwright.config.ts", format: "ts", sizeBytes: 128 },
+      reporters: [],
+      useOptions: [],
+      fixtureFiles: [
+        {
+          relativePath: "tests/fixtures/auth.fixture.ts",
+          kind: "fixture-file",
+          signals: ["fixture-path"],
+          sizeBytes: 64
+        }
+      ],
+      pomFiles: [
+        {
+          relativePath: "pages/checkout.page.ts",
+          kind: "page-object",
+          classNames: ["CheckoutPage"],
+          locatorCount: 1,
+          locatorSamples: [
+            {
+              value: "this.page.getByRole('button', { name: 'Pay' })",
+              line: 12,
+              source: "heuristic"
+            }
+          ],
+          sizeBytes: 128
+        }
+      ],
+      authRisks: [],
+      warnings: []
+    });
+    vi.mocked(fetchInventory).mockResolvedValue({
+      projectId: "p1",
+      source: "playwright-list-json",
+      generatedAt: "2026-05-01T00:00:00Z",
+      specs: [
+        {
+          filePath: "/repo/tests/checkout.spec.ts",
+          relativePath: "tests/checkout.spec.ts",
+          tests: [
+            {
+              id: "t1",
+              title: "checkout completes",
+              fullTitle: "checkout completes",
+              filePath: "/repo/tests/checkout.spec.ts",
+              relativePath: "tests/checkout.spec.ts",
+              line: 4,
+              column: 0,
+              describePath: [],
+              tags: [],
+              qaMetadata: {
+                purpose: "checkout completes",
+                steps: [],
+                expectations: [],
+                source: "static-analysis",
+                confidence: "medium"
+              },
+              codeSignals: [
+                {
+                  kind: "locator",
+                  value: "page.getByText('Done')",
+                  line: 5,
+                  source: "static-analysis"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      totals: { specFiles: 1, tests: 1 },
+      warnings: []
+    });
+
+    renderWithRouter({ initialPath: "/dev" });
+    expect(await screen.findByTestId("dev-view-grid")).toBeInTheDocument();
     expect(screen.getByTestId("dev-view-grid")).toBeInTheDocument();
-    expect(screen.getByTestId("dev-file-tree-card")).toBeInTheDocument();
+    expect(screen.getByText("pages/checkout.page.ts")).toBeInTheDocument();
+    expect(screen.getByText("tests/fixtures/auth.fixture.ts")).toBeInTheDocument();
+    expect(screen.getByText("tests/checkout.spec.ts")).toBeInTheDocument();
+    expect(screen.getByText("this.page.getByRole('button', { name: 'Pay' })")).toBeInTheDocument();
+    expect(screen.getByText("page.getByText('Done')")).toBeInTheDocument();
     expect(screen.getByTestId("dev-source-tabs-card")).toBeInTheDocument();
-    expect(screen.getByTestId("dev-inspector-panel")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Developer", selected: true })).toBeInTheDocument();
   });
 

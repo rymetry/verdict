@@ -76,6 +76,47 @@ describe("buildConfigSummary", () => {
     expect(summary.warnings).toContain("playwright.config.{ts,js,mjs,cjs} was not found.");
   });
 
+  it("lists POM-like files with class names and locator samples", async () => {
+    fs.mkdirSync(path.join(workdir, "pages"), { recursive: true });
+    fs.mkdirSync(path.join(workdir, "tests"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workdir, "pages", "checkout.page.ts"),
+      [
+        "import type { Page } from '@playwright/test';",
+        "export class CheckoutPage {",
+        "  constructor(private readonly page: Page) {}",
+        "  placeOrder = this.page.getByRole('button', { name: 'Place Order' });",
+        "}"
+      ].join("\n")
+    );
+    fs.writeFileSync(
+      path.join(workdir, "tests", "checkout.spec.ts"),
+      "test('checkout', async ({ page }) => { await page.getByRole('button').click(); });\n"
+    );
+
+    const summary = await buildConfigSummary({
+      projectId: "p1",
+      projectRoot: workdir
+    });
+
+    expect(summary.pomFiles).toEqual([
+      expect.objectContaining({
+        relativePath: "pages/checkout.page.ts",
+        kind: "page-object",
+        classNames: ["CheckoutPage"],
+        locatorCount: 1,
+        locatorSamples: [
+          {
+            value: "this.page.getByRole('button', { name: 'Place Order' });",
+            line: 4,
+            source: "heuristic"
+          }
+        ]
+      })
+    ]);
+    expect(JSON.stringify(summary.pomFiles)).not.toContain(workdir);
+  });
+
   it("surfaces storageState and auth setup risks without reading state contents", async () => {
     const configPath = path.join(workdir, "playwright.config.ts");
     fs.writeFileSync(

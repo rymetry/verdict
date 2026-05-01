@@ -107,6 +107,22 @@ describe("shared run warning schemas", () => {
         reporters: [],
         useOptions: [],
         fixtureFiles: [],
+        pomFiles: [
+          {
+            relativePath: "pages/checkout.page.ts",
+            kind: "page-object",
+            classNames: ["CheckoutPage"],
+            locatorCount: 1,
+            locatorSamples: [
+              {
+                value: "this.page.getByRole('button', { name: 'Pay' })",
+                line: 12,
+                source: "heuristic"
+              }
+            ],
+            sizeBytes: 128
+          }
+        ],
         warnings: []
       }).authRisks
     ).toEqual([]);

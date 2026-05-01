@@ -27,6 +27,7 @@ interface SourceTabsCardProps {
   diff: ReadonlyArray<SourceLine>;
   /** ターミナル出力 (1 行 = 1 配列要素) */
   terminal: ReadonlyArray<string>;
+  badgeLabel?: string | null;
 }
 
 const TAB_VALUES = {
@@ -70,14 +71,15 @@ function renderLine(line: SourceLine, index: number): React.ReactElement {
 export function SourceTabsCard({
   source,
   diff,
-  terminal
+  terminal,
+  badgeLabel = DEFERRED_PLACEHOLDER_LABEL
 }: SourceTabsCardProps): React.ReactElement {
   return (
     <Card data-testid="dev-source-tabs-card">
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span>{DEVELOPER_VIEW_LABELS.sourceTabs}</span>
-          <Badge variant="info">{DEFERRED_PLACEHOLDER_LABEL}</Badge>
+          {badgeLabel ? <Badge variant="info">{badgeLabel}</Badge> : null}
         </CardTitle>
       </CardHeader>
       <CardContent>
