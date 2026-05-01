@@ -1,5 +1,6 @@
 import {
   AiAnalysisResponseSchema,
+  AiTestGenerationResponseSchema,
   AllureHistoryResponseSchema,
   CiArtifactImportResponseSchema,
   FailureReviewResponseSchema,
@@ -18,6 +19,8 @@ import {
   type AllureHistoryResponse,
   type ApiError,
   type AiAnalysisResponse,
+  type AiTestGenerationRequest,
+  type AiTestGenerationResponse,
   type CiArtifactImportRequest,
   type CiArtifactImportResponse,
   type FailureReviewResponse,
@@ -127,6 +130,19 @@ export async function runAiAnalysis(runId: string): Promise<AiAnalysisResponse> 
   });
   const body = await parseJson<unknown>(response);
   return AiAnalysisResponseSchema.parse(body);
+}
+
+export async function runAiTestGeneration(
+  runId: string,
+  request: AiTestGenerationRequest
+): Promise<AiTestGenerationResponse> {
+  const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/ai-test-generation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request)
+  });
+  const body = await parseJson<unknown>(response);
+  return AiTestGenerationResponseSchema.parse(body);
 }
 
 export async function checkPatch(

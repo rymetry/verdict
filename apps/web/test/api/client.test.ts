@@ -9,6 +9,7 @@ import {
   importCiArtifacts,
   revertPatchTemporary,
   runAiAnalysis,
+  runAiTestGeneration,
   startRepairRerun
 } from "@/api/client";
 
@@ -85,6 +86,51 @@ describe("api/client runAiAnalysis", () => {
     });
     expect(fetch).toHaveBeenCalledWith(
       "/api/runs/r1/ai-analysis",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+});
+
+describe("api/client runAiTestGeneration", () => {
+  it("posts generation request and validates the response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            runId: "r1",
+            projectId: "<projectRoot>",
+            provider: "claude-code",
+            mode: "generator",
+            generatedAt: "2026-05-01T00:00:00Z",
+            result: {
+              plan: ["Add generated coverage"],
+              proposedPatch: "diff --git a/tests/generated.spec.ts b/tests/generated.spec.ts\n",
+              filesTouched: ["tests/generated.spec.ts"],
+              evidence: ["failure context"],
+              risk: ["test-only change"],
+              confidence: 0.72,
+              requiresHumanDecision: false
+            },
+            warnings: []
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    await expect(
+      runAiTestGeneration("r1", {
+        mode: "generator",
+        objective: "Add generated coverage.",
+        targetFiles: ["tests/generated.spec.ts"]
+      })
+    ).resolves.toMatchObject({
+      mode: "generator",
+      result: { filesTouched: ["tests/generated.spec.ts"] }
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/r1/ai-test-generation",
       expect.objectContaining({ method: "POST" })
     );
   });

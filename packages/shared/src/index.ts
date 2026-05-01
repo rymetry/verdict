@@ -644,6 +644,54 @@ export const AiAnalysisResponseSchema = z.object({
 });
 export type AiAnalysisResponse = z.infer<typeof AiAnalysisResponseSchema>;
 
+export const AiTestGenerationModeSchema = z.enum(["planner", "generator", "healer"]);
+export type AiTestGenerationMode = z.infer<typeof AiTestGenerationModeSchema>;
+
+const ProjectRelativeFileSchema = z
+  .string()
+  .min(1)
+  .refine(noFlagInjection, "target file must not start with '-'")
+  .refine((value) => !value.includes(".."), "target file must not contain '..'")
+  .refine((value) => !absolutePathLike(value), "target file must be project-relative");
+
+export const AiTestGenerationRequestSchema = z.object({
+  provider: AiAnalysisProviderSchema.optional().default("claude-code"),
+  mode: AiTestGenerationModeSchema.optional().default("generator"),
+  objective: z.string().min(1),
+  targetFiles: z.array(ProjectRelativeFileSchema).default([])
+});
+export type AiTestGenerationRequest = z.input<typeof AiTestGenerationRequestSchema>;
+
+export const AiTestGenerationContextSchema = z.object({
+  mode: AiTestGenerationModeSchema,
+  objective: z.string(),
+  targetFiles: z.array(ProjectRelativeFileSchema),
+  analysisContext: AiAnalysisContextSchema
+});
+export type AiTestGenerationContext = z.infer<typeof AiTestGenerationContextSchema>;
+
+export const AiTestGenerationOutputSchema = z.object({
+  plan: z.array(z.string()),
+  proposedPatch: z.string().optional(),
+  filesTouched: z.array(ProjectRelativeFileSchema),
+  evidence: z.array(z.string()),
+  risk: z.array(z.string()),
+  confidence: z.number().min(0).max(1),
+  requiresHumanDecision: z.boolean()
+});
+export type AiTestGenerationOutput = z.infer<typeof AiTestGenerationOutputSchema>;
+
+export const AiTestGenerationResponseSchema = z.object({
+  runId: z.string(),
+  projectId: z.string(),
+  provider: AiAnalysisProviderSchema,
+  mode: AiTestGenerationModeSchema,
+  generatedAt: z.string(),
+  result: AiTestGenerationOutputSchema,
+  warnings: z.array(z.string())
+});
+export type AiTestGenerationResponse = z.infer<typeof AiTestGenerationResponseSchema>;
+
 export const PatchRequestSchema = z.object({
   projectId: z.string(),
   patch: z.string().min(1)
