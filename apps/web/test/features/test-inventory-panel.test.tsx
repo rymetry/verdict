@@ -222,4 +222,47 @@ describe("TestInventoryPanel", () => {
     expect(screen.getByText("Expected")).toBeInTheDocument();
     expect(screen.getByText("注文完了メッセージが表示される")).toBeInTheDocument();
   });
+
+  it("static-analysis で補強された test title 由来の purpose は重複表示しない", async () => {
+    const inv: TestInventory = {
+      projectId: "p1",
+      source: "playwright-list-json",
+      generatedAt: "2026-04-28T00:00:00Z",
+      specs: [
+        {
+          filePath: "/p/tests/example.spec.ts",
+          relativePath: "tests/example.spec.ts",
+          tests: [
+            {
+              id: "example-1",
+              title: "trivial passing assertion",
+              fullTitle: "trivial passing assertion",
+              filePath: "/p/tests/example.spec.ts",
+              relativePath: "tests/example.spec.ts",
+              line: 3,
+              column: 0,
+              describePath: [],
+              tags: [],
+              qaMetadata: {
+                purpose: "trivial passing",
+                steps: [{ title: "Open page", line: 4 }],
+                expectations: [{ title: "await expect(true).toBeTruthy();", line: 5 }],
+                source: "static-analysis",
+                confidence: "medium"
+              }
+            }
+          ]
+        }
+      ],
+      totals: { specFiles: 1, tests: 1 },
+      warnings: []
+    };
+    vi.mocked(fetchInventory).mockResolvedValue(inv);
+    renderPanel(makeProject());
+
+    expect(await screen.findByText("trivial passing assertion")).toBeInTheDocument();
+    expect(screen.queryByText(/Purpose ·/)).not.toBeInTheDocument();
+    expect(screen.getByText("static-analysis · medium")).toBeInTheDocument();
+    expect(screen.getByText("Open page")).toBeInTheDocument();
+  });
 });
