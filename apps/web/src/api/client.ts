@@ -9,6 +9,7 @@ import {
   PatchCheckResponseSchema,
   PatchRevertResponseSchema,
   ProjectSummarySchema,
+  ProjectConfigSummarySchema,
   QmoSummarySchema,
   ReleaseReviewDraftSchema,
   RepairComparisonSchema,
@@ -29,6 +30,7 @@ import {
   type PatchCheckResponse,
   type PatchRevertResponse,
   type ProjectSummary,
+  type ProjectConfigSummary,
   type QmoSummary,
   type ReleaseReviewDraft,
   type ReleaseReviewDraftRequest,
@@ -89,6 +91,14 @@ export async function fetchInventory(projectId: string): Promise<TestInventory> 
   );
   const body = await parseJson<unknown>(response);
   return TestInventorySchema.parse(body);
+}
+
+export async function fetchConfigSummary(projectId: string): Promise<ProjectConfigSummary> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/config-summary`
+  );
+  const body = await parseJson<unknown>(response);
+  return ProjectConfigSummarySchema.parse(body);
 }
 
 export async function startRun(request: RunRequest): Promise<{ runId: string; metadata: RunMetadata }> {

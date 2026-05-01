@@ -1,12 +1,15 @@
 import { Hono } from "hono";
 import {
   AllureHistoryResponseSchema,
+  ProjectConfigSummarySchema,
   ProjectOpenRequestSchema,
   type AllureHistoryResponse,
+  type ProjectConfigSummary,
   type TestInventory
 } from "@pwqa/shared";
 import { scanProject, ProjectScanError } from "../project/scanner.js";
 import { buildInventory } from "../project/inventory.js";
+import { buildConfigSummary } from "../project/configSummary.js";
 import type { ProjectStore } from "../project/store.js";
 import type { CommandRunner } from "../commands/runner.js";
 import { apiError } from "../lib/apiError.js";
@@ -102,6 +105,20 @@ export function projectsRoutes({ projectStore, runnerForProject, allowedRoots }:
       runner: runnerForProject(current.summary.rootPath)
     });
     return c.json(inventory);
+  });
+
+  router.get("/projects/:projectId/config-summary", async (c) => {
+    const projectId = c.req.param("projectId");
+    const current = projectStore.getById(projectId);
+    if (!current) {
+      return apiError(c, "NO_PROJECT", "Project is not open.", 404);
+    }
+    const summary: ProjectConfigSummary = await buildConfigSummary({
+      projectId: current.summary.id,
+      projectRoot: current.summary.rootPath,
+      configPath: current.summary.playwrightConfigPath
+    });
+    return c.json(ProjectConfigSummarySchema.parse(summary));
   });
 
   return router;
