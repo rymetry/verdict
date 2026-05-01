@@ -315,6 +315,35 @@ describe("evaluateAllureQualityGate", () => {
     );
   });
 
+  it("preserves rule-evaluation warnings when the Allure CLI times out", async () => {
+    const { allureResultsDest } = setupAllureBinary();
+    fs.rmSync(allureResultsDest, { recursive: true, force: true });
+    const { runner } = fakeRunner({
+      exitCode: null,
+      signal: "SIGTERM",
+      stdout: "",
+      stderr: "",
+      durationMs: 30_000,
+      timedOut: true
+    });
+
+    const outcome = await evaluateAllureQualityGate({
+      runner,
+      projectRoot: workdir,
+      allureResultsDest,
+      profile: "release-smoke",
+      rules: { maxFailures: 0 },
+      timeoutMs: 30_000
+    });
+
+    expect(outcome.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("rule evaluation could not read allure-results"),
+        expect.stringContaining("timed out after 30000ms")
+      ])
+    );
+  });
+
   it.each([
     ["EACCES"],
     ["EMFILE"],

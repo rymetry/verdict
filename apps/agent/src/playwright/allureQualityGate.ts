@@ -194,6 +194,7 @@ export async function evaluateAllureQualityGate(
     status = "error";
     failureMode = "timeout";
     warnings = [
+      ...warnings,
       `Allure quality-gate timed out after ${input.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms.`
     ];
   } else if (result.exitCode === 0) {
@@ -204,6 +205,7 @@ export async function evaluateAllureQualityGate(
     status = "error";
     failureMode = "exit-other";
     warnings = [
+      ...warnings,
       `Allure quality-gate exited with unexpected code. exitCode=${result.exitCode ?? "null"}; signal=${result.signal ?? "null"}`
     ];
   }

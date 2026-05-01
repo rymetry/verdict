@@ -54,6 +54,7 @@ function relativeFailedTest(test: FailedTest, projectRoot: string): FailedTest {
   const sourcePath = test.absoluteFilePath ?? test.filePath;
   const relative = sourcePath ? projectRelativePath(sourcePath, projectRoot) : undefined;
   const attachments = test.attachments.map((artifact) => {
+    // Treat producer-supplied relativePath as tainted; unsafe values are demoted to a basename.
     const artifactRelative =
       projectRelativePath(artifact.relativePath ?? "", projectRoot) ??
       projectRelativePath(artifact.path, projectRoot);
