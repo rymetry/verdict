@@ -8,6 +8,7 @@ import {
   PatchRevertResponseSchema,
   ProjectSummarySchema,
   QmoSummarySchema,
+  ReleaseReviewDraftSchema,
   RepairComparisonSchema,
   RepairRerunResponseSchema,
   RunListResponseSchema,
@@ -23,6 +24,8 @@ import {
   type PatchRevertResponse,
   type ProjectSummary,
   type QmoSummary,
+  type ReleaseReviewDraft,
+  type ReleaseReviewDraftRequest,
   type RepairComparison,
   type RepairRerunResponse,
   type RunListResponse,
@@ -202,6 +205,20 @@ export async function fetchQmoSummary(runId: string): Promise<QmoSummary | null>
   if (response.status === 409) return null;
   const body = await parseJson<unknown>(response);
   return QmoSummarySchema.parse(body);
+}
+
+export async function createReleaseReviewDraft(
+  runId: string,
+  request: ReleaseReviewDraftRequest
+): Promise<ReleaseReviewDraft | null> {
+  const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/release-review-draft`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request)
+  });
+  if (response.status === 409) return null;
+  const body = await parseJson<unknown>(response);
+  return ReleaseReviewDraftSchema.parse(body);
 }
 
 /**

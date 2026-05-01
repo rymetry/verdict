@@ -163,6 +163,10 @@ export type RunCancellationReason = z.infer<typeof RunCancellationReasonSchema>;
 const noFlagInjection = (value: string): boolean => !value.startsWith("-");
 const absolutePathLike = (value: string): boolean =>
   value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+const httpUrl = (value: string): boolean => {
+  const lower = value.toLowerCase();
+  return lower.startsWith("https://") || lower.startsWith("http://");
+};
 
 export const RunRequestSchema = z.object({
   projectId: z.string(),
@@ -369,6 +373,75 @@ export const QmoSummarySchema = z.object({
   command: CommandTemplateSchema.optional()
 });
 export type QmoSummary = z.infer<typeof QmoSummarySchema>;
+
+const HttpUrlStringSchema = z.string().url().refine(httpUrl, "URL must use http or https");
+
+export const GitHubPullRequestLinkSchema = z.object({
+  url: HttpUrlStringSchema,
+  repository: z.string().min(1),
+  number: z.number().int().positive(),
+  title: z.string().min(1).optional(),
+  author: z.string().min(1).optional(),
+  headSha: z.string().min(7).optional()
+});
+export type GitHubPullRequestLink = z.infer<typeof GitHubPullRequestLinkSchema>;
+
+export const GitHubIssueLinkSchema = z.object({
+  url: HttpUrlStringSchema,
+  repository: z.string().min(1),
+  number: z.number().int().positive(),
+  title: z.string().min(1).optional(),
+  state: z.enum(["open", "closed"]).optional()
+});
+export type GitHubIssueLink = z.infer<typeof GitHubIssueLinkSchema>;
+
+export const CiArtifactKindSchema = z.enum([
+  "playwright-report",
+  "allure-report",
+  "quality-gate",
+  "qmo-summary",
+  "log",
+  "other"
+]);
+export type CiArtifactKind = z.infer<typeof CiArtifactKindSchema>;
+
+export const CiArtifactSourceSchema = z.enum([
+  "github-actions",
+  "allure",
+  "playwright",
+  "external"
+]);
+export type CiArtifactSource = z.infer<typeof CiArtifactSourceSchema>;
+
+export const CiArtifactLinkSchema = z.object({
+  name: z.string().min(1),
+  url: HttpUrlStringSchema,
+  source: CiArtifactSourceSchema,
+  kind: CiArtifactKindSchema,
+  workflowRunId: z.number().int().positive().optional(),
+  sizeBytes: z.number().int().nonnegative().optional()
+});
+export type CiArtifactLink = z.infer<typeof CiArtifactLinkSchema>;
+
+export const ReleaseReviewDraftRequestSchema = z.object({
+  pullRequest: GitHubPullRequestLinkSchema.optional(),
+  issues: z.array(GitHubIssueLinkSchema).default([]),
+  ciArtifacts: z.array(CiArtifactLinkSchema).default([])
+});
+export type ReleaseReviewDraftRequest = z.infer<typeof ReleaseReviewDraftRequestSchema>;
+
+export const ReleaseReviewDraftSchema = z.object({
+  runId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  outcome: QmoSummaryOutcomeSchema,
+  qmoSummary: QmoSummarySchema,
+  pullRequest: GitHubPullRequestLinkSchema.optional(),
+  issues: z.array(GitHubIssueLinkSchema),
+  ciArtifacts: z.array(CiArtifactLinkSchema),
+  markdown: z.string()
+});
+export type ReleaseReviewDraft = z.infer<typeof ReleaseReviewDraftSchema>;
 
 /**
  * §1.3 Allure history JSONL entry (Phase 1.2 / T206).

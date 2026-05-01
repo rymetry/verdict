@@ -13,6 +13,7 @@ import { PlaywrightCommandBuildError } from "../src/playwright/builder.js";
 import type {
   DetectedPackageManager,
   ProjectSummary,
+  QmoSummary,
   RunMetadata,
   TestResultSummary
 } from "@pwqa/shared";
@@ -92,6 +93,26 @@ function fakeRunMetadata(projectRoot: string, runId: string, failed = 0): RunMet
 function writeRunMetadata(run: RunMetadata): void {
   fs.mkdirSync(run.paths.runDir, { recursive: true });
   fs.writeFileSync(run.paths.metadataJson, JSON.stringify(run, null, 2));
+}
+
+function writeQmoSummary(run: RunMetadata, summary: Partial<QmoSummary> = {}): void {
+  const qmo: QmoSummary = {
+    runId: run.runId,
+    projectId: run.projectId,
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    outcome: "ready",
+    testSummary: run.summary,
+    warnings: run.warnings,
+    reportLinks: {
+      allureReportDir: "https://example.com/allure",
+      qualityGateResultPath: "https://example.com/quality-gate.json"
+    },
+    runDurationMs: run.durationMs,
+    command: run.command,
+    ...summary
+  };
+  fs.mkdirSync(path.dirname(run.paths.qmoSummaryJsonPath), { recursive: true });
+  fs.writeFileSync(run.paths.qmoSummaryJsonPath, JSON.stringify(qmo, null, 2));
 }
 
 beforeAll(() => {
@@ -354,6 +375,84 @@ describe("HTTP API surface", () => {
     expect(response.status).toBe(200);
     expect(body.verdict).toBe("fixed");
     expect(body.resolvedFailures).toHaveLength(1);
+  });
+
+  it("builds a release review draft from QMO summary and linked GitHub context", async () => {
+    const run = fakeRunMetadata(workdir, "run-release-11111111", 0);
+    writeRunMetadata(run);
+    writeQmoSummary(run, { outcome: "ready" });
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+
+    const response = await app.request(`/runs/${run.runId}/release-review-draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pullRequest: {
+          repository: "owner/repo",
+          number: 42,
+          title: "Release smoke",
+          url: "https://github.com/owner/repo/pull/42"
+        },
+        issues: [
+          {
+            repository: "owner/repo",
+            number: 7,
+            title: "Known issue",
+            state: "open",
+            url: "https://github.com/owner/repo/issues/7"
+          }
+        ],
+        ciArtifacts: [
+          {
+            name: "playwright-report",
+            kind: "playwright-report",
+            source: "github-actions",
+            url: "https://github.com/owner/repo/actions/runs/1/artifacts/2"
+          }
+        ]
+      })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.runId).toBe(run.runId);
+    expect(body.outcome).toBe("ready");
+    expect(body.markdown).toContain("owner/repo#42 Release smoke");
+    expect(body.markdown).toContain("playwright-report (playwright-report, github-actions)");
+  });
+
+  it("returns 409 when release review draft is requested before QMO summary exists", async () => {
+    const run = fakeRunMetadata(workdir, "run-release-22222222", 0);
+    writeRunMetadata(run);
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      }
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+
+    const response = await app.request(`/runs/${run.runId}/release-review-draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error.code).toBe("NO_QMO_SUMMARY");
   });
 
   it("rejects invalid repair comparison rerun ids", async () => {

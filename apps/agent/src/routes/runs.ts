@@ -7,6 +7,7 @@ import {
   AiAnalysisResponseSchema,
   type AiAnalysisResponse,
   QmoSummarySchema,
+  ReleaseReviewDraftRequestSchema,
   RepairComparisonSchema,
   RepairRerunResponseSchema,
   RunRequestSchema,
@@ -27,6 +28,7 @@ import { AuditPersistenceError } from "../lib/errors.js";
 import { buildFailureReview } from "../reporting/failureReview.js";
 import { buildAiAnalysisContext } from "../ai/analysisContext.js";
 import { AiAnalysisError, type AiAnalysisAdapter } from "../ai/cliAdapter.js";
+import { buildReleaseReviewDraft } from "../reporting/releaseReviewDraft.js";
 import {
   isValidRunIdSegment,
   persistRepairComparison,
@@ -428,6 +430,91 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
       );
     }
     return c.body(body, 200, { "Content-Type": "text/markdown; charset=utf-8" });
+  });
+
+  router.post("/runs/:runId/release-review-draft", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = ReleaseReviewDraftRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return apiError(
+        c,
+        "INVALID_INPUT",
+        parsed.error.issues.map((i) => i.message).join("; "),
+        400
+      );
+    }
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    const { run } = result;
+    let raw: string;
+    try {
+      raw = await fs.readFile(run.paths.qmoSummaryJsonPath, "utf8");
+    } catch (error) {
+      const code =
+        error instanceof Error && "code" in error && typeof (error as { code: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : "READ_FAILED";
+      if (code === "ENOENT") {
+        return apiError(
+          c,
+          "NO_QMO_SUMMARY",
+          "QMO summary is required before a release review draft can be generated.",
+          409
+        );
+      }
+      logger?.error(
+        {
+          runId: run.runId,
+          artifactKind: "metadata",
+          ...errorLogFields(error)
+        },
+        "release review draft qmo-summary read failed"
+      );
+      return apiError(
+        c,
+        "QMO_SUMMARY_READ_FAILED",
+        `QMO summary file could not be read. code=${code}`,
+        500
+      );
+    }
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(raw);
+    } catch {
+      logger?.error(
+        {
+          runId: run.runId,
+          artifactKind: "metadata",
+          code: "INVALID_JSON"
+        },
+        "release review draft qmo-summary contained invalid JSON"
+      );
+      return apiError(
+        c,
+        "INVALID_QMO_SUMMARY",
+        "Persisted QMO summary is not valid JSON.",
+        500
+      );
+    }
+    const qmoSummary = QmoSummarySchema.safeParse(parsedJson);
+    if (!qmoSummary.success) {
+      logger?.error(
+        {
+          runId: run.runId,
+          artifactKind: "metadata",
+          code: "SCHEMA_MISMATCH",
+          issues: qmoSummary.error.issues.map((i) => i.path.join(".")).join(",")
+        },
+        "release review draft qmo-summary failed schema validation"
+      );
+      return apiError(
+        c,
+        "INVALID_QMO_SUMMARY",
+        "Persisted QMO summary failed schema validation.",
+        500
+      );
+    }
+    return c.json(buildReleaseReviewDraft({ qmoSummary: qmoSummary.data, request: parsed.data }));
   });
 
   router.post("/runs/:runId/repair-rerun", async (c) => {
