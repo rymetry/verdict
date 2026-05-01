@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import {
   AllureHistoryResponseSchema,
+  PlaywrightLaunchCommandRequestSchema,
+  PlaywrightLaunchCommandResponseSchema,
   ProjectConfigSummarySchema,
   ProjectOpenRequestSchema,
   type AllureHistoryResponse,
@@ -10,6 +12,7 @@ import {
 import { scanProject, ProjectScanError } from "../project/scanner.js";
 import { buildInventory } from "../project/inventory.js";
 import { buildConfigSummary } from "../project/configSummary.js";
+import { buildPlaywrightLaunchCommand, PlaywrightCommandBuildError } from "../playwright/builder.js";
 import type { ProjectStore } from "../project/store.js";
 import type { CommandRunner } from "../commands/runner.js";
 import { apiError } from "../lib/apiError.js";
@@ -119,6 +122,37 @@ export function projectsRoutes({ projectStore, runnerForProject, allowedRoots }:
       configPath: current.summary.playwrightConfigPath
     });
     return c.json(ProjectConfigSummarySchema.parse(summary));
+  });
+
+  router.post("/projects/:projectId/playwright-launch-command", async (c) => {
+    const projectId = c.req.param("projectId");
+    const current = projectStore.getById(projectId);
+    if (!current) {
+      return apiError(c, "NO_PROJECT", "Project is not open.", 404);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = PlaywrightLaunchCommandRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return apiError(
+        c,
+        "INVALID_INPUT",
+        parsed.error.issues.map((issue) => issue.message).join("; "),
+        400
+      );
+    }
+    try {
+      const response = buildPlaywrightLaunchCommand({
+        packageManager: current.packageManager,
+        projectId: current.summary.id,
+        request: parsed.data
+      });
+      return c.json(PlaywrightLaunchCommandResponseSchema.parse(response));
+    } catch (error) {
+      if (error instanceof PlaywrightCommandBuildError) {
+        return apiError(c, error.code, "Playwright launch command could not be built.", 400);
+      }
+      return apiError(c, "LAUNCH_COMMAND_BUILD_FAILED", "Playwright launch command could not be built.", 500);
+    }
   });
 
   return router;

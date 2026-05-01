@@ -122,6 +122,12 @@ const PLAYWRIGHT_PREFIXES: Readonly<Record<string, ReadonlyArray<string>>> = {
   yarn: ["playwright", "test"]
 };
 
+const PLAYWRIGHT_EXEC_PREFIXES: Readonly<Record<string, ReadonlyArray<string>>> = {
+  npx: ["--no-install", "playwright"],
+  pnpm: ["exec", "playwright"],
+  yarn: ["playwright"]
+};
+
 const SINGLE_FLAGS = new Set([
   "--list",
   "--headed",
@@ -160,6 +166,11 @@ function hasPrefix(args: ReadonlyArray<string>, prefix: ReadonlyArray<string>): 
 
 function isFlagValue(value: string): boolean {
   return value.length === 0 || value.startsWith("-");
+}
+
+function httpUrl(value: string): boolean {
+  const lower = value.toLowerCase();
+  return lower.startsWith("https://") || lower.startsWith("http://");
 }
 
 type DecodeRepeatedlyResult =
@@ -284,6 +295,55 @@ export function validatePhase1PlaywrightArgs({
   }
 
   return argsValid;
+}
+
+export function validatePlaywrightLaunchArgs({
+  executableName,
+  args
+}: {
+  executableName: string;
+  args: ReadonlyArray<string>;
+}): CommandArgsValidationResult {
+  const prefix = PLAYWRIGHT_EXEC_PREFIXES[executableName];
+  if (!prefix) {
+    return argsInvalid(
+      "unsupported-executable",
+      `Executable '${executableName}' is not supported for Playwright launch commands.`
+    );
+  }
+  if (!hasPrefix(args, prefix)) {
+    return argsInvalid(
+      "invalid-prefix",
+      `'${executableName}' must invoke the local Playwright binary with the approved prefix: ${prefix.join(" ")}`
+    );
+  }
+  for (const arg of args) {
+    const valueError = validateArgValue(arg);
+    if (!valueError.ok) return valueError;
+  }
+
+  const rest = args.slice(prefix.length);
+  const [subcommand, firstOperand, secondOperand] = rest;
+  if (subcommand === "test") {
+    return rest.length === 2 && firstOperand === "--ui"
+      ? argsValid
+      : argsInvalid("disallowed-operand", "UI Mode must be invoked as 'playwright test --ui'.");
+  }
+  if (subcommand === "codegen") {
+    if (rest.length === 1) return argsValid;
+    if (rest.length === 2 && firstOperand && httpUrl(firstOperand)) return argsValid;
+    return argsInvalid("disallowed-operand", "Codegen only accepts an optional http(s) URL.");
+  }
+  if (subcommand === "show-trace") {
+    if (rest.length !== 2 || !firstOperand || secondOperand !== undefined) {
+      return argsInvalid("missing-flag-value", "Trace Viewer requires exactly one trace zip path.");
+    }
+    if (path.extname(firstOperand).toLowerCase() !== ".zip") {
+      return argsInvalid("disallowed-operand", "Trace Viewer only accepts .zip trace files.");
+    }
+    return validateProjectRelativeOperand(firstOperand);
+  }
+  return argsInvalid("disallowed-subcommand", `Playwright subcommand '${subcommand ?? ""}' is not allowed.`);
 }
 
 export function unsafelyAllowAnyArgsValidator(): CommandArgsValidationResult {

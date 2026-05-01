@@ -2,8 +2,11 @@ import * as path from "node:path";
 import {
   type CommandTemplate,
   type DetectedPackageManager,
+  type PlaywrightLaunchCommandRequest,
+  type PlaywrightLaunchCommandResponse,
   type RunRequest
 } from "@pwqa/shared";
+import { validatePlaywrightLaunchArgs } from "../commands/policy.js";
 
 export interface PlaywrightCommandInput {
   packageManager: DetectedPackageManager;
@@ -85,6 +88,65 @@ export function buildPlaywrightTestCommand(input: PlaywrightCommandInput): {
     command: { executable: base.executable, args },
     env
   };
+}
+
+export function buildPlaywrightLaunchCommand(input: {
+  packageManager: DetectedPackageManager;
+  projectId: string;
+  request: PlaywrightLaunchCommandRequest;
+}): PlaywrightLaunchCommandResponse {
+  const base = input.packageManager.commandTemplates.playwrightTest;
+  const args = buildLaunchArgs(base.args, input.request);
+  const validation = validatePlaywrightLaunchArgs({
+    executableName: base.executable,
+    args
+  });
+  if (!validation.ok) {
+    throw new PlaywrightCommandBuildError(validation.message, "INVALID_LAUNCH_COMMAND");
+  }
+  return {
+    projectId: input.projectId,
+    kind: input.request.kind,
+    command: { executable: base.executable, args },
+    warnings: []
+  };
+}
+
+function buildLaunchArgs(
+  playwrightTestArgs: ReadonlyArray<string>,
+  request: PlaywrightLaunchCommandRequest
+): string[] {
+  const playwrightIndex = playwrightTestArgs.indexOf("playwright");
+  if (playwrightIndex < 0) {
+    throw new PlaywrightCommandBuildError(
+      "Package manager command template does not invoke playwright.",
+      "INVALID_COMMAND_TEMPLATE"
+    );
+  }
+  const prefix = playwrightTestArgs.slice(0, playwrightIndex + 1);
+  switch (request.kind) {
+    case "ui-mode":
+      return [...prefix, "test", "--ui"];
+    case "codegen":
+      return request.codegenUrl
+        ? [...prefix, "codegen", request.codegenUrl]
+        : [...prefix, "codegen"];
+    case "trace-viewer":
+      if (!request.tracePath) {
+        throw new PlaywrightCommandBuildError(
+          "Trace Viewer requires a trace zip path.",
+          "MISSING_TRACE_PATH"
+        );
+      }
+      return [...prefix, "show-trace", request.tracePath];
+    default: {
+      const _exhaustive: never = request.kind;
+      throw new PlaywrightCommandBuildError(
+        `Unsupported launch kind: ${String(_exhaustive)}`,
+        "INVALID_LAUNCH_KIND"
+      );
+    }
+  }
 }
 
 function escapeRegex(value: string): string {

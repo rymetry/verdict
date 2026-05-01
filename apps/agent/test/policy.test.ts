@@ -11,7 +11,8 @@ import {
   validateAllureArgs,
   validateAllureGenerateArgs,
   validateGitPatchArgs,
-  validatePhase1PlaywrightArgs
+  validatePhase1PlaywrightArgs,
+  validatePlaywrightLaunchArgs
 } from "../src/commands/policy.js";
 import { CommandPolicyError, createNodeCommandRunner } from "../src/commands/runner.js";
 
@@ -108,6 +109,33 @@ describe("default Phase 1 command policy", () => {
         cwd: cwdBoundary
       })
     ).toThrow(CommandPolicyError);
+  });
+});
+
+describe("Playwright launch command policy (T800-3)", () => {
+  it.each([
+    ["pnpm", ["exec", "playwright", "test", "--ui"]],
+    ["pnpm", ["exec", "playwright", "codegen"]],
+    ["pnpm", ["exec", "playwright", "codegen", "https://example.com/login"]],
+    ["pnpm", ["exec", "playwright", "show-trace", "test-results/trace.zip"]],
+    ["npx", ["--no-install", "playwright", "test", "--ui"]],
+    ["yarn", ["playwright", "show-trace", ".playwright-workbench/runs/r1/trace.zip"]]
+  ])("allows approved %s launch command shapes", (executableName, args) => {
+    expect(validatePlaywrightLaunchArgs({ executableName, args }).ok).toBe(true);
+  });
+
+  it.each([
+    ["pnpm", ["exec", "playwright", "test"]],
+    ["pnpm", ["exec", "playwright", "test", "--headed"]],
+    ["pnpm", ["exec", "playwright", "codegen", "file:///tmp/index.html"]],
+    ["pnpm", ["exec", "playwright", "codegen", "--target=python"]],
+    ["pnpm", ["exec", "playwright", "show-trace", "/tmp/trace.zip"]],
+    ["pnpm", ["exec", "playwright", "show-trace", "../trace.zip"]],
+    ["pnpm", ["exec", "playwright", "show-trace", "trace.json"]],
+    ["pnpm", ["exec", "playwright", "open", "https://example.com"]],
+    ["node", ["exec", "playwright", "test", "--ui"]]
+  ])("rejects unsafe launch command shape for %s", (executableName, args) => {
+    expect(validatePlaywrightLaunchArgs({ executableName, args }).ok).toBe(false);
   });
 });
 

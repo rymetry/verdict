@@ -9,6 +9,8 @@ import {
   CiArtifactImportResponseSchema,
   CiArtifactLinkSchema,
   GitHubPullRequestLinkSchema,
+  PlaywrightLaunchCommandRequestSchema,
+  PlaywrightLaunchCommandResponseSchema,
   QaTestMetadataSchema,
   ReleaseReviewDraftRequestSchema,
   RunCompletedPayloadSchema,
@@ -43,6 +45,44 @@ describe("shared run warning schemas", () => {
     });
     expect(() => RunRequestSchema.parse({ projectId: "project-1", retries: -1 })).toThrow();
     expect(() => RunRequestSchema.parse({ projectId: "project-1", workers: 0 })).toThrow();
+  });
+
+  it("validates safe Playwright launch command requests and responses", () => {
+    expect(
+      PlaywrightLaunchCommandRequestSchema.parse({
+        kind: "trace-viewer",
+        tracePath: "test-results/trace.zip"
+      })
+    ).toEqual({
+      kind: "trace-viewer",
+      tracePath: "test-results/trace.zip"
+    });
+    expect(
+      PlaywrightLaunchCommandResponseSchema.parse({
+        projectId: "p1",
+        kind: "ui-mode",
+        command: { executable: "pnpm", args: ["exec", "playwright", "test", "--ui"] },
+        warnings: []
+      }).kind
+    ).toBe("ui-mode");
+    expect(() =>
+      PlaywrightLaunchCommandRequestSchema.parse({
+        kind: "trace-viewer",
+        tracePath: "../trace.zip"
+      })
+    ).toThrow();
+    expect(() =>
+      PlaywrightLaunchCommandRequestSchema.parse({
+        kind: "codegen",
+        codegenUrl: "file:///tmp/index.html"
+      })
+    ).toThrow();
+    expect(() =>
+      PlaywrightLaunchCommandRequestSchema.parse({
+        kind: "ui-mode",
+        codegenUrl: "https://example.com"
+      })
+    ).toThrow();
   });
 
   it("validates QA inventory metadata on test cases", () => {

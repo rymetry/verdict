@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyPatchTemporary,
   checkPatch,
+  createPlaywrightLaunchCommand,
   createReleaseReviewDraft,
   fetchConfigSummary,
   fetchRepairComparison,
@@ -88,6 +89,29 @@ describe("api/client fetchConfigSummary", () => {
       fixtureFiles: [{ relativePath: "tests/fixtures/auth.fixture.ts" }]
     });
     expect(fetch).toHaveBeenCalledWith("/api/projects/p1/config-summary");
+  });
+});
+
+describe("api/client createPlaywrightLaunchCommand", () => {
+  it("posts a launch command request and validates the response", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      projectId: "p1",
+      kind: "ui-mode",
+      command: { executable: "pnpm", args: ["exec", "playwright", "test", "--ui"] },
+      warnings: []
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createPlaywrightLaunchCommand("p1", { kind: "ui-mode" })
+    ).resolves.toMatchObject({
+      kind: "ui-mode",
+      command: { executable: "pnpm" }
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/p1/playwright-launch-command",
+      expect.objectContaining({ method: "POST" })
+    );
   });
 });
 

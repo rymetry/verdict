@@ -439,6 +439,56 @@ export type QmoSummary = z.infer<typeof QmoSummarySchema>;
 
 const HttpUrlStringSchema = z.string().url().refine(httpUrl, "URL must use http or https");
 
+const ProjectRelativeTracePathSchema = z
+  .string()
+  .min(1)
+  .refine(noFlagInjection, "tracePath must not start with '-'")
+  .refine((value) => !value.split(/[\\/]+/).includes(".."), "tracePath must not contain '..'")
+  .refine((value) => !absolutePathLike(value), "tracePath must be project-relative")
+  .refine((value) => value.toLowerCase().endsWith(".zip"), "tracePath must point to a .zip file");
+
+export const PlaywrightLaunchKindSchema = z.enum(["ui-mode", "codegen", "trace-viewer"]);
+export type PlaywrightLaunchKind = z.infer<typeof PlaywrightLaunchKindSchema>;
+
+export const PlaywrightLaunchCommandRequestSchema = z
+  .object({
+    kind: PlaywrightLaunchKindSchema,
+    codegenUrl: HttpUrlStringSchema.optional(),
+    tracePath: ProjectRelativeTracePathSchema.optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.kind === "trace-viewer" && !value.tracePath) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["tracePath"],
+        message: "tracePath is required for trace-viewer"
+      });
+    }
+    if (value.kind !== "trace-viewer" && value.tracePath) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["tracePath"],
+        message: "tracePath is only supported for trace-viewer"
+      });
+    }
+    if (value.kind !== "codegen" && value.codegenUrl) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["codegenUrl"],
+        message: "codegenUrl is only supported for codegen"
+      });
+    }
+  });
+export type PlaywrightLaunchCommandRequest = z.infer<typeof PlaywrightLaunchCommandRequestSchema>;
+
+export const PlaywrightLaunchCommandResponseSchema = z.object({
+  projectId: z.string(),
+  kind: PlaywrightLaunchKindSchema,
+  command: CommandTemplateSchema,
+  warnings: z.array(z.string())
+});
+export type PlaywrightLaunchCommandResponse = z.infer<typeof PlaywrightLaunchCommandResponseSchema>;
+
 export const GitHubPullRequestLinkSchema = z.object({
   url: HttpUrlStringSchema,
   repository: z.string().min(1),

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPlaywrightLaunchCommand,
   buildPlaywrightTestCommand,
   PlaywrightCommandBuildError
 } from "../src/playwright/builder";
-import { validatePhase1PlaywrightArgs } from "../src/commands/policy";
+import { validatePhase1PlaywrightArgs, validatePlaywrightLaunchArgs } from "../src/commands/policy";
 import type { DetectedPackageManager } from "@pwqa/shared";
 
 function pmTemplate(): DetectedPackageManager {
@@ -131,6 +132,72 @@ describe("buildPlaywrightTestCommand", () => {
         jsonOutputPath: "/proj/.playwright-workbench/runs/1/playwright-results.json",
         htmlOutputDir: "/proj/.playwright-workbench/runs/1/playwright-report",
         projectRoot: "/proj"
+      })
+    ).toThrow(PlaywrightCommandBuildError);
+  });
+});
+
+describe("buildPlaywrightLaunchCommand", () => {
+  it("builds a UI Mode command from the local Playwright prefix", () => {
+    const response = buildPlaywrightLaunchCommand({
+      packageManager: pmTemplate(),
+      projectId: "/proj",
+      request: { kind: "ui-mode" }
+    });
+
+    expect(response.command).toEqual({
+      executable: "pnpm",
+      args: ["exec", "playwright", "test", "--ui"]
+    });
+    expect(
+      validatePlaywrightLaunchArgs({
+        executableName: response.command.executable,
+        args: response.command.args
+      })
+    ).toEqual({ ok: true });
+  });
+
+  it("builds Codegen with an optional http URL", () => {
+    const response = buildPlaywrightLaunchCommand({
+      packageManager: pmTemplate(),
+      projectId: "/proj",
+      request: { kind: "codegen", codegenUrl: "https://example.com/login" }
+    });
+
+    expect(response.command.args).toEqual([
+      "exec",
+      "playwright",
+      "codegen",
+      "https://example.com/login"
+    ]);
+  });
+
+  it("builds Trace Viewer only for a project-relative trace zip", () => {
+    const response = buildPlaywrightLaunchCommand({
+      packageManager: pmTemplate(),
+      projectId: "/proj",
+      request: { kind: "trace-viewer", tracePath: "test-results/trace.zip" }
+    });
+
+    expect(response.command.args).toEqual([
+      "exec",
+      "playwright",
+      "show-trace",
+      "test-results/trace.zip"
+    ]);
+  });
+
+  it("rejects command templates that do not invoke playwright", () => {
+    expect(() =>
+      buildPlaywrightLaunchCommand({
+        packageManager: {
+          ...pmTemplate(),
+          commandTemplates: {
+            playwrightTest: { executable: "pnpm", args: ["exec", "node", "test"] }
+          }
+        },
+        projectId: "/proj",
+        request: { kind: "ui-mode" }
       })
     ).toThrow(PlaywrightCommandBuildError);
   });

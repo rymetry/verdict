@@ -7,8 +7,18 @@
 //  - mutation 自体は useStartRunMutation 内で console.error 済 (defense-in-depth)
 //  - 入力編集で前回 error を reset し、stale error の固着を避ける
 import * as React from "react";
-import type { ProjectSummary, RunRequest } from "@pwqa/shared";
+import { Clipboard, Code2, FileArchive, Play } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import type {
+  CommandTemplate,
+  PlaywrightLaunchCommandRequest,
+  PlaywrightLaunchCommandResponse,
+  PlaywrightLaunchKind,
+  ProjectSummary,
+  RunRequest
+} from "@pwqa/shared";
 
+import { createPlaywrightLaunchCommand } from "@/api/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -250,9 +260,201 @@ export function RunControls({ project }: RunControlsProps): React.ReactElement {
             <AlertDescription>{errorMessage}</AlertDescription>
           </Alert>
         ) : null}
+        <PlaywrightLaunchCommands project={project} blocked={blocked} />
       </CardContent>
     </Card>
   );
+}
+
+function PlaywrightLaunchCommands({
+  project,
+  blocked
+}: {
+  project: ProjectSummary;
+  blocked: boolean;
+}): React.ReactElement {
+  const [codegenUrl, setCodegenUrl] = React.useState("");
+  const [tracePath, setTracePath] = React.useState("");
+  const [validationError, setValidationError] = React.useState<string | null>(null);
+  const [copyState, setCopyState] = React.useState<"idle" | "copied" | "failed">("idle");
+  const launchMutation = useMutation({
+    mutationFn: (request: PlaywrightLaunchCommandRequest) =>
+      createPlaywrightLaunchCommand(project.id, request)
+  });
+
+  const commandText = launchMutation.data ? formatCommand(launchMutation.data.command) : null;
+  const errorMessage = launchMutation.error
+    ? formatMutationError(launchMutation.error, "Failed to build launch command")
+    : null;
+
+  function resetFeedback(): void {
+    setValidationError(null);
+    setCopyState("idle");
+    launchMutation.reset();
+  }
+
+  function build(kind: PlaywrightLaunchKind): void {
+    resetFeedback();
+    if (kind === "trace-viewer" && tracePath.trim() === "") {
+      setValidationError("Trace Viewer requires a project-relative .zip path.");
+      return;
+    }
+    const request: PlaywrightLaunchCommandRequest =
+      kind === "codegen"
+        ? { kind, codegenUrl: codegenUrl.trim() || undefined }
+        : kind === "trace-viewer"
+          ? { kind, tracePath: tracePath.trim() }
+          : { kind };
+    launchMutation.mutate(request);
+  }
+
+  async function copyCommand(): Promise<void> {
+    if (!commandText) return;
+    if (!navigator.clipboard?.writeText) {
+      setCopyState("failed");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(commandText);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  }
+
+  return (
+    <section className="mt-5 border-t border-[var(--line)] pt-4" aria-label="Playwright launch commands">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-[var(--ink-0)]">Playwright launch commands</h3>
+          {launchMutation.data ? (
+            <span className="text-xs text-[var(--ink-3)]">{launchKindLabel(launchMutation.data.kind)}</span>
+          ) : null}
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="codegen-url">Codegen URL (optional)</Label>
+            <Input
+              id="codegen-url"
+              placeholder="https://example.com"
+              value={codegenUrl}
+              onChange={(event) => {
+                setCodegenUrl(event.target.value);
+                resetFeedback();
+              }}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="trace-path">Trace zip path</Label>
+            <Input
+              id="trace-path"
+              placeholder=".playwright-workbench/runs/run-1/trace.zip"
+              value={tracePath}
+              onChange={(event) => {
+                setTracePath(event.target.value);
+                resetFeedback();
+              }}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={blocked || launchMutation.isPending}
+            title="Build UI Mode command"
+            onClick={() => build("ui-mode")}
+          >
+            <Play aria-hidden="true" />
+            UI Mode
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={blocked || launchMutation.isPending}
+            title="Build Codegen command"
+            onClick={() => build("codegen")}
+          >
+            <Code2 aria-hidden="true" />
+            Codegen
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={blocked || launchMutation.isPending}
+            title="Build Trace Viewer command"
+            onClick={() => build("trace-viewer")}
+          >
+            <FileArchive aria-hidden="true" />
+            Trace Viewer
+          </Button>
+        </div>
+        {validationError ? (
+          <Alert variant="warning">
+            <AlertTitle>入力確認</AlertTitle>
+            <AlertDescription>{validationError}</AlertDescription>
+          </Alert>
+        ) : null}
+        {errorMessage ? (
+          <Alert variant="destructive">
+            <AlertTitle>コマンド生成失敗</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
+        {commandText ? (
+          <div className="flex flex-col gap-2 rounded-md border border-[var(--line-strong)] bg-[var(--bg-1)] p-3">
+            <code
+              data-testid="playwright-launch-command"
+              className="break-all font-mono text-xs text-[var(--ink-0)]"
+            >
+              {commandText}
+            </code>
+            <div className="flex items-center justify-end gap-2">
+              {copyState === "copied" ? (
+                <span className="text-xs text-[var(--pass)]">Copied</span>
+              ) : null}
+              {copyState === "failed" ? (
+                <span className="text-xs text-[var(--fail)]">Copy failed</span>
+              ) : null}
+              <Button type="button" variant="ghost" size="sm" onClick={() => void copyCommand()}>
+                <Clipboard aria-hidden="true" />
+                Copy
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function launchKindLabel(kind: PlaywrightLaunchCommandResponse["kind"]): string {
+  switch (kind) {
+    case "ui-mode":
+      return "UI Mode";
+    case "codegen":
+      return "Codegen";
+    case "trace-viewer":
+      return "Trace Viewer";
+  }
+}
+
+function formatCommand(command: CommandTemplate): string {
+  return [command.executable, ...command.args].map(shellQuote).join(" ");
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function parseProjectNames(value: string): string[] | undefined {
