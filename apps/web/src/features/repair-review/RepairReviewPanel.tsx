@@ -14,6 +14,7 @@ import type {
   PatchApplyResponse,
   PatchCheckResponse,
   PatchRevertResponse,
+  QmoSummary,
   RepairComparison,
   RepairRerunResponse
 } from "@pwqa/shared";
@@ -22,6 +23,7 @@ import {
   applyPatchTemporary,
   checkPatch,
   fetchRepairComparison,
+  fetchQmoSummary,
   revertPatchTemporary,
   startRepairRerun
 } from "@/api/client";
@@ -39,16 +41,20 @@ type ReviewState =
   | "approved"
   | "rejected";
 
+type ApprovalPolicy = "comparison-only" | "generated-test-quality-gate";
+
 interface RepairReviewPanelProps {
   runId: string;
   projectId: string;
   patch: string;
+  approvalPolicy?: ApprovalPolicy;
 }
 
 export function RepairReviewPanel({
   runId,
   projectId,
-  patch
+  patch,
+  approvalPolicy = "comparison-only"
 }: RepairReviewPanelProps): React.ReactElement {
   const [reviewState, setReviewState] = useState<ReviewState>("draft");
   const [checkResult, setCheckResult] = useState<PatchCheckResponse | null>(null);
@@ -57,6 +63,7 @@ export function RepairReviewPanel({
   const [rerun, setRerun] = useState<RepairRerunResponse | null>(null);
   const [comparison, setComparison] = useState<RepairComparison | null>(null);
   const [comparisonPending, setComparisonPending] = useState(false);
+  const [qualityGateSummary, setQualityGateSummary] = useState<QmoSummary | null>(null);
 
   useEffect(() => {
     setReviewState("draft");
@@ -66,7 +73,8 @@ export function RepairReviewPanel({
     setRerun(null);
     setComparison(null);
     setComparisonPending(false);
-  }, [runId, projectId, patch]);
+    setQualityGateSummary(null);
+  }, [runId, projectId, patch, approvalPolicy]);
 
   const checkMutation = useMutation({
     mutationFn: () => checkPatch(projectId, patch),
@@ -94,6 +102,13 @@ export function RepairReviewPanel({
     }
   });
 
+  const qualityGateMutation = useMutation({
+    mutationFn: (rerunId: string) => fetchQmoSummary(rerunId),
+    onSuccess: (result) => {
+      setQualityGateSummary(result);
+    }
+  });
+
   const comparisonMutation = useMutation({
     mutationFn: () => {
       if (!rerun) throw new Error("Repair rerun has not started.");
@@ -101,9 +116,13 @@ export function RepairReviewPanel({
     },
     onSuccess: (result) => {
       setComparisonPending(result === null);
-      if (result) {
-        setComparison(result);
-        setReviewState("comparison-ready");
+      if (!result) return;
+
+      setComparison(result);
+      setReviewState("comparison-ready");
+      if (approvalPolicy === "generated-test-quality-gate") {
+        setQualityGateSummary(null);
+        qualityGateMutation.mutate(result.rerunId);
       }
     }
   });
@@ -121,6 +140,7 @@ export function RepairReviewPanel({
     applyMutation.error ??
     rerunMutation.error ??
     comparisonMutation.error ??
+    qualityGateMutation.error ??
     revertMutation.error;
 
   const reviewTerminal = reviewState === "approved" || reviewState === "rejected";
@@ -128,7 +148,10 @@ export function RepairReviewPanel({
   const canApply = checkResult?.ok === true && !applied;
   const canRerun = applied && !rerunMutation.isPending;
   const canLoadComparison = rerun !== null && !reviewTerminal;
-  const canApprove = comparison !== null && !reviewTerminal;
+  const canApprove =
+    comparison !== null &&
+    !reviewTerminal &&
+    approvalPolicyAllowsApproval(approvalPolicy, qualityGateSummary);
   const canReject = applyResult?.applied === true && !reviewTerminal;
 
   return (
@@ -213,6 +236,9 @@ export function RepairReviewPanel({
         rerun={rerun}
         comparison={comparison}
         comparisonPending={comparisonPending}
+        approvalPolicy={approvalPolicy}
+        qualityGateSummary={qualityGateSummary}
+        qualityGatePending={qualityGateMutation.isPending}
       />
 
       {currentError ? (
@@ -263,7 +289,10 @@ function ReviewFeedback({
   revertResult,
   rerun,
   comparison,
-  comparisonPending
+  comparisonPending,
+  approvalPolicy,
+  qualityGateSummary,
+  qualityGatePending
 }: {
   checkResult: PatchCheckResponse | null;
   applyResult: PatchApplyResponse | null;
@@ -271,6 +300,9 @@ function ReviewFeedback({
   rerun: RepairRerunResponse | null;
   comparison: RepairComparison | null;
   comparisonPending: boolean;
+  approvalPolicy: ApprovalPolicy;
+  qualityGateSummary: QmoSummary | null;
+  qualityGatePending: boolean;
 }): React.ReactElement {
   return (
     <div className="mt-3 flex flex-col gap-2 text-xs text-[var(--ink-2)]">
@@ -300,10 +332,51 @@ function ReviewFeedback({
         <StatusLine label="Comparison pending" detail="rerun is still producing evidence" variant="info" />
       ) : null}
       {comparison ? <ComparisonSummary comparison={comparison} /> : null}
+      {approvalPolicy === "generated-test-quality-gate" && comparison ? (
+        <GeneratedTestQualityGateStatus
+          summary={qualityGateSummary}
+          pending={qualityGatePending}
+        />
+      ) : null}
       {revertResult?.reverted ? (
         <StatusLine label="Temporary patch reverted" detail={revertResult.diagnostics} variant="fail" />
       ) : null}
     </div>
+  );
+}
+
+function GeneratedTestQualityGateStatus({
+  summary,
+  pending
+}: {
+  summary: QmoSummary | null;
+  pending: boolean;
+}): React.ReactElement {
+  if (pending) {
+    return (
+      <StatusLine
+        label="Generated test Quality Gate"
+        detail="pending"
+        variant="info"
+      />
+    );
+  }
+  if (!summary) {
+    return (
+      <StatusLine
+        label="Generated test Quality Gate"
+        detail="QMO summary is not yet generated"
+        variant="fail"
+      />
+    );
+  }
+  const qualityGateStatus = summary.qualityGate?.status ?? "not-evaluated";
+  return (
+    <StatusLine
+      label="Generated test Quality Gate"
+      detail={`${summary.outcome} / ${qualityGateStatus}`}
+      variant={summary.outcome === "ready" ? "pass" : "fail"}
+    />
   );
 }
 
@@ -375,6 +448,14 @@ function badgeVariantFor(state: ReviewState): "default" | "info" | "pass" | "fai
   if (state === "applied" || state === "rerun-started" || state === "comparison-ready") return "info";
   if (state === "checked") return "flaky";
   return "default";
+}
+
+function approvalPolicyAllowsApproval(
+  policy: ApprovalPolicy,
+  qualityGateSummary: QmoSummary | null
+): boolean {
+  if (policy === "comparison-only") return true;
+  return qualityGateSummary?.outcome === "ready";
 }
 
 function diffLineClass(line: string): string {

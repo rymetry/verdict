@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { RepairComparison } from "@pwqa/shared";
+import type { QmoSummary, RepairComparison } from "@pwqa/shared";
 
 import { RepairReviewPanel } from "@/features/repair-review/RepairReviewPanel";
 
@@ -15,7 +15,8 @@ vi.mock("@/api/client", async () => {
     applyPatchTemporary: vi.fn(),
     revertPatchTemporary: vi.fn(),
     startRepairRerun: vi.fn(),
-    fetchRepairComparison: vi.fn()
+    fetchRepairComparison: vi.fn(),
+    fetchQmoSummary: vi.fn()
   };
 });
 
@@ -23,6 +24,7 @@ import {
   applyPatchTemporary,
   checkPatch,
   fetchRepairComparison,
+  fetchQmoSummary,
   revertPatchTemporary,
   startRepairRerun
 } from "@/api/client";
@@ -38,9 +40,14 @@ beforeEach(() => {
   vi.mocked(revertPatchTemporary).mockReset();
   vi.mocked(startRepairRerun).mockReset();
   vi.mocked(fetchRepairComparison).mockReset();
+  vi.mocked(fetchQmoSummary).mockReset();
 });
 
-function renderPanel(): void {
+function renderPanel({
+  approvalPolicy
+}: {
+  approvalPolicy?: "comparison-only" | "generated-test-quality-gate";
+} = {}): void {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   });
@@ -50,6 +57,7 @@ function renderPanel(): void {
         runId="run-before-11111111"
         projectId="project-1"
         patch={"diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old\n+new"}
+        approvalPolicy={approvalPolicy}
       />
     </QueryClientProvider>
   );
@@ -141,6 +149,72 @@ describe("RepairReviewPanel", () => {
       "diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old\n+new"
     );
   });
+
+  it("requires a ready QMO summary before approving generated tests", async () => {
+    vi.mocked(checkPatch).mockResolvedValue({
+      ok: true,
+      filesTouched: ["a.ts"],
+      dirtyFiles: [],
+      diagnostics: "ok"
+    });
+    vi.mocked(applyPatchTemporary).mockResolvedValue({
+      applied: true,
+      filesTouched: ["a.ts"],
+      diagnostics: "ok"
+    });
+    vi.mocked(startRepairRerun).mockResolvedValue({
+      baselineRunId: "run-before-11111111",
+      rerunId: "run-after-22222222",
+      status: "queued",
+      comparisonPath: "/comparison.json"
+    });
+    vi.mocked(fetchRepairComparison).mockResolvedValue(makeComparison());
+    vi.mocked(fetchQmoSummary).mockResolvedValue(makeQmoSummary("ready"));
+    renderPanel({ approvalPolicy: "generated-test-quality-gate" });
+
+    await userEvent.click(screen.getByRole("button", { name: /^Check$/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Apply temp$/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Rerun$/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Compare$/ }));
+
+    expect(await screen.findByText("Generated test Quality Gate")).toBeInTheDocument();
+    expect(screen.getByText("ready / passed")).toBeInTheDocument();
+    expect(fetchQmoSummary).toHaveBeenCalledWith("run-after-22222222");
+
+    await userEvent.click(screen.getByRole("button", { name: /^Mark approved$/ }));
+    expect(await screen.findByText("Approved for the next review step.")).toBeInTheDocument();
+  });
+
+  it("blocks generated test approval when QMO summary is not ready", async () => {
+    vi.mocked(checkPatch).mockResolvedValue({
+      ok: true,
+      filesTouched: ["a.ts"],
+      dirtyFiles: [],
+      diagnostics: "ok"
+    });
+    vi.mocked(applyPatchTemporary).mockResolvedValue({
+      applied: true,
+      filesTouched: ["a.ts"],
+      diagnostics: "ok"
+    });
+    vi.mocked(startRepairRerun).mockResolvedValue({
+      baselineRunId: "run-before-11111111",
+      rerunId: "run-after-22222222",
+      status: "queued",
+      comparisonPath: "/comparison.json"
+    });
+    vi.mocked(fetchRepairComparison).mockResolvedValue(makeComparison());
+    vi.mocked(fetchQmoSummary).mockResolvedValue(makeQmoSummary("not-ready"));
+    renderPanel({ approvalPolicy: "generated-test-quality-gate" });
+
+    await userEvent.click(screen.getByRole("button", { name: /^Check$/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Apply temp$/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Rerun$/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Compare$/ }));
+
+    expect(await screen.findByText("not-ready / failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Mark approved$/ })).toBeDisabled();
+  });
 });
 
 function makeComparison(): RepairComparison {
@@ -196,5 +270,36 @@ function makeComparison(): RepairComparison {
       }
     },
     warnings: []
+  };
+}
+
+function makeQmoSummary(outcome: QmoSummary["outcome"]): QmoSummary {
+  return {
+    runId: "run-after-22222222",
+    projectId: "project-1",
+    generatedAt: "2026-05-01T00:00:00Z",
+    outcome,
+    testSummary: {
+      total: 1,
+      passed: outcome === "ready" ? 1 : 0,
+      failed: outcome === "ready" ? 0 : 1,
+      skipped: 0,
+      flaky: 0,
+      failedTests: []
+    },
+    qualityGate: {
+      status: outcome === "ready" ? "passed" : "failed",
+      profile: "local-review",
+      exitCode: outcome === "ready" ? 0 : 1,
+      warnings: []
+    },
+    warnings: [],
+    reportLinks: {
+      qualityGateResultPath: "/runs/after/quality-gate-result.json"
+    },
+    command: {
+      executable: "pnpm",
+      args: ["exec", "playwright", "test"]
+    }
   };
 }
