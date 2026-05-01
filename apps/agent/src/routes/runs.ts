@@ -16,6 +16,7 @@ import {
   RepairRerunResponseSchema,
   RunRequestSchema,
   FailureReviewResponseSchema,
+  type EvidenceArtifact,
   type RunListItem,
   type RunListResponse,
   type RunMetadata
@@ -84,6 +85,77 @@ interface Deps {
   runManager: RunManager;
   logger?: RunManagerLogger;
   aiAdapterForProject: (projectRoot: string) => AiAnalysisAdapter;
+}
+
+const LINKABLE_EVIDENCE_KINDS = new Set<EvidenceArtifact["kind"]>([
+  "trace",
+  "screenshot",
+  "video"
+]);
+
+const EVIDENCE_EXTENSIONS: Readonly<Record<EvidenceArtifact["kind"], ReadonlySet<string>>> = {
+  json: new Set(),
+  html: new Set(),
+  log: new Set(),
+  trace: new Set([".zip"]),
+  screenshot: new Set([".png", ".jpg", ".jpeg", ".webp"]),
+  video: new Set([".webm", ".mp4"])
+};
+
+interface ResolvedEvidenceFile {
+  attachment: EvidenceArtifact;
+  filePath: string;
+}
+
+async function resolveEvidenceFile(input: {
+  run: RunMetadata;
+  failureIndex: string;
+  attachmentIndex: string;
+}): Promise<ResolvedEvidenceFile | undefined> {
+  const failureIndex = parseEvidenceIndex(input.failureIndex);
+  const attachmentIndex = parseEvidenceIndex(input.attachmentIndex);
+  if (failureIndex === undefined || attachmentIndex === undefined) return undefined;
+
+  const attachment =
+    input.run.summary?.failedTests[failureIndex]?.attachments[attachmentIndex];
+  if (!attachment || !LINKABLE_EVIDENCE_KINDS.has(attachment.kind)) return undefined;
+  if (!EVIDENCE_EXTENSIONS[attachment.kind].has(path.extname(attachment.path).toLowerCase())) {
+    return undefined;
+  }
+
+  const absolutePath = path.isAbsolute(attachment.path)
+    ? attachment.path
+    : path.resolve(input.run.projectRoot, attachment.path);
+  const [projectRoot, filePath] = await Promise.all([
+    fs.realpath(input.run.projectRoot).catch(() => undefined),
+    fs.realpath(absolutePath).catch(() => undefined)
+  ]);
+  if (!projectRoot || !filePath || !isInside(projectRoot, filePath)) return undefined;
+
+  const stat = await fs.stat(filePath).catch(() => undefined);
+  if (!stat?.isFile()) return undefined;
+  return { attachment, filePath };
+}
+
+function parseEvidenceIndex(value: string): number | undefined {
+  if (!/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function isInside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function contentTypeForEvidence(kind: EvidenceArtifact["kind"], filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (kind === "trace") return "application/zip";
+  if (kind === "video" && ext === ".mp4") return "video/mp4";
+  if (kind === "video") return "video/webm";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  return "image/png";
 }
 
 export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProject }: Deps): Hono {
@@ -167,6 +239,39 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
       hasPlaywrightHtml: await pathExists(run.paths.playwrightHtml),
       hasStdoutLog: await pathExists(run.paths.stdoutLog),
       hasStderrLog: await pathExists(run.paths.stderrLog)
+    });
+  });
+
+  router.get("/runs/:runId/evidence/:failureIndex/:attachmentIndex", async (c) => {
+    const result = await loadRun(c, runManager, projectStore, logger);
+    if (!("run" in result)) return result.response;
+    const evidence = await resolveEvidenceFile({
+      run: result.run,
+      failureIndex: c.req.param("failureIndex"),
+      attachmentIndex: c.req.param("attachmentIndex")
+    });
+    if (!evidence) {
+      return apiError(c, "ARTIFACT_NOT_FOUND", "Evidence artifact is not available.", 404);
+    }
+    let body: ArrayBuffer;
+    try {
+      const file = await fs.readFile(evidence.filePath);
+      body = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength) as ArrayBuffer;
+    } catch (error) {
+      logger?.error(
+        {
+          runId: result.run.runId,
+          artifactKind: evidence.attachment.kind,
+          ...errorLogFields(error)
+        },
+        "evidence artifact read failed"
+      );
+      return apiError(c, "ARTIFACT_READ_FAILED", "Evidence artifact could not be read.", 500);
+    }
+    return new Response(body, {
+      headers: {
+        "Content-Type": contentTypeForEvidence(evidence.attachment.kind, evidence.filePath)
+      }
     });
   });
 

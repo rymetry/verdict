@@ -19,6 +19,7 @@ import {
   isTerminalEventType,
   terminalStatusMatchesEvent,
   type RunCancellationReason,
+  type EvidenceArtifact,
   type RunMetadata,
   type RunTerminalPayload,
   type WorkbenchEvent
@@ -45,6 +46,14 @@ export interface RunConsoleState {
   cancelReason?: RunCancellationReason;
   durationMs?: number;
   summary?: { total: number; passed: number; failed: number; skipped: number; flaky: number };
+  artifactLinks: EvidenceArtifactLink[];
+}
+
+interface EvidenceArtifactLink {
+  key: string;
+  kind: EvidenceArtifact["kind"];
+  label: string;
+  href: string;
 }
 
 export const initialRunConsoleState: RunConsoleState = {
@@ -52,7 +61,8 @@ export const initialRunConsoleState: RunConsoleState = {
   exitCode: null,
   stdout: [],
   stderr: [],
-  warnings: []
+  warnings: [],
+  artifactLinks: []
 };
 
 const MAX_LINES = 1000;
@@ -201,6 +211,25 @@ export function RunConsole({
           </p>
         ) : null}
         <RunWarningsAlert warnings={state.warnings} />
+        {state.artifactLinks.length > 0 ? (
+          <ul
+            className="mt-3 flex flex-wrap gap-2"
+            aria-label="Evidence artifact links"
+          >
+            {state.artifactLinks.map((artifact) => (
+              <li key={artifact.key}>
+                <a
+                  className="inline-flex h-8 items-center rounded-md border border-[var(--line-strong)] bg-[var(--bg-elev)] px-3 text-xs font-medium text-[var(--ink-1)] hover:bg-[var(--bg-1)]"
+                  href={artifact.href}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {artifact.kind}: {artifact.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <pre
           ref={stdoutRef}
           aria-label="標準出力"
@@ -248,6 +277,7 @@ function mergeRunSnapshot(
     cancelReason: run.cancelReason,
     durationMs: run.durationMs ?? state.durationMs,
     warnings: run.warnings,
+    artifactLinks: run.summary ? evidenceLinksForRun(run.runId, run.summary) : [],
     summary: run.summary
       ? {
           total: run.summary.total,
@@ -320,6 +350,7 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
         status,
         ...applyTerminalFields(state, payload),
         warnings: payload?.warnings ?? appendWarning(state.warnings, TERMINAL_PAYLOAD_WARNING),
+        artifactLinks: payload?.summary ? evidenceLinksForRun(event.runId, payload.summary) : state.artifactLinks,
         summary: payload?.summary
           ? {
               total: payload.summary.total,
@@ -376,4 +407,27 @@ export function applyEvent(state: RunConsoleState, event: WorkbenchEvent): RunCo
       return state;
     }
   }
+}
+
+function evidenceLinksForRun(
+  runId: string,
+  summary: NonNullable<RunMetadata["summary"]>
+): EvidenceArtifactLink[] {
+  const links: EvidenceArtifactLink[] = [];
+  summary.failedTests.forEach((test, failureIndex) => {
+    test.attachments.forEach((attachment, attachmentIndex) => {
+      if (!isLinkableEvidence(attachment.kind)) return;
+      links.push({
+        key: `${failureIndex}-${attachmentIndex}`,
+        kind: attachment.kind,
+        label: attachment.label,
+        href: `/api/runs/${encodeURIComponent(runId)}/evidence/${failureIndex}/${attachmentIndex}`
+      });
+    });
+  });
+  return links;
+}
+
+function isLinkableEvidence(kind: EvidenceArtifact["kind"]): boolean {
+  return kind === "trace" || kind === "screenshot" || kind === "video";
 }
