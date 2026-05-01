@@ -191,6 +191,7 @@ function GenerationResult({
           runId={runId ?? response.runId}
           projectId={response.projectId}
           patch={result.proposedPatch}
+          approvalPolicy="generated-test-quality-gate"
         />
       ) : (
         <div className="flex items-center gap-2 text-xs text-[var(--ink-3)]">
