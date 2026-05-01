@@ -78,13 +78,19 @@ cmd = command  # decoded plaintext, no JSON escaping left
 
 # --- Block rules -----------------------------------------------------------
 
-# B1. force-push to main (without --force-with-lease).
+# B1. Any history-rewriting push targeting main (force OR force-with-lease).
+# AGENTS.md / .agents/skills/prepare-release.md forbid rewriting `main`
+# regardless of which force-variant is used; force-with-lease only protects
+# concurrent contributors, not the protected-branch invariant.
 push_pattern = re.compile(r"\bgit\s+push\b")
-force_pattern = re.compile(r"--force(?!-with-lease)\b")
+plain_force_pattern = re.compile(r"--force(?!-with-lease)\b")
+any_force_pattern = re.compile(r"--force(?:-with-lease)?\b|(?<!\w)-f(?!\w)")
 main_pattern = re.compile(r"(?:\borigin\s+main\b|\bHEAD:main\b|\bmain\b\s*(?:$|;|&&|\|\|))")
-if push_pattern.search(cmd) and force_pattern.search(cmd):
-    if main_pattern.search(cmd):
-        emit_block("force-push to main is not permitted. Use --force-with-lease on a feature branch instead.")
+if push_pattern.search(cmd) and any_force_pattern.search(cmd) and main_pattern.search(cmd):
+    emit_block(
+        "force / force-with-lease push to main is not permitted. "
+        "Use a feature branch and PR for any history rewrite."
+    )
 
 # B2. rm -rf with any operand pointing at a system path. Iterate over every
 # non-option argument after a recursive flag — a multi-operand command like
@@ -145,14 +151,56 @@ def is_protected(target: str) -> bool:
             return True
     return False
 
+def skip_command_wrappers(tokens):
+    """Advance past leading wrappers that re-launch another command.
+
+    Recognized wrappers:
+      - `KEY=value ...`         (env-var-only prefix)
+      - `sudo [-flags ...]`     (with options like -E, -u USER, -i, -s)
+      - `env [-flags] [KEY=value ...]`  (env command, option block + assignments)
+      - `xargs`, `time`, `nohup` etc. — not handled here; the agent's
+        CommandRunner is the deeper line of defense for those.
+    Returns the index of the first token that is not a wrapper.
+    """
+    idx = 0
+    while idx < len(tokens):
+        tok = tokens[idx]
+        if tok == "sudo":
+            idx += 1
+            # consume any sudo options (-E, -H, -i, -s, -u USER, -g GROUP, ...)
+            while idx < len(tokens) and tokens[idx].startswith("-"):
+                opt = tokens[idx]
+                idx += 1
+                # opts that take a separate argument
+                if opt in ("-u", "-g", "-U", "-r", "-t", "-p", "-A", "-h"):
+                    if idx < len(tokens) and not tokens[idx].startswith("-"):
+                        idx += 1
+            continue
+        if tok == "env":
+            idx += 1
+            # env options. -u, -C, -S take a separate argument.
+            while idx < len(tokens) and tokens[idx].startswith("-"):
+                opt = tokens[idx]
+                idx += 1
+                if opt in ("-u", "-C", "-S"):
+                    if idx < len(tokens) and not tokens[idx].startswith("-") and "=" not in tokens[idx]:
+                        idx += 1
+            # KEY=value assignments
+            while idx < len(tokens) and "=" in tokens[idx] and not tokens[idx].startswith("-"):
+                idx += 1
+            continue
+        if "=" in tok and not tok.startswith("-") and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tok):
+            # bare env-var assignment prefix
+            idx += 1
+            continue
+        break
+    return idx
+
 for segment in shell_segments(cmd):
     tokens = segment.strip().split()
     if not tokens:
         continue
-    # Locate `rm` (allow leading `sudo` / env vars).
-    idx = 0
-    while idx < len(tokens) and (tokens[idx] == "sudo" or "=" in tokens[idx]):
-        idx += 1
+    idx = skip_command_wrappers(tokens)
     if idx >= len(tokens) or tokens[idx] != "rm":
         continue
     # Need a recursive flag somewhere in the option block.
@@ -175,7 +223,7 @@ for segment in shell_segments(cmd):
 # --- Warn rules ------------------------------------------------------------
 
 # W1. --force without --force-with-lease (any branch).
-if push_pattern.search(cmd) and force_pattern.search(cmd):
+if push_pattern.search(cmd) and plain_force_pattern.search(cmd):
     emit_warning("prefer `git push --force-with-lease` over `--force`.")
 
 # W2. --no-verify (git commit / push / etc.).
