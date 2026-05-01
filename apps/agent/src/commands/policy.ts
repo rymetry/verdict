@@ -7,6 +7,7 @@ export type CommandArgsValidationCode =
   | "nul-byte"
   | "argument-too-long"
   | "missing-flag-value"
+  | "invalid-numeric-value"
   | "disallowed-flag"
   | "invalid-uri-encoding"
   | "decode-depth-exceeded"
@@ -256,6 +257,17 @@ export function validatePhase1PlaywrightArgs({
       const value = args[index + 1];
       if (value === undefined || isFlagValue(value)) {
         return argsInvalid("missing-flag-value", `${arg} must be followed by a non-flag value.`);
+      }
+      index += 2;
+      continue;
+    }
+    if (arg === "--retries" || arg === "--workers") {
+      const value = args[index + 1];
+      if (value === undefined || isFlagValue(value)) {
+        return argsInvalid("missing-flag-value", `${arg} must be followed by a numeric value.`);
+      }
+      if (!/^\d+$/.test(value) || (arg === "--workers" && Number(value) === 0)) {
+        return argsInvalid("invalid-numeric-value", `${arg} must be a valid numeric value.`);
       }
       index += 2;
       continue;

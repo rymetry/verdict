@@ -248,6 +248,8 @@ export const RunRequestSchema = z.object({
     .array(z.string().refine(noFlagInjection, "projectName must not start with '-'"))
     .optional(),
   headed: z.boolean().optional().default(false),
+  retries: z.number().int().nonnegative().optional(),
+  workers: z.number().int().positive().optional(),
   /**
    * §1.4 Profile-driven Quality Gate rules. Default `"local-review"`
    * (lenient — Allure CLI defaults). Operators can choose `"release-smoke"`

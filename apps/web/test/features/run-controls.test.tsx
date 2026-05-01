@@ -191,6 +191,64 @@ describe("RunControls", () => {
     });
   });
 
+  it("project/headed/retries/workers controls を request に反映する", async () => {
+    vi.mocked(startRun).mockResolvedValue({
+      runId: "r-controls",
+      metadata: {
+        runId: "r-controls",
+        projectId: "p1",
+        projectRoot: "/p",
+        status: "queued",
+        startedAt: "2026-04-30T00:00:00Z",
+        command: { executable: "pnpm", args: [] },
+        cwd: "/p",
+        requested: {
+          projectId: "p1",
+          headed: true,
+          projectNames: ["chromium", "webkit"],
+          retries: 2,
+          workers: 4
+        },
+        paths: {
+          runDir: "/runs/r-controls",
+          metadataJson: "/runs/r-controls/metadata.json",
+          stdoutLog: "/runs/r-controls/stdout.log",
+          stderrLog: "/runs/r-controls/stderr.log",
+          playwrightJson: "/runs/r-controls/playwright.json",
+          playwrightHtml: "/runs/r-controls/playwright-report",
+          artifactsJson: "/runs/r-controls/artifacts.json",
+          allureResultsDest: "/runs/r-controls/allure-results",
+          allureReportDir: "/runs/r-controls/allure-report",
+          qualityGateResultPath: "/runs/r-controls/quality-gate-result.json",
+          allureExportsDir: "/runs/r-controls/allure-exports",
+          allureCsvPath: "/runs/r-controls/allure-exports/results.csv",
+          allureLogPath: "/runs/r-controls/allure-exports/results.log",
+          qmoSummaryJsonPath: "/runs/r-controls/qmo-summary.json",
+          qmoSummaryMarkdownPath: "/runs/r-controls/qmo-summary.md"
+        },
+        warnings: []
+      }
+    });
+    const { user } = renderControls(makeProject());
+    await user.type(
+      screen.getByLabelText(/Project names/),
+      " chromium, webkit "
+    );
+    await user.click(screen.getByLabelText("Headed"));
+    await user.type(screen.getByLabelText("Retries"), "2");
+    await user.type(screen.getByLabelText("Workers"), "4");
+    await user.click(screen.getByRole("button", { name: /Run Playwright/ }));
+    await waitFor(() => {
+      expect(vi.mocked(startRun)).toHaveBeenCalledTimes(1);
+    });
+    expect(vi.mocked(startRun).mock.calls[0]?.[0]).toMatchObject({
+      projectNames: ["chromium", "webkit"],
+      headed: true,
+      retries: 2,
+      workers: 4
+    });
+  });
+
   it("local-review が選ばれた状態では qualityGateProfile は request に含めない (default == omit)", async () => {
     vi.mocked(startRun).mockResolvedValue({
       runId: "r3",

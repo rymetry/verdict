@@ -82,7 +82,9 @@ describe("buildPlaywrightTestCommand", () => {
         projectNames: ["chromium"],
         grep: "ログインできること",
         testIds: ["trivial passing assertion"],
-        specPath: "tests/example.spec.ts"
+        specPath: "tests/example.spec.ts",
+        retries: 2,
+        workers: 4
       },
       jsonOutputPath: "/proj/.playwright-workbench/runs/1/playwright-results.json",
       htmlOutputDir: "/proj/.playwright-workbench/runs/1/playwright-report",
@@ -95,6 +97,10 @@ describe("buildPlaywrightTestCommand", () => {
         args: command.args
       })
     ).toEqual({ ok: true });
+    expect(command.args).toContain("--retries");
+    expect(command.args).toContain("2");
+    expect(command.args).toContain("--workers");
+    expect(command.args).toContain("4");
   });
 
   it("rejects specPath that escapes the project root", () => {
