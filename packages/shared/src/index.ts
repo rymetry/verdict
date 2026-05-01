@@ -162,6 +162,26 @@ export const FixtureEntrySchema = z.object({
 });
 export type FixtureEntry = z.infer<typeof FixtureEntrySchema>;
 
+export const AuthSetupRiskSignalSchema = z.enum([
+  "storage-state-path",
+  "storage-state-inline",
+  "global-setup",
+  "auth-setup-file"
+]);
+export type AuthSetupRiskSignal = z.infer<typeof AuthSetupRiskSignalSchema>;
+
+export const AuthSetupRiskSeveritySchema = z.enum(["info", "warning", "high"]);
+export type AuthSetupRiskSeverity = z.infer<typeof AuthSetupRiskSeveritySchema>;
+
+export const AuthSetupRiskSchema = z.object({
+  signal: AuthSetupRiskSignalSchema,
+  severity: AuthSetupRiskSeveritySchema,
+  message: z.string().min(1),
+  relativePath: z.string().optional(),
+  source: z.literal("heuristic")
+});
+export type AuthSetupRisk = z.infer<typeof AuthSetupRiskSchema>;
+
 export const ProjectConfigSummarySchema = z.object({
   projectId: z.string(),
   generatedAt: z.string(),
@@ -174,6 +194,7 @@ export const ProjectConfigSummarySchema = z.object({
   reporters: z.array(ConfigReporterSchema),
   useOptions: z.array(ConfigUseOptionSchema),
   fixtureFiles: z.array(FixtureEntrySchema),
+  authRisks: z.array(AuthSetupRiskSchema).default([]),
   warnings: z.array(z.string())
 });
 export type ProjectConfigSummary = z.infer<typeof ProjectConfigSummarySchema>;

@@ -79,6 +79,15 @@ describe("api/client fetchConfigSummary", () => {
               sizeBytes: 42
             }
           ],
+          authRisks: [
+            {
+              signal: "storage-state-path",
+              severity: "warning",
+              message: "storageState file path is configured.",
+              relativePath: "playwright/.auth/user.json",
+              source: "heuristic"
+            }
+          ],
           warnings: []
         })
       )
@@ -86,7 +95,8 @@ describe("api/client fetchConfigSummary", () => {
 
     await expect(fetchConfigSummary("p1")).resolves.toMatchObject({
       config: { relativePath: "playwright.config.ts" },
-      fixtureFiles: [{ relativePath: "tests/fixtures/auth.fixture.ts" }]
+      fixtureFiles: [{ relativePath: "tests/fixtures/auth.fixture.ts" }],
+      authRisks: [{ signal: "storage-state-path" }]
     });
     expect(fetch).toHaveBeenCalledWith("/api/projects/p1/config-summary");
   });

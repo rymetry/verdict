@@ -75,4 +75,79 @@ describe("buildConfigSummary", () => {
     ]);
     expect(summary.warnings).toContain("playwright.config.{ts,js,mjs,cjs} was not found.");
   });
+
+  it("surfaces storageState and auth setup risks without reading state contents", async () => {
+    const configPath = path.join(workdir, "playwright.config.ts");
+    fs.writeFileSync(
+      configPath,
+      [
+        "export default {",
+        "  globalSetup: './tests/auth/global.setup.ts',",
+        "  use: { storageState: 'playwright/.auth/user.json' },",
+        "};"
+      ].join("\n")
+    );
+    fs.mkdirSync(path.join(workdir, "tests", "auth"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workdir, "tests", "auth", "global.setup.ts"),
+      "import { test } from '@playwright/test';\nexport async function setup() { await test.step('login', async () => {}); }\n"
+    );
+
+    const summary = await buildConfigSummary({
+      projectId: "p1",
+      projectRoot: workdir,
+      configPath
+    });
+
+    expect(summary.authRisks).toEqual([
+      expect.objectContaining({
+        signal: "storage-state-path",
+        severity: "warning",
+        relativePath: "playwright/.auth/user.json"
+      }),
+      expect.objectContaining({
+        signal: "global-setup",
+        severity: "info",
+        relativePath: "./tests/auth/global.setup.ts"
+      }),
+      expect.objectContaining({
+        signal: "auth-setup-file",
+        severity: "info",
+        relativePath: "tests/auth/global.setup.ts"
+      })
+    ]);
+  });
+
+  it("does not return unsafe storageState paths", async () => {
+    const configPath = path.join(workdir, "playwright.config.ts");
+    fs.writeFileSync(
+      configPath,
+      [
+        "export default {",
+        "  use: { storageState: '/Users/example/.auth/state.json' },",
+        "  projects: [{ use: { storageState: { cookies: [], origins: [] } } }]",
+        "};"
+      ].join("\n")
+    );
+
+    const summary = await buildConfigSummary({
+      projectId: "p1",
+      projectRoot: workdir,
+      configPath
+    });
+
+    expect(summary.authRisks).toEqual([
+      expect.objectContaining({
+        signal: "storage-state-path",
+        severity: "high",
+        relativePath: undefined
+      }),
+      expect.objectContaining({
+        signal: "storage-state-inline",
+        severity: "high",
+        relativePath: "playwright.config.ts"
+      })
+    ]);
+    expect(JSON.stringify(summary.authRisks)).not.toContain("/Users/example");
+  });
 });

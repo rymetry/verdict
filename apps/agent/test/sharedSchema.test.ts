@@ -5,6 +5,7 @@ import {
   AiTestGenerationOutputSchema,
   AiTestGenerationRequestSchema,
   AiTestGenerationResponseSchema,
+  AuthSetupRiskSchema,
   CiArtifactImportRequestSchema,
   CiArtifactImportResponseSchema,
   CiArtifactLinkSchema,
@@ -17,6 +18,7 @@ import {
   RunCancelledPayloadSchema,
   RunErrorPayloadSchema,
   RunListItemSchema,
+  ProjectConfigSummarySchema,
   RunRequestSchema,
   RunQueuedPayloadSchema,
   RunStartedPayloadSchema,
@@ -83,6 +85,30 @@ describe("shared run warning schemas", () => {
         codegenUrl: "https://example.com"
       })
     ).toThrow();
+  });
+
+  it("validates auth setup risk signals on config summaries", () => {
+    expect(
+      AuthSetupRiskSchema.parse({
+        signal: "storage-state-path",
+        severity: "warning",
+        message: "storageState file path is configured.",
+        relativePath: "playwright/.auth/user.json",
+        source: "heuristic"
+      }).signal
+    ).toBe("storage-state-path");
+
+    expect(
+      ProjectConfigSummarySchema.parse({
+        projectId: "p1",
+        generatedAt: "2026-05-01T00:00:00.000Z",
+        config: { format: "ts" },
+        reporters: [],
+        useOptions: [],
+        fixtureFiles: [],
+        warnings: []
+      }).authRisks
+    ).toEqual([]);
   });
 
   it("validates QA inventory metadata on test cases", () => {
