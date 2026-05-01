@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyPatchTemporary,
   checkPatch,
+  createReleaseReviewDraft,
   fetchRepairComparison,
   fetchRuns,
   revertPatchTemporary,
@@ -140,6 +141,47 @@ describe("api/client repair review", () => {
       2,
       "/api/runs/run-before-11111111/repair-comparison/run-after-22222222"
     );
+  });
+});
+
+describe("api/client createReleaseReviewDraft", () => {
+  it("posts draft links and validates the release review draft response", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      runId: "run-1",
+      projectId: "p1",
+      generatedAt: "2026-05-01T00:00:00.000Z",
+      outcome: "ready",
+      qmoSummary: {
+        runId: "run-1",
+        projectId: "p1",
+        generatedAt: "2026-05-01T00:00:00.000Z",
+        outcome: "ready",
+        warnings: [],
+        reportLinks: {}
+      },
+      issues: [],
+      ciArtifacts: [],
+      markdown: "# Release Readiness Review\n"
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createReleaseReviewDraft("run-1", { issues: [], ciArtifacts: [] })).resolves.toMatchObject({
+      runId: "run-1",
+      outcome: "ready"
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/release-review-draft",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("treats missing QMO summary as a pending draft", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: { code: "NO_QMO_SUMMARY", message: "pending" } }, 409))
+    );
+
+    await expect(createReleaseReviewDraft("run-1", { issues: [], ciArtifacts: [] })).resolves.toBeNull();
   });
 });
 

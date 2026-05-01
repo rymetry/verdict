@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   AiAnalysisContextSchema,
   AiAnalysisOutputSchema,
+  CiArtifactLinkSchema,
+  GitHubPullRequestLinkSchema,
+  ReleaseReviewDraftRequestSchema,
   RunCompletedPayloadSchema,
   RunCancelledPayloadSchema,
   RunErrorPayloadSchema,
@@ -313,5 +316,47 @@ describe("shared AI analysis schemas", () => {
         requiresHumanDecision: true
       }).classification
     ).toBe("test-bug");
+  });
+});
+
+describe("shared release review schemas", () => {
+  it("accepts GitHub and CI artifact draft links with HTTP URLs", () => {
+    expect(
+      ReleaseReviewDraftRequestSchema.parse({
+        pullRequest: {
+          repository: "owner/repo",
+          number: 10,
+          url: "https://github.com/owner/repo/pull/10"
+        },
+        issues: [],
+        ciArtifacts: [
+          {
+            name: "allure-report",
+            kind: "allure-report",
+            source: "github-actions",
+            url: "https://github.com/owner/repo/actions/runs/1/artifacts/2"
+          }
+        ]
+      }).ciArtifacts[0]?.kind
+    ).toBe("allure-report");
+  });
+
+  it("rejects non-HTTP URLs at the review draft boundary", () => {
+    expect(() =>
+      GitHubPullRequestLinkSchema.parse({
+        repository: "owner/repo",
+        number: 10,
+        url: "file:///tmp/report"
+      })
+    ).toThrow(/http or https/);
+
+    expect(() =>
+      CiArtifactLinkSchema.parse({
+        name: "local",
+        kind: "other",
+        source: "external",
+        url: "javascript:alert(1)"
+      })
+    ).toThrow(/http or https/);
   });
 });
