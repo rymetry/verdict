@@ -14,20 +14,35 @@ set -uo pipefail
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$PROJECT_ROOT" || exit 0
 
-# Only run on the main project repo (skip nested worktrees / subprojects
-# where this script may have been copied in).
-case "$PROJECT_ROOT" in
-  */verdict|*/playwright-workbench) ;;
+# Only run on the Verdict repo. Detect via remote URL so per-session
+# worktrees (e.g. .claude/worktrees/<name>) still match. Falls back to
+# package.json name when no remote is configured.
+remote_url="$(git config --get remote.origin.url 2>/dev/null || true)"
+case "$remote_url" in
+  *rymetry/verdict*|*rymetry/playwright-workbench*) ;;
+  "")
+    # No remote — accept if root package.json claims the workspace.
+    if ! grep -q '"name": *"playwright-workbench"' package.json 2>/dev/null; then
+      exit 0
+    fi
+    ;;
   *)
-    # Different repo or sandbox — do nothing.
+    # Some other repo (the script may have been copied as a template).
     exit 0
     ;;
 esac
 
-# Skip if there are no recent edits (heuristic: nothing changed in the last
-# 5 minutes). This avoids running on a "Stop" that comes from a Q&A turn
-# with no code edits.
-if [[ -z "$(find . -path ./node_modules -prune -o -path ./.git -prune -o -newermt '5 minutes ago' -print 2>/dev/null | head -n1)" ]]; then
+# Skip if there are no recent edits. `find -mmin` is portable across BSD
+# (macOS) and GNU find. Look for files modified in the last 5 minutes,
+# excluding noisy paths.
+if [[ -z "$(find . \
+    -path ./node_modules -prune -o \
+    -path ./.git -prune -o \
+    -path ./dist -prune -o \
+    -path ./.playwright-mcp -prune -o \
+    -name '*.ts' -mmin -5 -print -o \
+    -name '*.tsx' -mmin -5 -print -o \
+    -name '*.json' -mmin -5 -print 2>/dev/null | head -n1)" ]]; then
   exit 0
 fi
 
@@ -43,7 +58,9 @@ for ws in agent web shared; do
     web)    base="apps/web/src" ;;
     shared) base="packages/shared/src" ;;
   esac
-  if [[ -n "$(find "$base" -newermt '5 minutes ago' -name '*.ts' -o -name '*.tsx' -newermt '5 minutes ago' 2>/dev/null | head -n1)" ]]; then
+  # Portable across BSD (macOS) and GNU find: `-mmin -5` = modified in
+  # the last 5 minutes.
+  if [[ -d "$base" ]] && [[ -n "$(find "$base" \( -name '*.ts' -o -name '*.tsx' \) -mmin -5 2>/dev/null | head -n1)" ]]; then
     touched_workspaces+=("$ws")
   fi
 done

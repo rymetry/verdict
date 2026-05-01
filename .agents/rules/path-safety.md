@@ -17,13 +17,16 @@ Verdict's **Phase 1 PoC review** identified absolute-path leakage in API respons
 | Boundary | Path representation | Notes |
 |---|---|---|
 | **Internal storage** (`metadata.json`, `quality-gate-result.json`, agent in-memory) | Absolute OK | Convenient for local file ops; not exposed |
-| **HTTP API responses** | **Project-relative only**, plus optional `absolutePath?: string` for "open in OS" flows | Never required |
+| **`ProjectSummary.rootPath`** (response of `/projects/open`, `/projects/current`) | **Absolute** by design | This is the user's chosen root, not test/run output. The local control-plane needs the absolute path so that subsequent navigation, file resolution, and CLI invocation all share one canonical root. Verified by server tests that assert the absolute workdir. |
+| **HTTP API responses** (everything else: failures, artifacts, evidence, run metadata path fields) | **Project-relative only**, plus optional `absolutePath?: string` for "open in OS" flows | Never required |
 | **WebSocket payloads** | Project-relative only | Same as HTTP |
 | **AI context** (sent to LLM) | Project-relative only, **absoluteFilePath strictly undefined** | Verified by `analysisContext.test.ts` |
 | **QMO Markdown** (`qmo-summary.md`) | Project-relative only | The Markdown is meant to be shared |
 | **Repair Review draft / GitHub PR comment** | Project-relative only | External-facing |
 | **Failure Review UI surface** | Project-relative only | Cross-role view |
 | **Audit log** (`audit.log`) | Absolute OK with `cwdHash` | Local diagnostic |
+
+The `ProjectSummary.rootPath` exception is intentional: a *local* control plane communicating the *active* project to its own GUI is not the threat model that path-safety addresses. The threat model is **shareable / external surfaces** (PR comments, AI context, Bundle exports). Run-scoped path fields inside those payloads stay relative even though `rootPath` itself is absolute.
 
 ## How to comply
 
