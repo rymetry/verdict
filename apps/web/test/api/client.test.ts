@@ -4,6 +4,7 @@ import {
   applyPatchTemporary,
   checkPatch,
   createReleaseReviewDraft,
+  fetchConfigSummary,
   fetchRepairComparison,
   fetchRuns,
   importCiArtifacts,
@@ -50,6 +51,43 @@ describe("api/client fetchRuns", () => {
         })
       ]
     });
+  });
+});
+
+describe("api/client fetchConfigSummary", () => {
+  it("fetches and validates the project config summary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          projectId: "p1",
+          generatedAt: "2026-05-01T00:00:00Z",
+          config: {
+            path: "/repo/playwright.config.ts",
+            relativePath: "playwright.config.ts",
+            format: "ts",
+            sizeBytes: 128
+          },
+          reporters: [{ name: "list", source: "heuristic" }],
+          useOptions: [{ name: "trace", value: "on-first-retry", source: "heuristic" }],
+          fixtureFiles: [
+            {
+              relativePath: "tests/fixtures/auth.fixture.ts",
+              kind: "fixture-file",
+              signals: ["fixture-path"],
+              sizeBytes: 42
+            }
+          ],
+          warnings: []
+        })
+      )
+    );
+
+    await expect(fetchConfigSummary("p1")).resolves.toMatchObject({
+      config: { relativePath: "playwright.config.ts" },
+      fixtureFiles: [{ relativePath: "tests/fixtures/auth.fixture.ts" }]
+    });
+    expect(fetch).toHaveBeenCalledWith("/api/projects/p1/config-summary");
   });
 });
 

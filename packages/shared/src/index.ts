@@ -138,6 +138,46 @@ export const ProjectSummarySchema = z.object({
 });
 export type ProjectSummary = z.infer<typeof ProjectSummarySchema>;
 
+export const ConfigReporterSchema = z.object({
+  name: z.string(),
+  source: z.literal("heuristic")
+});
+export type ConfigReporter = z.infer<typeof ConfigReporterSchema>;
+
+export const ConfigUseOptionSchema = z.object({
+  name: z.enum(["trace", "screenshot", "video"]),
+  value: z.string(),
+  source: z.literal("heuristic")
+});
+export type ConfigUseOption = z.infer<typeof ConfigUseOptionSchema>;
+
+export const FixtureSignalSchema = z.enum(["fixture-path", "test-extend"]);
+export type FixtureSignal = z.infer<typeof FixtureSignalSchema>;
+
+export const FixtureEntrySchema = z.object({
+  relativePath: z.string(),
+  kind: z.enum(["fixture-file", "test-extend"]),
+  signals: z.array(FixtureSignalSchema),
+  sizeBytes: z.number().int().nonnegative()
+});
+export type FixtureEntry = z.infer<typeof FixtureEntrySchema>;
+
+export const ProjectConfigSummarySchema = z.object({
+  projectId: z.string(),
+  generatedAt: z.string(),
+  config: z.object({
+    path: z.string().optional(),
+    relativePath: z.string().optional(),
+    format: z.enum(["ts", "js", "mjs", "cjs", "unknown"]),
+    sizeBytes: z.number().int().nonnegative().optional()
+  }),
+  reporters: z.array(ConfigReporterSchema),
+  useOptions: z.array(ConfigUseOptionSchema),
+  fixtureFiles: z.array(FixtureEntrySchema),
+  warnings: z.array(z.string())
+});
+export type ProjectConfigSummary = z.infer<typeof ProjectConfigSummarySchema>;
+
 export const InventorySourceSchema = z.enum([
   "playwright-list-json",
   "custom-reporter",

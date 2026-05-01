@@ -685,6 +685,34 @@ describe("HTTP API surface", () => {
     expect(titles).toContain("trivial passing assertion");
   }, 90_000);
 
+  it("returns a read-only config summary for an opened project", async () => {
+    const fixtureRealpath = fs.realpathSync(fixtureRoot);
+    const { app } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [fixtureRealpath],
+        failClosedAudit: false
+      }
+    });
+    const open = await app.request("/projects/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rootPath: fixtureRealpath })
+    });
+    expect(open.status).toBe(200);
+
+    const response = await app.request(
+      `/projects/${encodeURIComponent(fixtureRealpath)}/config-summary`
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.config.relativePath).toBe("playwright.config.ts");
+    expect(body.reporters).toContainEqual({ name: "list", source: "heuristic" });
+    expect(body.fixtureFiles).toEqual([]);
+  });
+
   it("passes each project root to the injected policy factory", async () => {
     const requestedRoots: string[] = [];
     const { runnerForProject } = buildApp({
