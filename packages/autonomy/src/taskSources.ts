@@ -115,7 +115,7 @@ export function pickCustomCommandTask(
   const result = spawnSync(command[0], command.slice(1), {
     cwd: projectRoot,
     encoding: "utf8",
-    env: taskSourceCommandEnv(progress),
+    env: taskSourceCommandEnv(projectRoot, progress),
     shell: false,
     timeout: config.taskSources?.customCommand?.timeoutMs ?? 30_000
   });
@@ -249,13 +249,34 @@ export function knownTaskIds(projectRoot: string, config: AutonomyConfig): strin
   return undefined;
 }
 
-function taskSourceCommandEnv(progress: ProgressState): NodeJS.ProcessEnv {
+function taskSourceCommandEnv(projectRoot: string, progress: ProgressState): NodeJS.ProcessEnv {
+  const completed = [...new Set([...progress.completed, ...readGitCompletedTaskIds(projectRoot)])];
   return {
     PATH: process.env.PATH ?? "",
     HOME: process.env.HOME ?? "",
     TMPDIR: process.env.TMPDIR ?? "",
-    AGENT_AUTONOMY_PROGRESS: JSON.stringify(progress)
+    AGENT_AUTONOMY_PROGRESS: JSON.stringify({ ...progress, completed }),
+    AGENT_AUTONOMY_GIT_COMPLETED_TASKS: JSON.stringify(completed)
   };
+}
+
+function readGitCompletedTaskIds(projectRoot: string): string[] {
+  const fromMain = spawnSync("git", ["log", "--oneline", "-500", "origin/main"], {
+    cwd: projectRoot,
+    encoding: "utf8",
+    shell: false,
+    timeout: 5_000
+  });
+  const output =
+    fromMain.status === 0
+      ? fromMain.stdout
+      : spawnSync("git", ["log", "--oneline", "-500", "HEAD"], {
+          cwd: projectRoot,
+          encoding: "utf8",
+          shell: false,
+          timeout: 5_000
+        }).stdout;
+  return [...new Set([...output.matchAll(/\bT\d{4}-\d+\b/g)].map((match) => match[0]))];
 }
 
 function parseCustomCommandSelection(stdout: string): TaskSelection {

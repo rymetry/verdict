@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   knownTaskIds,
@@ -143,6 +144,18 @@ describe("pickCustomCommandTask", () => {
     });
   });
 
+  it("passes git-completed T-tasks to command adapters", () => {
+    initGitHistory(["feat(T1500-3): add exploration engine"]);
+    writePlanV3LikeTaskSource();
+
+    expect(pickTask(workdir, customCommandConfig(), progress())).toMatchObject({
+      task: {
+        id: "T1500-6",
+        title: "Test Plan Generator"
+      }
+    });
+  });
+
   it("blocks when the command is not configured", () => {
     expect(
       pickTask(
@@ -223,6 +236,35 @@ function writeCustomTaskSource(): void {
       "console.log(JSON.stringify({ task, warnings: [], evidence: ['custom-task-source.mjs'] }));"
     ].join("\n")
   );
+}
+
+function writePlanV3LikeTaskSource(): void {
+  fs.writeFileSync(
+    path.join(workdir, "custom-task-source.mjs"),
+    [
+      "const progress = JSON.parse(process.env.AGENT_AUTONOMY_PROGRESS ?? '{}');",
+      "const completed = new Set(progress.completed ?? []);",
+      "const tasks = [",
+      "  { id: 'T1500-3', title: 'Exploration Engine', deliverable: 'Exploration Engine | apps/agent/src/exploration', expectedScope: ['apps/agent/src/exploration'] },",
+      "  { id: 'T1500-6', title: 'Test Plan Generator', deliverable: 'Test Plan Generator | apps/agent/src/ai/testPlan.ts', expectedScope: ['apps/agent/src/ai'] }",
+      "];",
+      "const task = tasks.find((candidate) => !completed.has(candidate.id)) ?? null;",
+      "console.log(JSON.stringify({ task, warnings: [], evidence: ['custom-task-source.mjs'] }));"
+    ].join("\n")
+  );
+}
+
+function initGitHistory(messages: string[]): void {
+  execFileSync("git", ["init"], { cwd: workdir, stdio: "ignore" });
+  for (const [index, message] of messages.entries()) {
+    fs.writeFileSync(path.join(workdir, `commit-${index}.txt`), `${message}\n`);
+    execFileSync("git", ["add", "."], { cwd: workdir, stdio: "ignore" });
+    execFileSync(
+      "git",
+      ["-c", "user.name=Agent Test", "-c", "user.email=agent@example.test", "commit", "-m", message],
+      { cwd: workdir, stdio: "ignore" }
+    );
+  }
 }
 
 function customCommandConfig(): AutonomyConfig {
