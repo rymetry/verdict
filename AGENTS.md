@@ -95,6 +95,16 @@ Common multi-step tasks have a corresponding skill in `.agents/skills/`. Agents 
 - **Running tests / interpreting failures** — [`.agents/skills/run-tests/SKILL.md`](.agents/skills/run-tests/SKILL.md)
 - **Preparing a release-ready commit + PR** — [`.agents/skills/prepare-release/SKILL.md`](.agents/skills/prepare-release/SKILL.md)
 
+**Autonomy loop (pick → execute → verify → review → merge → next):**
+
+- **Picking the next unblocked T-task** — [`.agents/skills/pick-next-task/SKILL.md`](.agents/skills/pick-next-task/SKILL.md)
+- **Verifying a T-task PR is complete** — [`.agents/skills/verify-completion/SKILL.md`](.agents/skills/verify-completion/SKILL.md)
+- **Persisting / resuming loop progress** — [`.agents/skills/checkpoint-progress/SKILL.md`](.agents/skills/checkpoint-progress/SKILL.md)
+- **Detecting a stuck loop and escalating** — [`.agents/skills/escape-loop/SKILL.md`](.agents/skills/escape-loop/SKILL.md)
+- **Driving one iteration of the loop** — [`.agents/skills/drive-next-task/SKILL.md`](.agents/skills/drive-next-task/SKILL.md)
+
+The autonomy loop is opt-in. Default mode is semi-autonomous: the loop drives Codex hand-off and verification, then stops at "ready to merge" for human approval. Setting `AUTONOMY_AUTO_MERGE=true` lets the loop merge after CI + Codex review pass. State lives at `.agents/state/progress.json` (gitignored).
+
 Skills are project-scoped under `.agents/skills/` per the [Agent Skills open standard](https://agentskills.io). Codex discovers them automatically. Claude Code discovers them via `.claude/skills/` symlink (or, if symlinks are not honored, by reading them directly through the SKILL tool).
 
 ### Choosing where a new skill belongs
