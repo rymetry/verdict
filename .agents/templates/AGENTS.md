@@ -24,6 +24,18 @@ installed package. Expose these commands before running the lifecycle:
 - `agent-autonomy-drive` or an equivalent `agents:drive` script
 - `agent-autonomy-progress` or an equivalent `agents:progress` script
 
+Useful driver commands:
+
+- `agent-autonomy-drive --dry-run` resolves the configured lifecycle without
+  executing side effects.
+- `agent-autonomy-drive --run-review <pr>` writes a structured review gate file
+  under `.agents/state/`.
+- `agent-autonomy-drive --ship-pr <pr> --qa-pass --review-file <file>
+  --auto-merge` evaluates the ship gate and merges only when policy allows it.
+- `agent-autonomy-drive --run-deploy --task-id <id>` runs optional
+  Deploy/Monitor stages. Production deploys require either
+  `deploy.productionPolicy: "auto"` or `--approval-granted`.
+
 The bundled edit hook does not execute package scripts unless
 `AGENTS_HOOK_RUN_TYPECHECK=1` is set for that repository.
 
@@ -45,3 +57,22 @@ Default safety gates:
 - Stop on repeated failures, tool authentication failures, network failures, or
   canary failures.
 - Never commit secrets or per-machine state.
+
+Review commands must emit structured JSON:
+
+```json
+{
+  "expectedReviewers": ["diff-review", "ai-review"],
+  "reviews": [
+    {
+      "reviewer": "diff-review",
+      "status": "pass",
+      "findings": [],
+      "summary": "Reviewed changed files."
+    }
+  ]
+}
+```
+
+Deploy commands are no-shell argv arrays. The driver expands
+`{taskId}`, `{environment}`, `{stage}`, and `{healthCheckUrl}` placeholders.

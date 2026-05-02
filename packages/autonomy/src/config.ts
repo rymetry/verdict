@@ -72,8 +72,25 @@ export function mergeConfig(base: AutonomyConfig, override: Partial<AutonomyConf
     taskSources: mergeTaskSources(base.taskSources, override.taskSources),
     executors: mergeExecutors(base.executors, override.executors),
     reviewers: mergeReviewers(base.reviewers, override.reviewers),
-    deploy: override.deploy === undefined ? base.deploy : { ...base.deploy, ...override.deploy },
+    deploy: mergeDeploy(base.deploy, override.deploy),
     safety: { ...base.safety, ...override.safety }
+  };
+}
+
+function mergeDeploy(
+  base: AutonomyConfig["deploy"],
+  override: AutonomyConfig["deploy"]
+): AutonomyConfig["deploy"] {
+  if (override === undefined) {
+    return base;
+  }
+  return {
+    ...base,
+    ...override,
+    canary: {
+      ...base?.canary,
+      ...override?.canary
+    }
   };
 }
 

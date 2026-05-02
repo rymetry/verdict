@@ -1,4 +1,5 @@
 export * from "./config.js";
+export * from "./deploy.js";
 export * from "./driver.js";
 export * from "./executor.js";
 export * from "./failures.js";

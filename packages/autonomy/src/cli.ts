@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "./config.js";
+import { runDeployMonitor } from "./deploy.js";
 import { drive } from "./driver.js";
 import { publishCurrentBranch } from "./githubPublish.js";
 import { shipPullRequest, SpawnCommandRunner } from "./githubShip.js";
@@ -22,8 +23,12 @@ export function runCli(args: string[], environment: CliEnvironment): number {
     const projectRoot = readPathArg(args, "--cwd", environment.initCwd ?? environment.cwd, environment);
     const runner = new SpawnCommandRunner(projectRoot);
     const publishCurrent = args.includes("--publish-current");
+    const runDeploy = args.includes("--run-deploy");
     const shipPr = readNumberArg(args, "--ship-pr");
     const reviewPr = readNumberArg(args, "--run-review");
+    if (runDeploy && (publishCurrent || shipPr !== undefined || reviewPr !== undefined)) {
+      throw new Error("--run-deploy cannot be combined with publish, review, or ship commands.");
+    }
     if (reviewPr !== undefined && shipPr !== undefined && reviewPr !== shipPr) {
       throw new Error("--run-review and --ship-pr must reference the same PR.");
     }
@@ -54,6 +59,13 @@ export function runCli(args: string[], environment: CliEnvironment): number {
         })
       : reviewPr && !shipPr
         ? reviewResult
+        : runDeploy
+          ? runDeployMonitor({
+              projectRoot,
+              taskId: readOptionalArg(args, "--task-id"),
+              approvalGranted: args.includes("--approval-granted"),
+              runner
+            })
         : shipPr
           ? shipPullRequest({
               projectRoot,

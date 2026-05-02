@@ -1,0 +1,164 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runDeployMonitor } from "../src/deploy.js";
+import type { CommandResult, CommandRunner, CommandRunOptions } from "../src/githubShip.js";
+
+let workdir: string;
+
+beforeEach(() => {
+  workdir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "agent-autonomy-deploy-")));
+  fs.mkdirSync(path.join(workdir, ".agents"), { recursive: true });
+});
+
+afterEach(() => {
+  fs.rmSync(workdir, { recursive: true, force: true });
+});
+
+describe("runDeployMonitor", () => {
+  it("skips deploy and canary when deploy config is absent", () => {
+    writeConfig({});
+
+    const result = runDeployMonitor({ projectRoot: workdir, runner: new FakeRunner([]) });
+
+    expect(result.deploy.status).toBe("skipped");
+    expect(result.canary.status).toBe("skipped");
+    expect(result.summary).toBe("Deploy/Monitor skipped because no deploy config is present.");
+  });
+
+  it("blocks production deploy without explicit auto policy or approval", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "production",
+        customCommand: ["deploy", "{environment}"]
+      }
+    });
+
+    const result = runDeployMonitor({ projectRoot: workdir, runner: new FakeRunner([]) });
+
+    expect(result.gate.allowed).toBe(false);
+    expect(result.deploy.status).toBe("blocked");
+    expect(result.summary).toContain("production deploy requires approval");
+    expect(readTimeline()).toContain('"status":"pending"');
+  });
+
+  it("runs deploy command and canary health check after approval", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "production",
+        productionPolicy: "approval",
+        customCommand: ["deploy", "--env", "{environment}", "--task", "{taskId}"],
+        healthCheckUrl: "https://example.test/health",
+        canary: {
+          enabled: true,
+          healthCheckUrl: "https://example.test/canary"
+        }
+      }
+    });
+    const runner = new FakeRunner([
+      { exitCode: 0, stdout: "deployed\n", stderr: "" },
+      { exitCode: 0, stdout: "ok\n", stderr: "" },
+      { exitCode: 0, stdout: "canary ok\n", stderr: "" }
+    ]);
+
+    const result = runDeployMonitor({
+      projectRoot: workdir,
+      taskId: "ROADMAP-1",
+      approvalGranted: true,
+      runner
+    });
+
+    expect(runner.calls).toEqual([
+      { command: "deploy", args: ["--env", "production", "--task", "ROADMAP-1"], options: { timeoutMs: undefined } },
+      { command: "curl", args: ["-fsS", "https://example.test/health"], options: { timeoutMs: undefined } },
+      { command: "curl", args: ["-fsS", "https://example.test/canary"], options: { timeoutMs: undefined } }
+    ]);
+    expect(result.deploy.status).toBe("pass");
+    expect(result.canary.status).toBe("pass");
+    expect(result.summary).toBe("Deploy/Monitor completed for production.");
+    expect(readTimeline()).toContain('"stage":"canary"');
+    expect(readLearnings()).toContain("deploy-monitor-production");
+  });
+
+  it("records canary failures as escalated CANARY_FAILURE", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "staging",
+        customCommand: ["deploy"],
+        canary: {
+          enabled: true,
+          customCommand: ["canary", "{stage}"]
+        }
+      }
+    });
+    const runner = new FakeRunner([
+      { exitCode: 0, stdout: "deployed\n", stderr: "" },
+      { exitCode: 1, stdout: "", stderr: "canary failed\n" }
+    ]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.canary.status).toBe("fail");
+    expect(result.canary.failureClass).toBe("CANARY_FAILURE");
+    expect(readTimeline()).toContain('"failureClass":"CANARY_FAILURE"');
+    const progress = JSON.parse(
+      fs.readFileSync(path.join(workdir, ".agents", "state", "progress.json"), "utf8")
+    );
+    expect(progress.escalated[0]).toMatchObject({
+      id: "ROADMAP-1:deploy",
+      class: "CANARY_FAILURE"
+    });
+  });
+});
+
+function writeConfig(override: Record<string, unknown>): void {
+  fs.writeFileSync(
+    path.join(workdir, ".agents", "autonomy.config.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        adapters: {
+          taskSource: "markdown-roadmap",
+          executor: "codex",
+          verifier: "manual-verification",
+          reviewer: "codex-review",
+          publisher: "github-pr",
+          ...(override.deploy ? { deployProvider: "custom-command" } : {})
+        },
+        ...override
+      },
+      null,
+      2
+    )
+  );
+}
+
+function readTimeline(): string {
+  return fs.readFileSync(path.join(workdir, ".agents", "state", "timeline.jsonl"), "utf8");
+}
+
+function readLearnings(): string {
+  return fs.readFileSync(path.join(workdir, ".agents", "state", "learnings.jsonl"), "utf8");
+}
+
+class FakeRunner implements CommandRunner {
+  readonly calls: Array<{ command: string; args: readonly string[]; options?: CommandRunOptions }> = [];
+  private readonly results: CommandResult[];
+
+  constructor(results: CommandResult[]) {
+    this.results = [...results];
+  }
+
+  run(command: string, args: readonly string[], options?: CommandRunOptions): CommandResult {
+    this.calls.push({ command, args, options });
+    const result = this.results.shift();
+    if (!result) {
+      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    }
+    return result;
+  }
+}

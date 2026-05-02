@@ -72,10 +72,14 @@ export interface AutonomyConfig {
     provider?: "custom-command" | "vercel-compatible" | string;
     customCommand?: string[];
     healthCheckUrl?: string;
+    timeoutMs?: number;
     productionPolicy?: "approval" | "auto";
     canary?: {
       enabled?: boolean;
       checks?: string[];
+      customCommand?: string[];
+      healthCheckUrl?: string;
+      timeoutMs?: number;
     };
   };
   safety?: {
