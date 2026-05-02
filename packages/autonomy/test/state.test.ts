@@ -38,24 +38,24 @@ describe("progress state", () => {
     const now = new Date("2026-05-02T00:00:00.000Z");
     const first = seedCompletedTasks({
       projectRoot: workdir,
-      taskIds: ["T1500-1", "T1500-2", "T1500-1"],
+      taskIds: ["TASK-1", "TASK-2", "TASK-1"],
       now
     });
     const second = seedCompletedTasks({
       projectRoot: workdir,
-      taskIds: ["T1500-2", "T1500-8"],
+      taskIds: ["TASK-2", "TASK-3"],
       now
     });
 
     expect(first).toMatchObject({
-      added: ["T1500-1", "T1500-2"],
+      added: ["TASK-1", "TASK-2"],
       ignored: [],
-      completed: ["T1500-1", "T1500-2"]
+      completed: ["TASK-1", "TASK-2"]
     });
     expect(second).toMatchObject({
-      added: ["T1500-8"],
-      ignored: ["T1500-2"],
-      completed: ["T1500-1", "T1500-2", "T1500-8"]
+      added: ["TASK-3"],
+      ignored: ["TASK-2"],
+      completed: ["TASK-1", "TASK-2", "TASK-3"]
     });
     expect(fs.readFileSync(timelinePath(workdir), "utf8").trim().split("\n")).toHaveLength(2);
   });
@@ -74,7 +74,7 @@ describe("progress state", () => {
   it("refuses to seed an active task as completed", () => {
     const progress = createInitialProgress(new Date("2026-05-02T00:00:00.000Z"));
     progress.active = {
-      id: "T1500-1",
+      id: "TASK-1",
       pr_number: null,
       branch: null,
       stage: "build",
@@ -90,10 +90,10 @@ describe("progress state", () => {
     expect(() =>
       seedCompletedTasks({
         projectRoot: workdir,
-        taskIds: ["T1500-1"],
+        taskIds: ["TASK-1"],
         now: new Date("2026-05-02T00:00:00.000Z")
       })
-    ).toThrow(/Cannot mark active task T1500-1 as completed/);
+    ).toThrow(/Cannot mark active task TASK-1 as completed/);
   });
 
   it("refuses to seed a legacy tid active task as completed", () => {
@@ -101,16 +101,16 @@ describe("progress state", () => {
     fs.mkdirSync(path.join(workdir, ".agents/state"), { recursive: true });
     fs.writeFileSync(
       path.join(workdir, ".agents/state/progress.json"),
-      `${JSON.stringify({ ...progress, active: { tid: "T1500-1" } }, null, 2)}\n`
+      `${JSON.stringify({ ...progress, active: { tid: "TASK-1" } }, null, 2)}\n`
     );
 
     expect(() =>
       seedCompletedTasks({
         projectRoot: workdir,
-        taskIds: ["T1500-1"],
+        taskIds: ["TASK-1"],
         now: new Date("2026-05-02T00:00:00.000Z")
       })
-    ).toThrow(/Cannot mark active task T1500-1 as completed/);
+    ).toThrow(/Cannot mark active task TASK-1 as completed/);
   });
 
   it("does not seed while another autonomy operation holds the lock", () => {
@@ -119,7 +119,7 @@ describe("progress state", () => {
       expect(() =>
         seedCompletedTasks({
           projectRoot: workdir,
-          taskIds: ["T1500-1"],
+          taskIds: ["TASK-1"],
           now: new Date("2026-05-02T00:00:00.000Z")
         })
       ).toThrow(/already locked/);

@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.codex/hooks/pre-tool-use-policy.sh",
+            "command": "/usr/bin/env bash \"$CLAUDE_PROJECT_DIR/.codex/hooks/pre-tool-use-policy.sh\"",
             "timeout": 5
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.codex/hooks/post-tool-use-typecheck.sh",
+            "command": "/usr/bin/env bash \"$CLAUDE_PROJECT_DIR/.codex/hooks/post-tool-use-typecheck.sh\"",
             "timeout": 60
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.codex/hooks/stop-verify.sh",
+            "command": "/usr/bin/env bash \"$CLAUDE_PROJECT_DIR/.codex/hooks/stop-verify.sh\"",
             "timeout": 120
           }
         ]

@@ -2,7 +2,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parsePlanV3Rows, pickVerdictPlanV3Task } from "../src/taskSources.js";
+import {
+  knownTaskIds,
+  parseMarkdownRoadmap,
+  pickMarkdownRoadmapTask,
+  pickTask
+} from "../src/taskSources.js";
 import { createInitialProgress } from "../src/state.js";
 import type { AutonomyConfig, ProgressState } from "../src/types.js";
 
@@ -16,117 +21,227 @@ afterEach(() => {
   fs.rmSync(workdir, { recursive: true, force: true });
 });
 
-describe("parsePlanV3Rows", () => {
-  it("extracts task rows from the PLAN.v3 table", () => {
-    const rows = parsePlanV3Rows(
-      "| T1500-1 | `.workbench/` directory 仕様の確定 | `rfcs/0001-workbench-directory.md` |\n"
-    );
-
-    expect(rows.get("T1500-1")).toEqual({
-      id: "T1500-1",
-      title: ".workbench/ directory 仕様の確定",
-      location: "rfcs/0001-workbench-directory.md"
-    });
+describe("parseMarkdownRoadmap", () => {
+  it("extracts unchecked roadmap tasks with explicit or fallback ids", () => {
+    expect(
+      parseMarkdownRoadmap(
+        [
+          "- [ ] ROADMAP-1: Add lifecycle CLI",
+          "- [x] ROADMAP-2: Already done",
+          "- [ ] [ROADMAP-3] Add docs",
+          "- [ ] Untitled work item"
+        ].join("\n")
+      )
+    ).toMatchObject([
+      { id: "ROADMAP-1", title: "Add lifecycle CLI", line: 1 },
+      { id: "ROADMAP-3", title: "Add docs", line: 3 },
+      { id: "ROADMAP-4", title: "Untitled work item", line: 4 }
+    ]);
   });
 });
 
-describe("pickVerdictPlanV3Task", () => {
-  it("picks the lowest incomplete task in the active wave", () => {
-    writePlan();
+describe("pickMarkdownRoadmapTask", () => {
+  it("picks the first unchecked markdown task not in progress.completed", () => {
+    writeRoadmap();
 
-    expect(pickVerdictPlanV3Task(workdir, config(), progress())).toMatchObject({
+    expect(pickMarkdownRoadmapTask(workdir, markdownConfig(), progress(["ROADMAP-1"]))).toMatchObject({
       task: {
-        id: "T1500-1",
-        title: ".workbench/ directory 仕様の確定",
-        expectedScope: ["docs/product/rfcs"],
+        id: "ROADMAP-2",
+        title: "Add docs",
+        deliverable: "Add docs | ROADMAP.md:4",
+        expectedScope: ["docs/README.md"],
         highRisk: false
       },
       warnings: []
     });
   });
 
-  it("advances to the next wave only after the current wave is complete", () => {
-    writePlan();
+  it("blocks when a task is already active", () => {
+    writeRoadmap();
 
     expect(
-      pickVerdictPlanV3Task(workdir, config(), progress(["T1500-1", "T1500-2", "T1500-8"]))
-    ).toMatchObject({
-      task: {
-        id: "T1500-3",
-        expectedScope: ["apps/agent/src/exploration"]
-      }
-    });
-  });
-
-  it("blocks when progress already has an active task", () => {
-    writePlan();
-
-    expect(
-      pickVerdictPlanV3Task(
+      pickMarkdownRoadmapTask(
         workdir,
-        config(),
+        markdownConfig(),
         progress([], {
-          id: "T1500-8",
-          title: "Code Generation 強化",
-          pr_number: 96,
-          branch: "chore/autonomy-tasksource-dogfood",
-          stage: "review",
+          id: "ROADMAP-1",
+          pr_number: null,
+          branch: "chore/roadmap-1",
+          stage: "build",
           started_at: "2026-05-02T00:00:00.000Z",
           last_attempt_at: "2026-05-02T00:00:00.000Z"
         })
       )
     ).toMatchObject({
       task: null,
-      blockedReason: "active-task-in-progress",
-      warnings: ["Active task T1500-8 is already in progress."]
+      blockedReason: "active-task-in-progress"
     });
   });
 
-  it("marks tasks high-risk when configured patterns match the row", () => {
-    writePlan();
+  it("returns a blocked selection when no roadmap tasks exist", () => {
+    expect(pickTask(workdir, markdownConfig(), progress())).toMatchObject({
+      task: null,
+      blockedReason: "no-roadmap-tasks",
+      warnings: [expect.stringContaining("No markdown roadmap tasks found")]
+    });
+  });
 
+  it("rejects roadmap paths outside the project root", () => {
     expect(
-      pickVerdictPlanV3Task(
+      pickTask(
         workdir,
-        config({ highRiskPatterns: ["stagehand"] }),
-        progress(["T1500-1", "T1500-2", "T1500-8"])
+        {
+          ...markdownConfig(),
+          taskSources: { markdownRoadmap: { paths: ["../ROADMAP.md"] } }
+        },
+        progress()
       )
     ).toMatchObject({
+      task: null,
+      blockedReason: "roadmap-path-invalid"
+    });
+  });
+
+  it("rejects roadmap symlinks outside the project root", () => {
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "agent-autonomy-outside-")));
+    try {
+      fs.writeFileSync(path.join(outside, "ROADMAP.md"), "- [ ] ROADMAP-1: Outside\n");
+      fs.symlinkSync(path.join(outside, "ROADMAP.md"), path.join(workdir, "ROADMAP.md"));
+
+      expect(pickTask(workdir, markdownConfig(), progress())).toMatchObject({
+        task: null,
+        blockedReason: "roadmap-path-invalid"
+      });
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes known task ids for progress seeding validation", () => {
+    writeRoadmap();
+
+    expect(knownTaskIds(workdir, markdownConfig())).toEqual(["ROADMAP-1", "ROADMAP-2"]);
+  });
+
+  it("fails closed for seed validation when no markdown roadmap exists yet", () => {
+    expect(knownTaskIds(workdir, markdownConfig())).toEqual([]);
+  });
+});
+
+describe("pickCustomCommandTask", () => {
+  it("uses a command adapter to select a task", () => {
+    writeCustomTaskSource();
+
+    expect(pickTask(workdir, customCommandConfig(), progress(["CMD-1"]))).toMatchObject({
       task: {
-        id: "T1500-3",
-        highRisk: true
-      }
+        id: "CMD-2",
+        title: "Second command task",
+        deliverable: "Second command task | command",
+        expectedScope: ["docs/"]
+      },
+      evidence: ["custom-task-source.mjs"]
+    });
+  });
+
+  it("blocks when the command is not configured", () => {
+    expect(
+      pickTask(
+        workdir,
+        { ...customCommandConfig(), taskSources: { customCommand: { command: [] } } },
+        progress()
+      )
+    ).toMatchObject({
+      task: null,
+      blockedReason: "task-source-command-missing"
+    });
+  });
+
+  it("blocks when the command output is invalid", () => {
+    const script = path.join(workdir, "invalid-task-source.mjs");
+    fs.writeFileSync(script, "console.log('not json');\n");
+
+    expect(
+      pickTask(
+        workdir,
+        {
+          ...customCommandConfig(),
+          taskSources: { customCommand: { command: [process.execPath, script] } }
+        },
+        progress()
+      )
+    ).toMatchObject({
+      task: null,
+      blockedReason: "task-source-command-invalid"
     });
   });
 });
 
-function writePlan(): void {
-  fs.mkdirSync(path.join(workdir, "docs/product"), { recursive: true });
+function writeRoadmap(): void {
   fs.writeFileSync(
-    path.join(workdir, "docs/product/PLAN.v3.md"),
+    path.join(workdir, "ROADMAP.md"),
     [
-      "| # | 成果物 | 所在 |",
-      "|---|---|---|",
-      "| T1500-1 | `.workbench/` directory 仕様の確定 | `rfcs/0001-workbench-directory.md` |",
-      "| T1500-2 | AGENTS.md / skills/ / rules/ / hooks/ / intents/ / prompts/ の loader 実装 | `apps/agent/src/workbench/` (新規) |",
-      "| T1500-3 | Exploration Engine (Stagehand / Browser Use adapter) | `apps/agent/src/exploration/` (新規) |",
-      "| T1500-8 | Code Generation 強化 (rule/skill/hook context 注入) | 既存 `apps/agent/src/ai/cliAdapter.ts` の拡張 |"
+      "# Roadmap",
+      "",
+      "- [ ] ROADMAP-1: Add lifecycle CLI",
+      "- [ ] ROADMAP-2: Add docs `docs/README.md`"
     ].join("\n")
   );
 }
 
-function config(options: { highRiskPatterns?: string[] } = {}): AutonomyConfig {
+function markdownConfig(): AutonomyConfig {
   return {
     version: 1,
     adapters: {
-      taskSource: "verdict-plan-v3",
+      taskSource: "markdown-roadmap",
       executor: "codex",
-      verifier: "verdict-verify-completion",
+      verifier: "custom-command",
       reviewer: "codex-review",
       publisher: "github-pr"
     },
+    taskSources: {
+      markdownRoadmap: {
+        paths: ["ROADMAP.md"]
+      }
+    },
     safety: {
-      highRiskPatterns: options.highRiskPatterns ?? ["auth", "permission", "billing", "deploy"]
+      highRiskPatterns: ["auth", "permission", "billing", "deploy"]
+    }
+  };
+}
+
+function writeCustomTaskSource(): void {
+  fs.writeFileSync(
+    path.join(workdir, "custom-task-source.mjs"),
+    [
+      "const progress = JSON.parse(process.env.AGENT_AUTONOMY_PROGRESS ?? '{}');",
+      "const completed = new Set(progress.completed ?? []);",
+      "const tasks = [",
+      "  { id: 'CMD-1', title: 'First command task', deliverable: 'First command task | command', expectedScope: [] },",
+      "  { id: 'CMD-2', title: 'Second command task', deliverable: 'Second command task | command', expectedScope: ['docs/'] }",
+      "];",
+      "const task = tasks.find((candidate) => !completed.has(candidate.id)) ?? null;",
+      "console.log(JSON.stringify({ task, warnings: [], evidence: ['custom-task-source.mjs'] }));"
+    ].join("\n")
+  );
+}
+
+function customCommandConfig(): AutonomyConfig {
+  return {
+    version: 1,
+    adapters: {
+      taskSource: "custom-command",
+      executor: "codex",
+      verifier: "custom-command",
+      reviewer: "codex-review",
+      publisher: "github-pr"
+    },
+    taskSources: {
+      customCommand: {
+        command: [process.execPath, path.join(workdir, "custom-task-source.mjs")]
+      }
+    },
+    safety: {
+      highRiskPatterns: ["auth", "permission", "billing", "deploy"]
     }
   };
 }

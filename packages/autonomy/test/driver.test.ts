@@ -60,4 +60,14 @@ describe("drive", () => {
       class: "UNCLASSIFIED"
     });
   });
+
+  it("marks high-risk task selections as blocked", () => {
+    fs.writeFileSync(path.join(workdir, "ROADMAP.md"), "- [ ] ROADMAP-1: Update deploy flow\n");
+
+    const result = drive({ projectRoot: workdir, dryRun: true });
+
+    expect(result.task).toMatchObject({ id: "ROADMAP-1", highRisk: true });
+    expect(result.blockedReason).toBe("high-risk-task");
+    expect(result.warnings).toContain("Task ROADMAP-1 is high risk and requires approval.");
+  });
 });

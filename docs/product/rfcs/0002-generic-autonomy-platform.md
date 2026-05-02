@@ -31,7 +31,7 @@ Think -> Plan -> Build -> QA -> Review -> Ship -> optional Deploy/Monitor -> Lea
 - Codex と Claude Code の両方で同じ stage contract を扱う
 - PR 作成、自動 merge、任意 deploy / canary、学習記録まで v1 で扱う
 - Verdict 固有の T-task 処理を adapter に閉じ込める
-- 他 repo へ導入できる template と init command を提供する
+- 他 repo へ導入できる packageable engine、template、init command を提供する
 
 ### Non-goals
 
@@ -69,9 +69,19 @@ Think -> Plan -> Build -> QA -> Review -> Ship -> optional Deploy/Monitor -> Lea
 - `Publisher`: PR 作成、CI polling、merge を扱う
 - `DeployProvider`: deploy、health check、canary を扱う
 
-v1 の実装 adapter は `verdict-plan-v3`, `codex`, `claude`, `github-pr`,
-`custom-command`, `vercel-compatible` を対象にする。未実装 adapter は stage
+v1 の generic package built-in は `markdown-roadmap` と `custom-command` を対象にする。
+Verdict 固有の `verdict-plan-v3` 相当 picker は repository-local script として
+`custom-command` 経由で呼び出す。未実装 adapter は stage
 contract を壊さず `ESCALATED` として停止する。
+
+`markdown-roadmap` は generic default の `TaskSource` とする。unchecked Markdown task
+を `ROADMAP.md`, `docs/ROADMAP.md`, `docs/roadmap.md`, `TODO.md` から読み、以下のような
+id つき task を選択する。
+
+```markdown
+- [ ] ROADMAP-1: Add release checklist
+- [ ] [ROADMAP-2] Add smoke test
+```
 
 ### 3.3 State
 
@@ -110,12 +120,13 @@ v1 では `.agents/autonomy.config.json` の `version: 1` を唯一の設定 ver
 ### 5.1 Promotion path to `rymetry/repo-template`
 
 `repo-template` は新規 repository の初期状態を配る場所であり、実装本体を複製する場所ではない。
-したがって移植時は以下に分ける。
+実行本体は `@rymetry/agent-autonomy` の package / bin として供給し、template repository は
+それを呼び出す導線と安全契約を持つ。したがって移植時は以下に分ける。
 
 - `repo-template` に入れる: `.agents/`, `.codex/`, `.claude/`, autonomy config,
-  setup script integration, README の導線
+  setup script integration, package command の導線
 - `repo-template` に入れない: Verdict 固有 adapter、PLAN.v3 / T-task 前提、Allure / E2E
-  前提、`packages/autonomy` の実装本体
+  前提、`packages/autonomy` の source 実装本体
 
 移植前の昇格条件:
 
@@ -125,6 +136,7 @@ v1 では `.agents/autonomy.config.json` の `version: 1` を唯一の設定 ver
 4. `agents:init` が空 repo に rules / skills / hooks / config を展開できる。
 5. `agents:progress seed-completed` で既存 repo の完了済み baseline を明示できる。
 6. 既存 file を `--force` なしで上書きしない。
+7. package tarball に engine bin と templates が入り、空 repo へ展開できる。
 
 ### 5.2 Verdict optimization after template migration
 
@@ -160,14 +172,19 @@ Verdict の default config:
     "stages": ["think", "plan", "build", "qa-only", "review", "ship", "learn"]
   },
   "adapters": {
-    "taskSource": "verdict-plan-v3",
+    "taskSource": "custom-command",
     "executor": "codex",
     "verifier": "verdict-verify-completion",
     "reviewer": "codex-review",
     "publisher": "github-pr"
   },
+  "taskSources": {
+    "customCommand": {
+      "command": ["node", ".agents/scripts/pick-verdict-plan-v3.mjs"]
+    }
+  },
   "safety": {
-    "autoMerge": true,
+    "autoMerge": false,
     "maxFailuresPerTask": 3
   }
 }

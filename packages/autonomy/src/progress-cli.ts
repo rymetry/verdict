@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadConfig } from "./config.js";
 import { seedCompletedTasks } from "./state.js";
-import { parsePlanV3Rows } from "./taskSources.js";
+import { knownTaskIds } from "./taskSources.js";
 
 const args = process.argv.slice(2).filter((arg, index) => !(index === 0 && arg === "--"));
 const command = args[0];
@@ -18,7 +17,7 @@ try {
   const result = seedCompletedTasks({
     projectRoot,
     taskIds,
-    knownTaskIds: readKnownTaskIds(projectRoot),
+    knownTaskIds: knownTaskIds(projectRoot, loadConfig(projectRoot)),
     allowUnknown: args.includes("--allow-unknown")
   });
   console.log(JSON.stringify(result, null, 2));
@@ -55,17 +54,4 @@ function readTaskIds(args: string[]): string[] {
     }
   }
   return values;
-}
-
-function readKnownTaskIds(projectRoot: string): string[] | undefined {
-  const config = loadConfig(projectRoot);
-  if (config.adapters.taskSource !== "verdict-plan-v3") {
-    return undefined;
-  }
-
-  const planPath = path.join(projectRoot, "docs", "product", "PLAN.v3.md");
-  if (!fs.existsSync(planPath)) {
-    return undefined;
-  }
-  return [...parsePlanV3Rows(fs.readFileSync(planPath, "utf8")).keys()];
 }

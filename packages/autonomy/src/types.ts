@@ -38,6 +38,15 @@ export interface AutonomyConfig {
     publisher: string;
     deployProvider?: string;
   };
+  taskSources?: {
+    markdownRoadmap?: {
+      paths?: string[];
+    };
+    customCommand?: {
+      command?: string[];
+      timeoutMs?: number;
+    };
+  };
   deploy?: {
     enabled?: boolean;
     environment?: "preview" | "staging" | "production";

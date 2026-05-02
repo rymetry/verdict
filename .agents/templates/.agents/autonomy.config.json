@@ -7,9 +7,14 @@
   "adapters": {
     "taskSource": "markdown-roadmap",
     "executor": "codex",
-    "verifier": "custom-command",
+    "verifier": "manual-verification",
     "reviewer": "codex-review",
     "publisher": "github-pr"
+  },
+  "taskSources": {
+    "markdownRoadmap": {
+      "paths": ["ROADMAP.md", "docs/ROADMAP.md", "docs/roadmap.md", "TODO.md"]
+    }
   },
   "safety": {
     "autoMerge": false,

@@ -1,18 +1,15 @@
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { readActiveTaskId } from "./state.js";
 import type { AutonomyConfig, ProgressState, TaskBrief, TaskSelection } from "./types.js";
 
-const VERDICT_PHASE_15_WAVES = [
-  ["T1500-1", "T1500-2", "T1500-8"],
-  ["T1500-3", "T1500-4", "T1500-5", "T1500-6"],
-  ["T1500-7", "T1500-9"],
-  ["T1500-10"]
-];
-
-interface PlanTaskRow {
+interface MarkdownTaskRow {
   id: string;
   title: string;
-  location: string;
+  sourcePath: string;
+  line: number;
+  raw: string;
 }
 
 export function pickTask(
@@ -20,99 +17,221 @@ export function pickTask(
   config: AutonomyConfig,
   progress: ProgressState
 ): TaskSelection {
-  if (config.adapters.taskSource !== "verdict-plan-v3") {
-    return {
-      task: null,
-      warnings: [`Task source ${config.adapters.taskSource} is not implemented yet.`],
-      evidence: [".agents/autonomy.config.json"]
-    };
+  switch (config.adapters.taskSource) {
+    case "markdown-roadmap":
+      return pickMarkdownRoadmapTask(projectRoot, config, progress);
+    case "custom-command":
+      return pickCustomCommandTask(projectRoot, config, progress);
+    default:
+      return {
+        task: null,
+        warnings: [`Task source ${config.adapters.taskSource} is not implemented yet.`],
+        evidence: [".agents/autonomy.config.json"]
+      };
   }
-  return pickVerdictPlanV3Task(projectRoot, config, progress);
 }
 
-export function pickVerdictPlanV3Task(
+export function pickMarkdownRoadmapTask(
   projectRoot: string,
   config: AutonomyConfig,
   progress: ProgressState
 ): TaskSelection {
-  const planPath = path.join(projectRoot, "docs", "product", "PLAN.v3.md");
-  if (!fs.existsSync(planPath)) {
+  const activeTaskId = readActiveTaskId(progress);
+  const evidence = [".agents/state/progress.json"];
+  if (activeTaskId !== null) {
     return {
       task: null,
-      warnings: ["docs/product/PLAN.v3.md was not found."],
-      evidence: [".agents/state/progress.json"]
-    };
-  }
-
-  if (progress.active !== null) {
-    return {
-      task: null,
-      warnings: [`Active task ${progress.active.id} is already in progress.`],
-      evidence: [".agents/state/progress.json", "docs/product/PLAN.v3.md"],
+      warnings: [`Active task ${activeTaskId} is already in progress.`],
+      evidence,
       blockedReason: "active-task-in-progress"
     };
   }
 
-  const rows = parsePlanV3Rows(fs.readFileSync(planPath, "utf8"));
-  const completed = new Set(progress.completed);
-  for (const wave of VERDICT_PHASE_15_WAVES) {
-    const incomplete = wave.filter((id) => !completed.has(id));
-    if (incomplete.length === 0) {
-      continue;
-    }
-    const next = rows.get(incomplete[0]);
-    if (!next) {
-      return {
-        task: null,
-        warnings: [`Task ${incomplete[0]} is in the active wave but missing from PLAN.v3.`],
-        evidence: [".agents/state/progress.json", "docs/product/PLAN.v3.md"],
-        blockedReason: "task-missing-from-plan"
-      };
-    }
-    const task = {
-      id: next.id,
-      title: next.title,
-      deliverable: `${next.title} | ${next.location}`,
-      expectedScope: inferExpectedScope(next.location),
-      highRisk: isHighRisk(next, config)
-    };
+  let sources: MarkdownTaskRow[];
+  try {
+    sources = readMarkdownRoadmapTasks(projectRoot, config);
+  } catch (error) {
     return {
-      task,
-      warnings: [],
-      evidence: [".agents/state/progress.json", "docs/product/PLAN.v3.md"]
+      task: null,
+      warnings: [
+        `Invalid markdown roadmap configuration: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      ],
+      evidence: [".agents/autonomy.config.json"],
+      blockedReason: "roadmap-path-invalid"
     };
   }
+  if (sources.length === 0) {
+    return {
+      task: null,
+      warnings: [
+        "No markdown roadmap tasks found. Add unchecked tasks like '- [ ] ROADMAP-1: Describe the work'."
+      ],
+      evidence: [".agents/autonomy.config.json"],
+      blockedReason: "no-roadmap-tasks"
+    };
+  }
+
+  const completed = new Set(progress.completed);
+  const next = sources.find((task) => !completed.has(task.id));
+  if (!next) {
+    return {
+      task: null,
+      warnings: [],
+      evidence: [...evidence, ...unique(sources.map((task) => task.sourcePath))]
+    };
+  }
+
+  const task: TaskBrief = {
+    id: next.id,
+    title: next.title,
+    deliverable: `${next.title} | ${next.sourcePath}:${next.line}`,
+    expectedScope: inferExpectedScope(next.raw),
+    highRisk: isTextHighRisk(`${next.id} ${next.title} ${next.raw}`, config)
+  };
   return {
-    task: null,
+    task,
     warnings: [],
-    evidence: [".agents/state/progress.json", "docs/product/PLAN.v3.md"]
+    evidence: [...evidence, next.sourcePath]
   };
 }
 
-export function parsePlanV3Rows(markdown: string): Map<string, PlanTaskRow> {
-  const rows = new Map<string, PlanTaskRow>();
-  for (const line of markdown.split("\n")) {
-    const match = line.match(/^\|\s*(T\d{4}-\d+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|/);
+export function pickCustomCommandTask(
+  projectRoot: string,
+  config: AutonomyConfig,
+  progress: ProgressState
+): TaskSelection {
+  const command = config.taskSources?.customCommand?.command;
+  if (!command?.length) {
+    return {
+      task: null,
+      warnings: ["Task source custom-command requires taskSources.customCommand.command."],
+      evidence: [".agents/autonomy.config.json"],
+      blockedReason: "task-source-command-missing"
+    };
+  }
+
+  const result = spawnSync(command[0], command.slice(1), {
+    cwd: projectRoot,
+    encoding: "utf8",
+    env: taskSourceCommandEnv(progress),
+    shell: false,
+    timeout: config.taskSources?.customCommand?.timeoutMs ?? 30_000
+  });
+
+  if (result.error) {
+    return {
+      task: null,
+      warnings: [`Task source command failed: ${result.error.message}`],
+      evidence: [".agents/autonomy.config.json"],
+      blockedReason: "task-source-command-failed"
+    };
+  }
+  if (result.status !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim() || `exit status ${result.status}`;
+    return {
+      task: null,
+      warnings: [`Task source command failed: ${detail}`],
+      evidence: [".agents/autonomy.config.json"],
+      blockedReason: "task-source-command-failed"
+    };
+  }
+
+  try {
+    return parseCustomCommandSelection(result.stdout);
+  } catch (error) {
+    return {
+      task: null,
+      warnings: [
+        `Task source command returned invalid JSON: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      ],
+      evidence: [".agents/autonomy.config.json"],
+      blockedReason: "task-source-command-invalid"
+    };
+  }
+}
+
+export function readMarkdownRoadmapTasks(
+  projectRoot: string,
+  config: AutonomyConfig
+): MarkdownTaskRow[] {
+  const rows: MarkdownTaskRow[] = [];
+  for (const relativePath of markdownRoadmapPaths(config)) {
+    const roadmapPath = resolveRoadmapPath(projectRoot, relativePath);
+    if (!fs.existsSync(roadmapPath.absolute)) {
+      continue;
+    }
+    const realPath = fs.realpathSync(roadmapPath.absolute);
+    ensureContainedPath(fs.realpathSync(projectRoot), realPath, relativePath);
+    rows.push(
+      ...parseMarkdownRoadmap(fs.readFileSync(realPath, "utf8"), roadmapPath.relative)
+    );
+  }
+  return rows;
+}
+
+export function parseMarkdownRoadmap(markdown: string, sourcePath = "ROADMAP.md"): MarkdownTaskRow[] {
+  const rows: MarkdownTaskRow[] = [];
+  const lines = markdown.split("\n");
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^\s*[-*]\s+\[\s\]\s+(.+?)\s*$/);
     if (!match) {
       continue;
     }
-    rows.set(match[1], {
-      id: match[1],
-      title: stripMarkdown(match[2].trim()),
-      location: stripMarkdown(match[3].trim())
-    });
+    const parsed = parseMarkdownTaskText(match[1], sourcePath, index + 1);
+    rows.push({ ...parsed, raw: line.trim() });
   }
   return rows;
+}
+
+function parseMarkdownTaskText(
+  text: string,
+  sourcePath: string,
+  line: number
+): Omit<MarkdownTaskRow, "raw"> {
+  const bracketed = text.match(/^\[([A-Za-z0-9][A-Za-z0-9_.:-]*)\]\s+(.+)$/);
+  if (bracketed) {
+    return {
+      id: bracketed[1],
+      title: cleanMarkdownTaskTitle(bracketed[2].trim()),
+      sourcePath,
+      line
+    };
+  }
+
+  const prefixed = text.match(/^([A-Za-z0-9][A-Za-z0-9_.:-]*)\s*[:\-]\s+(.+)$/);
+  if (prefixed) {
+    return {
+      id: prefixed[1],
+      title: cleanMarkdownTaskTitle(prefixed[2].trim()),
+      sourcePath,
+      line
+    };
+  }
+
+  const fallbackId = `${path.basename(sourcePath, path.extname(sourcePath)).toUpperCase()}-${line}`;
+  return {
+    id: fallbackId,
+    title: cleanMarkdownTaskTitle(text.trim()),
+    sourcePath,
+    line
+  };
 }
 
 function stripMarkdown(value: string): string {
   return value.replace(/`([^`]+)`/g, "$1");
 }
 
+function cleanMarkdownTaskTitle(value: string): string {
+  return stripMarkdown(value.replace(/`[^`]*\/[^`]*`/g, "").replace(/\((scope|paths?):[^)]*\)/gi, ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function inferExpectedScope(location: string): string[] {
-  if (location.includes("rfcs/")) {
-    return ["docs/product/rfcs"];
-  }
   const paths = [...location.matchAll(/([A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+)/g)].map((match) =>
     match[1].replace(/\/$/, "")
   );
@@ -122,12 +241,110 @@ function inferExpectedScope(location: string): string[] {
   return [];
 }
 
-function isHighRisk(row: PlanTaskRow, config: AutonomyConfig): boolean {
-  const haystack = `${row.id} ${row.title} ${row.location}`.toLowerCase();
+export function knownTaskIds(projectRoot: string, config: AutonomyConfig): string[] | undefined {
+  if (config.adapters.taskSource === "markdown-roadmap") {
+    const tasks = readMarkdownRoadmapTasks(projectRoot, config);
+    return tasks.map((task) => task.id);
+  }
+  return undefined;
+}
+
+function taskSourceCommandEnv(progress: ProgressState): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH ?? "",
+    HOME: process.env.HOME ?? "",
+    TMPDIR: process.env.TMPDIR ?? "",
+    AGENT_AUTONOMY_PROGRESS: JSON.stringify(progress)
+  };
+}
+
+function parseCustomCommandSelection(stdout: string): TaskSelection {
+  const parsed = JSON.parse(stdout) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error("expected an object");
+  }
+  return {
+    task: parseCustomCommandTask(parsed.task),
+    warnings: readStringArray(parsed.warnings, "warnings"),
+    evidence: readStringArray(parsed.evidence, "evidence"),
+    blockedReason: typeof parsed.blockedReason === "string" ? parsed.blockedReason : undefined
+  };
+}
+
+function parseCustomCommandTask(value: unknown): TaskBrief | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    throw new Error("task must be an object or null");
+  }
+  const expectedScope = readStringArray(value.expectedScope, "task.expectedScope");
+  if (
+    typeof value.id !== "string" ||
+    typeof value.title !== "string" ||
+    typeof value.deliverable !== "string"
+  ) {
+    throw new Error("task requires id, title, and deliverable strings");
+  }
+  return {
+    id: value.id,
+    title: value.title,
+    deliverable: value.deliverable,
+    expectedScope,
+    highRisk: typeof value.highRisk === "boolean" ? value.highRisk : undefined
+  };
+}
+
+function readStringArray(value: unknown, field: string): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error(`${field} must be a string array`);
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isTextHighRisk(text: string, config: AutonomyConfig): boolean {
+  const haystack = text.toLowerCase();
   for (const pattern of config.safety?.highRiskPatterns ?? []) {
     if (pattern.trim() && haystack.includes(pattern.toLowerCase())) {
       return true;
     }
   }
   return false;
+}
+
+function markdownRoadmapPaths(config: AutonomyConfig): string[] {
+  return config.taskSources?.markdownRoadmap?.paths?.length
+    ? config.taskSources.markdownRoadmap.paths
+    : ["ROADMAP.md", "docs/ROADMAP.md", "docs/roadmap.md", "TODO.md"];
+}
+
+function resolveRoadmapPath(projectRoot: string, configuredPath: string): { absolute: string; relative: string } {
+  if (path.isAbsolute(configuredPath)) {
+    throw new Error(`roadmap path must be relative: ${configuredPath}`);
+  }
+  const root = path.resolve(projectRoot);
+  const absolute = path.resolve(root, configuredPath);
+  const relative = path.relative(root, absolute);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`roadmap path escapes project root: ${configuredPath}`);
+  }
+  return { absolute, relative };
+}
+
+function ensureContainedPath(root: string, target: string, configuredPath: string): void {
+  const relative = path.relative(root, target);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`roadmap path escapes project root: ${configuredPath}`);
+  }
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }

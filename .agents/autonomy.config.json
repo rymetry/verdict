@@ -6,11 +6,16 @@
     "includeDesignReview": false
   },
   "adapters": {
-    "taskSource": "verdict-plan-v3",
+    "taskSource": "custom-command",
     "executor": "codex",
     "verifier": "verdict-verify-completion",
     "reviewer": "codex-review",
     "publisher": "github-pr"
+  },
+  "taskSources": {
+    "customCommand": {
+      "command": ["node", ".agents/scripts/pick-verdict-plan-v3.mjs"]
+    }
   },
   "safety": {
     "autoMerge": false,

@@ -17,6 +17,7 @@ beforeEach(() => {
     recursive: true
   });
   fs.writeFileSync(path.join(sourceRoot, ".agents/templates/AGENTS.md"), "# Agent\n");
+  fs.writeFileSync(path.join(sourceRoot, ".agents/templates/.gitignore"), ".agents/state/\n");
   fs.writeFileSync(path.join(sourceRoot, ".agents/templates/.agents/autonomy.config.json"), "{}\n");
   fs.writeFileSync(path.join(sourceRoot, ".agents/templates/.codex/config.toml"), "\n");
   fs.writeFileSync(
@@ -60,11 +61,13 @@ describe("initProject", () => {
     try {
       fs.mkdirSync(path.join(packageRoot, "templates/.agents/rules"), { recursive: true });
       fs.writeFileSync(path.join(packageRoot, "templates/.agents/rules/safety.md"), "# Safety\n");
+      fs.writeFileSync(path.join(packageRoot, "templates/gitignore"), "node_modules/\n");
 
       const result = initProject({ sourceRoot: packageRoot, targetRoot });
 
-      expect(result.written).toEqual([".agents/rules/safety.md"]);
+      expect(result.written).toEqual([".agents/rules/safety.md", ".gitignore"]);
       expect(fs.existsSync(path.join(targetRoot, ".agents/rules/safety.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(targetRoot, ".gitignore"), "utf8")).toBe("node_modules/\n");
     } finally {
       fs.rmSync(packageRoot, { recursive: true, force: true });
     }
@@ -77,5 +80,17 @@ describe("initProject", () => {
 
     expect(result.skipped).toContain("AGENTS.md");
     expect(fs.readFileSync(path.join(targetRoot, "AGENTS.md"), "utf8")).toBe("existing\n");
+  });
+
+  it("appends the state ignore rule to an existing gitignore", () => {
+    fs.writeFileSync(path.join(targetRoot, ".gitignore"), "dist/\n");
+
+    const result = initProject({ sourceRoot, targetRoot });
+
+    expect(result.written).toContain(".gitignore");
+    expect(result.skipped).not.toContain(".gitignore");
+    expect(fs.readFileSync(path.join(targetRoot, ".gitignore"), "utf8")).toContain(
+      ".agents/state/"
+    );
   });
 });
