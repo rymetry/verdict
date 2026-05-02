@@ -49,7 +49,7 @@ These are off the candidate list.
 
 ```bash
 gh pr list --base main --state open --json number,title \
-  --jq '.[] | select(.title | test("T[0-9]{4}-[0-9]+")) | {number, tid: (.title | capture("T(?<n>[0-9]{4}-[0-9]+)").n)}'
+  --jq '.[] | select(.title | test("T[0-9]{4}-[0-9]+")) | {number, tid: (.title | capture("(?<tid>T[0-9]{4}-[0-9]+)").tid)}'
 ```
 
 These count as "in-flight". A T-task with an open PR is not eligible to be picked again.

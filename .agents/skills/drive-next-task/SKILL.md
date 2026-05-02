@@ -34,7 +34,7 @@ RESUME=$(jq -r '
 ```
 
 - `BLOCKED_ESCALATED` → exit. Surface "loop is paused, see escape dump".
-- `RESUME_ACTIVE` → go to Step 4 (verify the existing PR; do not pick a new task).
+- `RESUME_ACTIVE` → check whether the active PR has already been merged via `gh pr view <pr_number> --json state --jq .state`. If `MERGED`, call `checkpoint-progress complete_task` and treat this iteration as `READY_FOR_NEXT` (continue to Step 2 to pick the next T-task). Otherwise go to Step 4 (re-verify the existing PR; do not pick a new task).
 - `READY_FOR_NEXT` → continue to Step 2.
 
 ### Step 2 — pick the task

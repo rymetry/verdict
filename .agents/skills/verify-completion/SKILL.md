@@ -29,10 +29,13 @@ EXPECTED_SCOPE: <comma-separated path prefixes, optional>
 
 ```bash
 gh pr view <PR_NUMBER> --json statusCheckRollup \
-  --jq '.statusCheckRollup[] | select(.status == "COMPLETED") | {name, conclusion}'
+  --jq '.statusCheckRollup[] | {name, status, conclusion}'
 ```
 
-Pass: every required check `conclusion == "SUCCESS"` or `"SKIPPED"`. Fail: any `FAILURE`, `CANCELLED`, `TIMED_OUT`. In-progress: report `WAITING` and exit (do not call this PR done yet).
+The query intentionally returns ALL checks (not just completed) so the rollup decision can see pending work:
+- **WAITING** if any check has `status != "COMPLETED"` (e.g., `IN_PROGRESS`, `QUEUED`, `PENDING`, `WAITING`). Re-run later; do not advance.
+- **FAIL** if any check has `conclusion` in `{FAILURE, CANCELLED, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE}`.
+- **PASS** only when every check has `status == "COMPLETED"` AND `conclusion` in `{SUCCESS, SKIPPED, NEUTRAL}`.
 
 ### CHECK_TID_IN_TITLE — PR title contains T-id
 
@@ -75,10 +78,10 @@ Pass: shared changes present. Fail with diagnostic: "boundary code touched witho
 ### CHECK_NO_SHELL — no `child_process` calls
 
 ```bash
-gh pr diff <PR_NUMBER> | grep -E '\+.*child_process|exec\(.*\)|spawn\(.*\)|execSync|spawnSync' || true
+gh pr diff <PR_NUMBER> | grep -E '^\+.*\b(child_process|execSync|spawnSync|exec|spawn)[ \t]*[(]' || true
 ```
 
-Pass: no matches in added lines (lines starting with `+`). Fail: report each line. (CommandRunner usage is fine; it never appears as a literal child_process import in the consumer.)
+Pass: no matches. Fail: report each matching line. The `^\+` anchor ensures the entire alternation only fires on added lines (not context or removed lines), and `\b` word boundaries plus `[ \t]*[(]` (character class instead of a literal paren) prevent false positives like `runtimeExec(` while still catching `child_process` imports and direct call sites. CommandRunner usage is fine; it never appears as a literal `child_process` import in the consumer.
 
 ### CHECK_PATH_SAFETY — emit relative paths
 
