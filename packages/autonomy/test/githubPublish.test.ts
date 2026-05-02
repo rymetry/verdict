@@ -67,6 +67,7 @@ describe("publishCurrentBranch", () => {
     const runner = new FakeRunner([
       command({ stdout: "codex/publish-autobody\n" }),
       command({ stdout: "fix: improve publisher defaults\n" }),
+      command({ stdout: "origin-main-oid\n" }),
       command({ stdout: "abc123 fix: improve publisher defaults\n" }),
       command({ stdout: " packages/autonomy/src/githubPublish.ts | 42 ++++++++++++++++++++++\n 1 file changed, 42 insertions(+)\n" }),
       command({ stdout: "https://github.com/rymetry/verdict/pull/111\n" })
@@ -83,9 +84,10 @@ describe("publishCurrentBranch", () => {
       base: "main"
     });
     expect(runner.calls[1]).toEqual(["git", "log", "-1", "--pretty=%s"]);
-    expect(runner.calls[2]).toEqual(["git", "log", "--oneline", "--no-decorate", "main...codex/publish-autobody"]);
-    expect(runner.calls[3]).toEqual(["git", "diff", "--stat", "main...codex/publish-autobody"]);
-    expect(runner.calls[4]).toEqual([
+    expect(runner.calls[2]).toEqual(["git", "rev-parse", "--verify", "origin/main"]);
+    expect(runner.calls[3]).toEqual(["git", "log", "--oneline", "--no-decorate", "origin/main...codex/publish-autobody"]);
+    expect(runner.calls[4]).toEqual(["git", "diff", "--stat", "origin/main...codex/publish-autobody"]);
+    expect(runner.calls[5]).toEqual([
       "gh",
       "pr",
       "create",
@@ -115,6 +117,25 @@ describe("publishCurrentBranch", () => {
       "--head",
       "codex/publish-autobody"
     ]);
+  });
+
+  it("falls back to the local base branch when the remote base ref is unavailable", () => {
+    const runner = new FakeRunner([
+      command({ stdout: "codex/local-base\n" }),
+      command({ stdout: "fix: local base fallback\n" }),
+      command({ exitCode: 1, stderr: "unknown revision\n" }),
+      command({ stdout: "def456 fix: local base fallback\n" }),
+      command({ stdout: " packages/autonomy/src/githubPublish.ts | 12 ++++++\n" }),
+      command({ stdout: "https://github.com/rymetry/verdict/pull/112\n" })
+    ]);
+
+    publishCurrentBranch({
+      projectRoot: workdir,
+      runner
+    });
+
+    expect(runner.calls[3]).toEqual(["git", "log", "--oneline", "--no-decorate", "main...codex/local-base"]);
+    expect(runner.calls[4]).toEqual(["git", "diff", "--stat", "main...codex/local-base"]);
   });
 });
 

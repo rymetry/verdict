@@ -103,8 +103,9 @@ function generatePullRequestBody(
   runner: CommandRunner,
   input: { base: string; head: string; title: string }
 ): string {
-  const commits = readGitOutput(runner, ["log", "--oneline", "--no-decorate", `${input.base}...${input.head}`]);
-  const diffStat = readGitOutput(runner, ["diff", "--stat", `${input.base}...${input.head}`]);
+  const diffBase = resolveDiffBase(runner, input.base);
+  const commits = readGitOutput(runner, ["log", "--oneline", "--no-decorate", `${diffBase}...${input.head}`]);
+  const diffStat = readGitOutput(runner, ["diff", "--stat", `${diffBase}...${input.head}`]);
   const summary = commits.length > 0
     ? commits.split("\n").filter(Boolean).map((line) => `- ${line}`).join("\n")
     : `- ${input.title}`;
@@ -136,6 +137,15 @@ function readGitOutput(runner: CommandRunner, args: readonly string[]): string {
     return "";
   }
   return result.stdout.trim();
+}
+
+function resolveDiffBase(runner: CommandRunner, base: string): string {
+  const remoteBase = `origin/${base}`;
+  const result = runner.run("git", ["rev-parse", "--verify", remoteBase]);
+  if (result.exitCode === 0) {
+    return remoteBase;
+  }
+  return base;
 }
 
 function parsePullRequestUrl(stdout: string): string {
