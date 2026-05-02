@@ -29,6 +29,7 @@ export interface ShipPullRequestOptions {
   autoMerge?: boolean;
   qa?: "pass" | "fail" | "skipped";
   review?: "pass" | "fail" | "pending";
+  reviews?: readonly SubagentReview[];
   scope?: "pass" | "fail";
   expectedReviewers?: string[];
   now?: Date;
@@ -74,12 +75,13 @@ export function shipPullRequest(options: ShipPullRequestOptions): ShipPullReques
   };
   writeProgress(options.projectRoot, nextProgress);
 
-  const reviews = buildReviews(options.review ?? "pending", options.expectedReviewers ?? ["operator-review"]);
+  const expectedReviewers = options.expectedReviewers ?? ["operator-review"];
+  const reviews = options.reviews ?? buildReviews(options.review ?? "pending", expectedReviewers);
   const gate = evaluateShipGate({
     ci,
     qa: options.qa ?? "skipped",
     reviews,
-    expectedReviewers: options.expectedReviewers ?? ["operator-review"],
+    expectedReviewers,
     scope: options.scope ?? "pass",
     workingTree: isWorkingTreeClean(runner) ? "clean" : "dirty"
   });
@@ -286,7 +288,7 @@ function markTaskCompleted(projectRoot: string, taskId: string | undefined): voi
   writeProgress(projectRoot, progress);
 }
 
-class SpawnCommandRunner implements CommandRunner {
+export class SpawnCommandRunner implements CommandRunner {
   constructor(private readonly cwd: string) {}
 
   run(command: string, args: readonly string[]): CommandResult {

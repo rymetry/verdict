@@ -1,25 +1,44 @@
 #!/usr/bin/env node
 import * as path from "node:path";
 import { drive } from "./driver.js";
-import { shipPullRequest } from "./githubShip.js";
+import { publishCurrentBranch } from "./githubPublish.js";
+import { shipPullRequest, SpawnCommandRunner } from "./githubShip.js";
+import { loadReviewInput } from "./reviewInput.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 
 try {
   const projectRoot = readPathArg(args, "--cwd", process.env.INIT_CWD ?? process.cwd());
+  const runner = new SpawnCommandRunner(projectRoot);
+  const publishCurrent = args.includes("--publish-current");
   const shipPr = readNumberArg(args, "--ship-pr");
-  const result = shipPr
-    ? shipPullRequest({
+  const reviewFile = readOptionalArg(args, "--review-file");
+  const reviewInput = reviewFile ? loadReviewInput(projectRoot, reviewFile) : undefined;
+  const result = publishCurrent
+    ? publishCurrentBranch({
         projectRoot,
-        prNumber: shipPr,
+        title: readRequiredArg(args, "--title"),
+        bodyFile: readRequiredArg(args, "--body-file"),
+        base: readOptionalArg(args, "--base"),
+        head: readOptionalArg(args, "--head"),
         taskId: readOptionalArg(args, "--task-id"),
-        autoMerge: args.includes("--auto-merge"),
-        qa: args.includes("--qa-pass") ? "pass" : "skipped",
-        review: args.includes("--review-pass") ? "pass" : "pending",
-        scope: args.includes("--scope-fail") ? "fail" : "pass"
+        draft: args.includes("--draft"),
+        runner
       })
-    : drive({ projectRoot, dryRun });
+    : shipPr
+      ? shipPullRequest({
+          projectRoot,
+          prNumber: shipPr,
+          taskId: readOptionalArg(args, "--task-id"),
+          autoMerge: args.includes("--auto-merge"),
+          qa: args.includes("--qa-pass") ? "pass" : "skipped",
+          review: args.includes("--review-pass") ? "pass" : "pending",
+          reviews: reviewInput?.reviews,
+          expectedReviewers: reviewInput?.expectedReviewers,
+          scope: args.includes("--scope-fail") ? "fail" : "pass"
+        })
+      : drive({ projectRoot, dryRun });
   console.log(JSON.stringify(result, null, 2));
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -48,6 +67,14 @@ function readOptionalArg(args: string[], flag: string): string | undefined {
   const value = args[index + 1];
   if (!value || value.startsWith("--")) {
     throw new Error(`${flag} requires a value`);
+  }
+  return value;
+}
+
+function readRequiredArg(args: string[], flag: string): string {
+  const value = readOptionalArg(args, flag);
+  if (value === undefined) {
+    throw new Error(`${flag} is required`);
   }
   return value;
 }
