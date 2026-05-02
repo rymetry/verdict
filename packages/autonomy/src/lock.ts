@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { stateDir } from "./state.js";
 
 export interface LockHandle {
   path: string;
@@ -9,11 +8,11 @@ export interface LockHandle {
 }
 
 export function lockPath(projectRoot: string): string {
-  return path.join(stateDir(projectRoot), "lock");
+  return path.join(projectRoot, ".agents", "state", "lock");
 }
 
 export function acquireLock(projectRoot: string, staleMs = 30 * 60 * 1000): LockHandle {
-  fs.mkdirSync(stateDir(projectRoot), { recursive: true });
+  fs.mkdirSync(path.join(projectRoot, ".agents", "state"), { recursive: true });
   const target = lockPath(projectRoot);
   clearStaleLock(target, staleMs);
   const token = `${process.pid}:${Date.now()}`;

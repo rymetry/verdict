@@ -82,6 +82,18 @@ contract を壊さず `ESCALATED` として停止する。
 - `learnings.jsonl`: 再利用価値のある知見
 - `lock`: 二重起動防止
 
+既存 repository へ導入する場合、driver は git log や branch history から完了済み task
+を推測しない。初回実行前に operator が受け入れ済み baseline を明示する。
+
+```bash
+agent-autonomy-progress seed-completed --ids ROADMAP-1,ROADMAP-2
+```
+
+この操作は `.agents/state/progress.json` の `completed` を重複なく更新し、
+`.agents/state/timeline.jsonl` に evidence を残す。active task と同じ id を
+completed に seed することは拒否する。task source が既知 task id を列挙できる場合は
+seed id を検証し、不明な id は明示的な `--allow-unknown` なしでは受け付けない。
+
 ## 4. Integration with existing architecture
 
 既存の `pick-next-task`, `execute-t-task`, `verify-completion`, `escape-loop`,
@@ -111,7 +123,8 @@ v1 では `.agents/autonomy.config.json` の `version: 1` を唯一の設定 ver
 2. 実 PR 1 本を Ship まで通し、timeline / learnings が診断に使える。
 3. generic core と template に Verdict 固有語彙が残っていない。
 4. `agents:init` が空 repo に rules / skills / hooks / config を展開できる。
-5. 既存 file を `--force` なしで上書きしない。
+5. `agents:progress seed-completed` で既存 repo の完了済み baseline を明示できる。
+6. 既存 file を `--force` なしで上書きしない。
 
 ### 5.2 Verdict optimization after template migration
 
