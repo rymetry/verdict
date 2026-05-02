@@ -30,14 +30,26 @@ EXPECTED_SCOPE: <comma 区切りのパス prefix、省略可>
 ### CHECK_CI — CI が green
 
 ```bash
-gh pr view <PR_NUMBER> --json statusCheckRollup \
-  --jq '.statusCheckRollup[] | {name, status, conclusion}'
+gh pr view <PR_NUMBER> --json statusCheckRollup --jq '
+  .statusCheckRollup[] |
+  if .__typename == "StatusContext" then
+    {
+      name: .context,
+      status: (if .state == "PENDING" or .state == "EXPECTED" then "IN_PROGRESS" else "COMPLETED" end),
+      conclusion: (if .state == "SUCCESS" then "SUCCESS"
+                   elif .state == "FAILURE" or .state == "ERROR" then "FAILURE"
+                   else null end)
+    }
+  else
+    {name: .name, status: .status, conclusion: .conclusion}
+  end'
 ```
 
-このクエリは意図的にすべてのチェックを返す (completed のみではない) — rollup 判定が pending を見えるようにするため:
-- **WAITING**: `status != "COMPLETED"` (例: `IN_PROGRESS`, `QUEUED`, `PENDING`, `WAITING`) のチェックが 1 つでもあれば。後で再走、進めない
-- **FAIL**: `conclusion` が `{FAILURE, CANCELLED, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE}` のいずれかのチェックが 1 つでもあれば
-- **PASS**: 全チェックが `status == "COMPLETED"` かつ `conclusion` が `{SUCCESS, SKIPPED, NEUTRAL}` のいずれかであるとき
+jq は `CheckRun` (GitHub Actions) と `StatusContext` (legacy commit status) の両方の形状を正規化してから rule を適用する — rollup は両方を混ぜて返すため。CheckRun は `status` / `conclusion`、StatusContext は `state` (`SUCCESS` / `FAILURE` / `ERROR` / `PENDING` / `EXPECTED`) のみ。正規化後:
+
+- **WAITING**: `status != "COMPLETED"` (例: `IN_PROGRESS`, `QUEUED`, `PENDING`, `WAITING`) のエントリが 1 つでもあれば。後で再走、進めない
+- **FAIL**: `conclusion` が `{FAILURE, CANCELLED, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE}` のいずれかのエントリが 1 つでもあれば
+- **PASS**: 全エントリが `status == "COMPLETED"` かつ `conclusion` が `{SUCCESS, SKIPPED, NEUTRAL}` のいずれかであるとき
 
 ### CHECK_TID_IN_TITLE — PR title に T-id 含む
 
@@ -80,10 +92,10 @@ Pass: shared 変更あり。Fail: 「boundary code touched without packages/shar
 ### CHECK_NO_SHELL — `child_process` 呼び出しなし
 
 ```bash
-gh pr diff <PR_NUMBER> | grep -E '^\+.*\b(child_process|execSync|spawnSync|exec|spawn)[ \t]*[(]' || true
+gh pr diff <PR_NUMBER> | grep -E '^\+.*(\bchild_process\b|\b(execSync|spawnSync|exec|spawn)[ \t]*[(])' || true
 ```
 
-Pass: マッチなし。Fail: 各マッチ行を report。`^\+` で alternation 全体を追加行 (context や削除行ではない) に固定し、`\b` 単語境界 + `[ \t]*[(]` (literal paren ではなく文字クラス) で `runtimeExec(` などの誤マッチを排除しつつ `child_process` import や直接の呼び出し箇所をキャッチ。CommandRunner 経由なら literal な `child_process` import は出ない。
+Pass: マッチなし。Fail: 各マッチ行を report。`^\+` で alternation 全体を追加行 (context や削除行ではない) に固定。第 1 の内側分岐 `\bchild_process\b` は `import { spawn as rawSpawn } from "node:child_process"` や `require("node:child_process")` のような module 参照を — エイリアス import であっても — キャッチ。第 2 の内側分岐 `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` は直接の呼び出し箇所を捕捉、`\b` 単語境界 + `[ \t]*[(]` (literal paren ではなく文字クラス) で `runtimeExec(` などの誤マッチを排除。CommandRunner 経由なら literal な `child_process` import は出ない。
 
 ### CHECK_PATH_SAFETY — 相対パスで emit
 

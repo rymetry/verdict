@@ -28,14 +28,26 @@ EXPECTED_SCOPE: <comma-separated path prefixes, optional>
 ### CHECK_CI — CI is green
 
 ```bash
-gh pr view <PR_NUMBER> --json statusCheckRollup \
-  --jq '.statusCheckRollup[] | {name, status, conclusion}'
+gh pr view <PR_NUMBER> --json statusCheckRollup --jq '
+  .statusCheckRollup[] |
+  if .__typename == "StatusContext" then
+    {
+      name: .context,
+      status: (if .state == "PENDING" or .state == "EXPECTED" then "IN_PROGRESS" else "COMPLETED" end),
+      conclusion: (if .state == "SUCCESS" then "SUCCESS"
+                   elif .state == "FAILURE" or .state == "ERROR" then "FAILURE"
+                   else null end)
+    }
+  else
+    {name: .name, status: .status, conclusion: .conclusion}
+  end'
 ```
 
-The query intentionally returns ALL checks (not just completed) so the rollup decision can see pending work:
-- **WAITING** if any check has `status != "COMPLETED"` (e.g., `IN_PROGRESS`, `QUEUED`, `PENDING`, `WAITING`). Re-run later; do not advance.
-- **FAIL** if any check has `conclusion` in `{FAILURE, CANCELLED, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE}`.
-- **PASS** only when every check has `status == "COMPLETED"` AND `conclusion` in `{SUCCESS, SKIPPED, NEUTRAL}`.
+The jq normalizes both `CheckRun` (GitHub Actions) and `StatusContext` (legacy commit-status) shapes before applying the rule, since the rollup mixes both. CheckRun exposes `status` / `conclusion`; StatusContext only exposes `state` (`SUCCESS` / `FAILURE` / `ERROR` / `PENDING` / `EXPECTED`). After normalization:
+
+- **WAITING** if any normalized entry has `status != "COMPLETED"` (e.g., `IN_PROGRESS`, `QUEUED`, `PENDING`, `WAITING`). Re-run later; do not advance.
+- **FAIL** if any entry has `conclusion` in `{FAILURE, CANCELLED, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE}`.
+- **PASS** only when every entry has `status == "COMPLETED"` AND `conclusion` in `{SUCCESS, SKIPPED, NEUTRAL}`.
 
 ### CHECK_TID_IN_TITLE — PR title contains T-id
 
@@ -78,10 +90,10 @@ Pass: shared changes present. Fail with diagnostic: "boundary code touched witho
 ### CHECK_NO_SHELL — no `child_process` calls
 
 ```bash
-gh pr diff <PR_NUMBER> | grep -E '^\+.*\b(child_process|execSync|spawnSync|exec|spawn)[ \t]*[(]' || true
+gh pr diff <PR_NUMBER> | grep -E '^\+.*(\bchild_process\b|\b(execSync|spawnSync|exec|spawn)[ \t]*[(])' || true
 ```
 
-Pass: no matches. Fail: report each matching line. The `^\+` anchor ensures the entire alternation only fires on added lines (not context or removed lines), and `\b` word boundaries plus `[ \t]*[(]` (character class instead of a literal paren) prevent false positives like `runtimeExec(` while still catching `child_process` imports and direct call sites. CommandRunner usage is fine; it never appears as a literal `child_process` import in the consumer.
+Pass: no matches. Fail: report each matching line. The `^\+` anchor ensures the entire alternation only fires on added lines (not context or removed lines). The first inner alternative `\bchild_process\b` catches `import { spawn as rawSpawn } from "node:child_process"` and `require("node:child_process")` — i.e., any reference to the module by name, even when functions are imported under aliases. The second alternative `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` catches direct call sites; `\b` word boundaries plus `[ \t]*[(]` (character class instead of a literal paren) prevent false positives like `runtimeExec(`. CommandRunner usage is fine; it never appears as a literal `child_process` import in the consumer.
 
 ### CHECK_PATH_SAFETY — emit relative paths
 
