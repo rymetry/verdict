@@ -8,13 +8,15 @@
     "dev": "pnpm --filter '@pwqa/*' --parallel dev",
     "dev:agent": "pnpm --filter @pwqa/agent dev",
     "dev:web": "pnpm --filter @pwqa/web dev",
-    "build": "pnpm --filter '@pwqa/*' build",
-    "typecheck": "pnpm --filter @pwqa/shared build && pnpm --filter '@pwqa/*' typecheck && pnpm --filter @pwqa/agent typecheck:test",
-    "test": "pnpm --filter '@pwqa/*' test",
+    "build": "pnpm --filter '@pwqa/*' --filter @rymetry/agent-autonomy build",
+    "typecheck": "pnpm --filter @pwqa/shared build && pnpm --filter '@pwqa/*' --filter @rymetry/agent-autonomy typecheck && pnpm --filter @pwqa/agent typecheck:test",
+    "test": "pnpm --filter '@pwqa/*' --filter @rymetry/agent-autonomy test",
     "e2e": "pnpm --filter @pwqa-e2e/workbench-gui e2e",
     "e2e:allure": "pnpm --filter @pwqa-e2e/workbench-gui e2e:allure",
     "smoke:gui": "pnpm --filter @pwqa-e2e/workbench-gui smoke",
-    "smoke:gui:allure": "pnpm --filter @pwqa-e2e/workbench-gui smoke:allure"
+    "smoke:gui:allure": "pnpm --filter @pwqa-e2e/workbench-gui smoke:allure",
+    "agents:drive": "pnpm --filter @rymetry/agent-autonomy run drive --",
+    "agents:init": "pnpm --filter @rymetry/agent-autonomy run init --"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

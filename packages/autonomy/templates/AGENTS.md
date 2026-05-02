@@ -1,0 +1,19 @@
+# Agent Autonomy Context
+
+This repository uses the generic autonomy lifecycle:
+
+```text
+Think -> Plan -> Build -> QA -> Review -> Ship -> optional Deploy/Monitor -> Learn
+```
+
+Read `.agents/autonomy.config.json` first. Project-specific rules live under
+`.agents/rules/`, reusable workflows live under `.agents/skills/`, and runtime
+state lives under `.agents/state/` and must not be committed.
+
+Default safety gates:
+
+- Do not merge unless CI, QA, scope, and AI review gates pass.
+- Stop before high-risk changes unless the repo config explicitly allows them.
+- Stop on repeated failures, tool authentication failures, network failures, or
+  canary failures.
+- Never commit secrets or per-machine state.
