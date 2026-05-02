@@ -1,7 +1,8 @@
 import { loadConfig, resolveWorkflow } from "./config.js";
 import { acquireLock } from "./lock.js";
 import { appendLearning, appendTimeline, ensureProgress, writeProgress } from "./state.js";
-import type { StageName } from "./types.js";
+import { pickTask } from "./taskSources.js";
+import type { StageName, TaskBrief } from "./types.js";
 
 export interface DriveOptions {
   projectRoot: string;
@@ -11,6 +12,9 @@ export interface DriveOptions {
 export interface DriveResult {
   dryRun: boolean;
   stages: StageName[];
+  task: TaskBrief | null;
+  warnings: string[];
+  blockedReason?: string;
   progressPath: string;
   summary: string;
 }
@@ -24,6 +28,7 @@ export function drive(options: DriveOptions): DriveResult {
     progress.last_iter_at = new Date().toISOString();
     progress.stats.iterations += 1;
     writeProgress(options.projectRoot, progress);
+    const selection = pickTask(options.projectRoot, config, progress);
 
     if (!options.dryRun) {
       const failure = appendTimeline(options.projectRoot, {
@@ -52,9 +57,12 @@ export function drive(options: DriveOptions): DriveResult {
         status: "dry-run",
         input: { adapters: config.adapters },
         output: {
-          message: `Resolved ${stage} stage without executing side effects.`
+          message: `Resolved ${stage} stage without executing side effects.`,
+          task: selection.task,
+          taskWarnings: selection.warnings,
+          blockedReason: selection.blockedReason
         },
-        evidence: [".agents/autonomy.config.json"]
+        evidence: [".agents/autonomy.config.json", ...selection.evidence]
       });
     }
 
@@ -69,8 +77,14 @@ export function drive(options: DriveOptions): DriveResult {
     return {
       dryRun: Boolean(options.dryRun),
       stages,
+      task: selection.task,
+      warnings: selection.warnings,
+      blockedReason: selection.blockedReason,
       progressPath: ".agents/state/progress.json",
-      summary: `Resolved ${stages.length} autonomy stages.`
+      summary:
+        selection.task === null
+          ? `Resolved ${stages.length} autonomy stages.`
+          : `Resolved ${stages.length} autonomy stages for ${selection.task.id}.`
     };
   } finally {
     lock.release();

@@ -40,6 +40,7 @@ describe("drive", () => {
     const result = drive({ projectRoot: workdir, dryRun: true });
 
     expect(result.stages).toEqual(["think", "plan", "build", "qa-only", "review", "ship", "learn"]);
+    expect(result.task).toBeNull();
     const stateDir = path.join(workdir, ".agents", "state");
     expect(fs.existsSync(path.join(stateDir, "progress.json"))).toBe(true);
     expect(fs.readFileSync(path.join(stateDir, "timeline.jsonl"), "utf8").trim().split("\n")).toHaveLength(7);
