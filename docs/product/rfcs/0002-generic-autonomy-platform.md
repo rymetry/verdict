@@ -54,7 +54,7 @@ Think -> Plan -> Build -> QA -> Review -> Ship -> optional Deploy/Monitor -> Lea
 | Build | Codex または Claude が repo の rules / skills / hooks を読んで実装する |
 | QA | 実ブラウザ検証または project-specific smoke を実行し、結果だけ保存する |
 | Review | CI では拾えない本番リスク、テスト不足、境界違反を AI review で検出する |
-| Ship | テスト、PR作成、CI polling、review gate、squash merge を行う |
+| Ship | テスト、PR作成、CI polling、review gate、repository policy に合う merge を行う |
 | Deploy/Monitor | deploy config がある場合のみ deploy、health check、canary を行う |
 | Learn | 成功/失敗、review findings、環境トラブル、project 固有判断を保存する |
 
@@ -103,6 +103,23 @@ agent-autonomy-progress seed-completed --ids ROADMAP-1,ROADMAP-2
 `.agents/state/timeline.jsonl` に evidence を残す。active task と同じ id を
 completed に seed することは拒否する。task source が既知 task id を列挙できる場合は
 seed id を検証し、不明な id は明示的な `--allow-unknown` なしでは受け付けない。
+
+### 3.4 Ship state machine
+
+PR #99-#102 の dogfood で、Ship stage には以下の判断が必要だった。
+
+- CI polling は `queued` / `in_progress` / `completed` を区別し、red CI は停止する。
+  ただし non-required の skipped check は学習として記録しつつ、少なくとも 1 つの
+  non-skipped check が成功していれば CI pass と扱う。
+- AI review gate は subagent review の完了を待つ。P0/P1 は既存 merge policy の
+  `p0-p1` として扱い、P2 も auto-merge 前の blocker として `fail` にする。
+- merge method は `squash` を第一候補にし、repository が squash merge を禁止している場合は
+  `merge` に fallback する。
+- `gh pr merge` が local worktree の `main` 衝突で失敗しても、PR state が `MERGED` なら
+  Ship は成功扱いにし、環境 pitfall として Learn に保存する。
+
+この判断は package core の純粋な state machine として実装し、GitHub adapter は
+check run / review / merge 結果をこの state machine に渡すだけにする。
 
 ## 4. Integration with existing architecture
 
