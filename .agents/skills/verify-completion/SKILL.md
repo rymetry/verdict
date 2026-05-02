@@ -90,10 +90,18 @@ Pass: shared changes present. Fail with diagnostic: "boundary code touched witho
 ### CHECK_NO_SHELL — no `child_process` calls
 
 ```bash
-gh pr diff <PR_NUMBER> | grep -E '^\+.*(\bchild_process\b|\b(execSync|spawnSync|exec|spawn)[ \t]*[(])' || true
+gh pr diff <PR_NUMBER> | awk '
+  /^diff --git / { inTest = ($0 ~ /\/(apps\/agent\/test|apps\/web\/test)\//) }
+  !inTest
+' | grep -E '^\+.*(\bchild_process\b|\b(execSync|spawnSync|exec|spawn)[ \t]*[(])' || true
 ```
 
-Pass: no matches. Fail: report each matching line. The `^\+` anchor ensures the entire alternation only fires on added lines (not context or removed lines). The first inner alternative `\bchild_process\b` catches `import { spawn as rawSpawn } from "node:child_process"` and `require("node:child_process")` — i.e., any reference to the module by name, even when functions are imported under aliases. The second alternative `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` catches direct call sites; `\b` word boundaries plus `[ \t]*[(]` (character class instead of a literal paren) prevent false positives like `runtimeExec(`. CommandRunner usage is fine; it never appears as a literal `child_process` import in the consumer.
+Pass: no matches. Fail: report each matching line. The pipeline has two stages:
+
+1. **awk pre-filter** strips diff hunks for files under `apps/agent/test/**` or `apps/web/test/**`. `.agents/rules/no-shell.md` explicitly permits `child_process` in test harnesses (shim scripts, integration spawning), so flagging them would over-block valid PRs.
+2. **grep** anchors the alternation to added lines (`^\+`). The first inner alternative `\bchild_process\b` catches `import { spawn as rawSpawn } from "node:child_process"` and `require("node:child_process")` — any reference to the module by name, even when functions are imported under aliases. The second alternative `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` catches direct call sites; `\b` word boundaries plus `[ \t]*[(]` (character class instead of a literal paren) prevent false positives like `runtimeExec(`.
+
+CommandRunner usage is fine; it never appears as a literal `child_process` import in the consumer.
 
 ### CHECK_PATH_SAFETY — emit relative paths
 
