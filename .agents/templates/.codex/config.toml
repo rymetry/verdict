@@ -1,0 +1,28 @@
+[features]
+codex_hooks = true
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = '/usr/bin/env bash "$(git rev-parse --show-toplevel)/.codex/hooks/pre-tool-use-policy.sh"'
+timeout = 5
+statusMessage = "Verifying command policy"
+
+[[hooks.PostToolUse]]
+matcher = "^(Edit|Write)$"
+
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = '/usr/bin/env bash "$(git rev-parse --show-toplevel)/.codex/hooks/post-tool-use-typecheck.sh"'
+timeout = 60
+statusMessage = "Targeted typecheck"
+
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = '/usr/bin/env bash "$(git rev-parse --show-toplevel)/.codex/hooks/stop-verify.sh"'
+timeout = 120
+statusMessage = "Final verification"

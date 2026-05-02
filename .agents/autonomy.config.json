@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "workflow": {
+    "preset": "default",
+    "stages": ["think", "plan", "build", "qa-only", "review", "ship", "learn"],
+    "includeDesignReview": false
+  },
+  "adapters": {
+    "taskSource": "verdict-plan-v3",
+    "executor": "codex",
+    "verifier": "verdict-verify-completion",
+    "reviewer": "codex-review",
+    "publisher": "github-pr"
+  },
+  "safety": {
+    "autoMerge": false,
+    "highRiskPatterns": [
+      "auth",
+      "permission",
+      "billing",
+      "payment",
+      "delete",
+      "external integration",
+      "deploy"
+    ],
+    "maxFailuresPerTask": 3
+  }
+}

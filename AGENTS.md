@@ -70,6 +70,10 @@ pnpm dev:web        # http://127.0.0.1:5173, proxies /api and /ws to agent
 pnpm smoke:gui              # GUI smoke against the dev servers
 pnpm smoke:gui:allure       # Full Allure pipeline E2E
 pnpm e2e                    # Full e2e (heavier)
+
+# Generic autonomy foundation
+pnpm agents:drive --dry-run # Resolve lifecycle, initialize state, write timeline/learnings
+pnpm agents:init --target <repo> # Install generic .agents/.codex/.claude templates into another repo
 ```
 
 ## 5. Critical conventions (DO NOT violate without explicit user approval)
@@ -104,6 +108,8 @@ Common multi-step tasks have a corresponding skill in `.agents/skills/`. Agents 
 - **Driving one iteration of the loop** — [`.agents/skills/drive-next-task/SKILL.md`](.agents/skills/drive-next-task/SKILL.md)
 
 The autonomy loop is opt-in. Default mode is semi-autonomous: the loop drives Codex hand-off and verification, then stops at "ready to merge" for human approval. Setting `AUTONOMY_AUTO_MERGE=true` lets the loop merge after CI + Codex review pass. State lives at `.agents/state/progress.json` (gitignored).
+
+The generic autonomy foundation is implemented in `packages/autonomy`. It lifts the Verdict T-task loop into the lifecycle `Think → Plan → Build → QA → Review → Ship → optional Deploy/Monitor → Learn`, while keeping the existing `.agents/skills/` and `.agents/rules/` as reusable implementation parts.
 
 Skills are project-scoped under `.agents/skills/` per the [Agent Skills open standard](https://agentskills.io). Codex discovers them automatically. Claude Code discovers them via `.claude/skills/` symlink (or, if symlinks are not honored, by reading them directly through the SKILL tool).
 
