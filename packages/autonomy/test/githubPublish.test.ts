@@ -1,0 +1,88 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { publishCurrentBranch } from "../src/githubPublish.js";
+import type { CommandResult, CommandRunner } from "../src/githubShip.js";
+
+let workdir: string;
+
+beforeEach(() => {
+  workdir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "agent-autonomy-publish-")));
+});
+
+afterEach(() => {
+  fs.rmSync(workdir, { recursive: true, force: true });
+});
+
+describe("publishCurrentBranch", () => {
+  it("creates a PR for the current branch and records active progress", () => {
+    fs.writeFileSync(path.join(workdir, "body.md"), "## Summary\n- test\n");
+    const runner = new FakeRunner([
+      command({ stdout: "codex/T1500-9-repair\n" }),
+      command({ stdout: "https://github.com/rymetry/verdict/pull/107\n" })
+    ]);
+
+    const result = publishCurrentBranch({
+      projectRoot: workdir,
+      title: "feat(T1500-9): repair review integration",
+      bodyFile: "body.md",
+      taskId: "T1500-9",
+      runner
+    });
+
+    expect(result).toEqual({
+      prNumber: 107,
+      url: "https://github.com/rymetry/verdict/pull/107",
+      head: "codex/T1500-9-repair",
+      base: "main",
+      summary: "Created PR #107: https://github.com/rymetry/verdict/pull/107"
+    });
+    expect(runner.calls[1]).toEqual([
+      "gh",
+      "pr",
+      "create",
+      "--title",
+      "feat(T1500-9): repair review integration",
+      "--body",
+      "## Summary\n- test\n",
+      "--base",
+      "main",
+      "--head",
+      "codex/T1500-9-repair"
+    ]);
+
+    const progress = JSON.parse(
+      fs.readFileSync(path.join(workdir, ".agents", "state", "progress.json"), "utf8")
+    );
+    expect(progress.active).toMatchObject({
+      id: "T1500-9",
+      pr_number: 107,
+      branch: "codex/T1500-9-repair",
+      stage: "ship"
+    });
+  });
+});
+
+function command(partial: Partial<CommandResult>): CommandResult {
+  return {
+    exitCode: partial.exitCode ?? 0,
+    stdout: partial.stdout ?? "",
+    stderr: partial.stderr ?? ""
+  };
+}
+
+class FakeRunner implements CommandRunner {
+  readonly calls: string[][] = [];
+
+  constructor(private readonly results: CommandResult[]) {}
+
+  run(commandName: string, args: readonly string[]): CommandResult {
+    this.calls.push([commandName, ...args]);
+    const result = this.results.shift();
+    if (!result) {
+      throw new Error(`Unexpected command: ${commandName} ${args.join(" ")}`);
+    }
+    return result;
+  }
+}

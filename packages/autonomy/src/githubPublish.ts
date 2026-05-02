@@ -1,0 +1,106 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { appendTimeline, ensureProgress, writeProgress } from "./state.js";
+import type { CommandRunner } from "./githubShip.js";
+
+export interface PublishCurrentBranchOptions {
+  projectRoot: string;
+  title: string;
+  bodyFile: string;
+  base?: string;
+  head?: string;
+  taskId?: string;
+  draft?: boolean;
+  runner: CommandRunner;
+}
+
+export interface PublishCurrentBranchResult {
+  prNumber: number;
+  url: string;
+  head: string;
+  base: string;
+  summary: string;
+}
+
+export function publishCurrentBranch(options: PublishCurrentBranchOptions): PublishCurrentBranchResult {
+  const base = options.base ?? "main";
+  const head = options.head ?? currentBranch(options.runner);
+  const bodyPath = path.resolve(options.projectRoot, options.bodyFile);
+  const body = fs.readFileSync(bodyPath, "utf8");
+  const args = [
+    "pr",
+    "create",
+    "--title",
+    options.title,
+    "--body",
+    body,
+    "--base",
+    base,
+    "--head",
+    head
+  ];
+  if (options.draft) {
+    args.push("--draft");
+  }
+  const result = options.runner.run("gh", args);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || "Failed to create pull request.");
+  }
+  const url = parsePullRequestUrl(result.stdout);
+  const prNumber = parsePullRequestNumber(url);
+  const progress = ensureProgress(options.projectRoot);
+  if (options.taskId) {
+    progress.active = {
+      id: options.taskId,
+      pr_number: prNumber,
+      branch: head,
+      stage: "ship",
+      started_at: progress.active?.id === options.taskId ? progress.active.started_at : new Date().toISOString(),
+      last_attempt_at: new Date().toISOString()
+    };
+  }
+  progress.last_iter_at = new Date().toISOString();
+  writeProgress(options.projectRoot, progress);
+  appendTimeline(options.projectRoot, {
+    stage: "ship",
+    status: "pending",
+    input: { taskId: options.taskId, base, head },
+    output: {
+      message: "Created pull request for current branch.",
+      prNumber,
+      url
+    },
+    evidence: [url]
+  });
+  return {
+    prNumber,
+    url,
+    head,
+    base,
+    summary: `Created PR #${prNumber}: ${url}`
+  };
+}
+
+function currentBranch(runner: CommandRunner): string {
+  const result = runner.run("git", ["branch", "--show-current"]);
+  if (result.exitCode !== 0 || result.stdout.trim().length === 0) {
+    throw new Error(result.stderr.trim() || "Could not determine current branch.");
+  }
+  return result.stdout.trim();
+}
+
+function parsePullRequestUrl(stdout: string): string {
+  const match = stdout.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+  if (!match) {
+    throw new Error("Could not parse pull request URL from gh output.");
+  }
+  return match[0];
+}
+
+function parsePullRequestNumber(url: string): number {
+  const match = url.match(/\/pull\/(\d+)$/);
+  if (!match) {
+    throw new Error(`Could not parse pull request number from ${url}.`);
+  }
+  return Number.parseInt(match[1], 10);
+}

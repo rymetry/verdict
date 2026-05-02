@@ -102,6 +102,40 @@ describe("shipPullRequest", () => {
     expect(timeline).toContain('"stage":"ship"');
     expect(timeline).toContain('"status":"pass"');
   });
+
+  it("blocks auto-merge when review file contains P1 findings", () => {
+    const runner = new FakeRunner([
+      ghView({
+        state: "OPEN",
+        checks: [{ name: "verify", workflowName: "CI", status: "COMPLETED", conclusion: "SUCCESS" }]
+      }),
+      command({ stdout: "" })
+    ]);
+
+    const result = shipPullRequest({
+      projectRoot: workdir,
+      prNumber: 104,
+      autoMerge: true,
+      qa: "pass",
+      scope: "pass",
+      expectedReviewers: ["security"],
+      reviews: [
+        {
+          reviewer: "security",
+          status: "pass",
+          findings: [{ priority: 1, title: "Auth bypass" }]
+        }
+      ],
+      runner
+    });
+
+    expect(result.merged).toBe(false);
+    expect(result.gate).toMatchObject({
+      allowed: false,
+      reasons: ["AI review found P0/P1 issues"]
+    });
+    expect(result.mergeAttempts).toEqual([]);
+  });
 });
 
 function ghView(input: {
