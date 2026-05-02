@@ -51,6 +51,23 @@ describe("loadWorkbench", () => {
     writeWorkbenchFile(projectRoot, "AGENTS.md", "# Project context\n");
     writeWorkbenchFile(
       projectRoot,
+      "workbench.json",
+      JSON.stringify({
+        version: "0.1",
+        exploration: {
+          defaultProvider: "stagehand",
+          fallbackProviders: ["browser-use"],
+          providers: [
+            {
+              name: "stagehand",
+              command: { executable: "node", args: ["scripts/explore.mjs"] }
+            }
+          ]
+        }
+      })
+    );
+    writeWorkbenchFile(
+      projectRoot,
       "skills/payment-flow/SKILL.md",
       "---\ntitle: Payment Flow\nrequiresAuth: true\n---\n# Payment Flow\n"
     );
@@ -71,6 +88,10 @@ describe("loadWorkbench", () => {
 
     const context = await loadWorkbench(projectRoot);
 
+    expect(context.config?.exploration.defaultProvider).toBe("stagehand");
+    expect(context.config?.exploration.providers[0]?.command?.args).toEqual([
+      "scripts/explore.mjs"
+    ]);
     expect(context.agents?.relativePath).toBe(".workbench/AGENTS.md");
     expect(context.agents?.content).toContain("Project context");
     expect(context.skills).toHaveLength(1);
@@ -145,6 +166,25 @@ describe("loadWorkbench", () => {
     await expect(loadWorkbench(projectRoot)).rejects.toThrow(
       "Invalid YAML in .workbench/intents/list.yaml: expected a YAML mapping object"
     );
+  });
+
+  it("rejects malformed workbench.json with a project-relative path", async () => {
+    const projectRoot = createProject();
+    writeWorkbenchFile(projectRoot, "workbench.json", "{\"version\":\"0.2\"}\n");
+
+    await expect(loadWorkbench(projectRoot)).rejects.toThrow(
+      /Failed to load \.workbench\/workbench\.json/
+    );
+
+    try {
+      await loadWorkbench(projectRoot);
+      throw new Error("Expected loadWorkbench to reject");
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain(".workbench/workbench.json");
+      expect(message).not.toContain(projectRoot);
+      expect(message).not.toMatch(/\/private\/|\/var\/|\/Users\//);
+    }
   });
 
   it("loads empty YAML mappings as empty metadata", async () => {

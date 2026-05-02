@@ -6,10 +6,12 @@ import {
   createAiCommandPolicy,
   createAllureCommandPolicy,
   createDefaultCommandPolicy,
+  createExplorationCommandPolicy,
   createGitPatchCommandPolicy,
   validateAiArgs,
   validateAllureArgs,
   validateAllureGenerateArgs,
+  validateExplorationAdapterArgs,
   validateGitPatchArgs,
   validatePhase1PlaywrightArgs,
   validatePlaywrightLaunchArgs
@@ -163,6 +165,110 @@ describe("AI CLI command policy (T500-2)", () => {
     const policy = createAiCommandPolicy(os.tmpdir());
     expect(policy.allowedExecutables).toEqual(["claude"]);
     expect(policy.cwdBoundary).toBe(fs.realpathSync(os.tmpdir()));
+  });
+});
+
+describe("Exploration adapter command policy (T1500-3)", () => {
+  it("accepts project-relative Node and Python adapter scripts", () => {
+    expect(
+      validateExplorationAdapterArgs({
+        executableName: "node",
+        args: ["scripts/explore-stagehand.mjs"]
+      }).ok
+    ).toBe(true);
+    expect(
+      validateExplorationAdapterArgs({
+        executableName: "python3",
+        args: ["scripts/explore_browser_use.py", "--profile", "local"]
+      }).ok
+    ).toBe(true);
+  });
+
+  it("rejects eval-style and absolute-path exploration commands", () => {
+    const evalResult = validateExplorationAdapterArgs({
+      executableName: "node",
+      args: ["-e", "console.log(1)"]
+    });
+    expect(evalResult.ok).toBe(false);
+    if (!evalResult.ok) {
+      expect(evalResult.code).toBe("flag-like-operand");
+    }
+
+    const absoluteResult = validateExplorationAdapterArgs({
+      executableName: "python",
+      args: ["/tmp/explore.py"]
+    });
+    expect(absoluteResult.ok).toBe(false);
+    if (!absoluteResult.ok) {
+      expect(absoluteResult.code).toBe("absolute-path");
+    }
+
+    const uncResult = validateExplorationAdapterArgs({
+      executableName: "node",
+      args: ["scripts/explore.mjs", "\\\\server\\share\\state.json"]
+    });
+    expect(uncResult.ok).toBe(false);
+    if (!uncResult.ok) {
+      expect(uncResult.code).toBe("absolute-path");
+    }
+
+    const laterAbsoluteResult = validateExplorationAdapterArgs({
+      executableName: "node",
+      args: ["scripts/explore.mjs", "/tmp/secret.json"]
+    });
+    expect(laterAbsoluteResult.ok).toBe(false);
+    if (!laterAbsoluteResult.ok) {
+      expect(laterAbsoluteResult.code).toBe("absolute-path");
+    }
+
+    const embeddedAbsoluteResult = validateExplorationAdapterArgs({
+      executableName: "node",
+      args: ["scripts/explore.mjs", "--state=/etc/passwd"]
+    });
+    expect(embeddedAbsoluteResult.ok).toBe(false);
+    if (!embeddedAbsoluteResult.ok) {
+      expect(embeddedAbsoluteResult.code).toBe("absolute-path");
+    }
+
+    const embeddedUncResult = validateExplorationAdapterArgs({
+      executableName: "node",
+      args: ["scripts/explore.mjs", "--state=\\\\server\\share\\state.json"]
+    });
+    expect(embeddedUncResult.ok).toBe(false);
+    if (!embeddedUncResult.ok) {
+      expect(embeddedUncResult.code).toBe("absolute-path");
+    }
+
+    const laterTraversalResult = validateExplorationAdapterArgs({
+      executableName: "node",
+      args: ["scripts/explore.mjs", "--state=../secret.json"]
+    });
+    expect(laterTraversalResult.ok).toBe(false);
+    if (!laterTraversalResult.ok) {
+      expect(laterTraversalResult.code).toBe("path-traversal");
+    }
+
+    const laterSecretResult = validateExplorationAdapterArgs({
+      executableName: "node",
+      args: ["scripts/explore.mjs", "--token", "sk-proj-abcdefghijklmnopqrstuvwxyz"]
+    });
+    expect(laterSecretResult.ok).toBe(false);
+    if (!laterSecretResult.ok) {
+      expect(laterSecretResult.code).toBe("disallowed-operand");
+    }
+  });
+
+  it("returns a policy scoped to exploration adapter executables", async () => {
+    const fs = await import("node:fs");
+    const policy = createExplorationCommandPolicy(os.tmpdir());
+    expect(policy.allowedExecutables).toEqual(["node", "python", "python3"]);
+    expect(policy.cwdBoundary).toBe(fs.realpathSync(os.tmpdir()));
+    expect(
+      policy.argValidator({
+        executableName: "node",
+        args: ["scripts/explore.mjs"]
+      }).ok
+    ).toBe(true);
   });
 });
 

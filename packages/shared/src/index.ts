@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+export * from "./exploration.js";
 export * from "./workbench.js";
 
 export const HealthResponseSchema = z.object({

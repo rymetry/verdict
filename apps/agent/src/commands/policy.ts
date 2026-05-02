@@ -800,6 +800,86 @@ export function createAiCommandPolicy(cwdBoundary: string): CommandPolicy {
 }
 
 /* ----------------------------------------------------------------- */
+/* T1500-3: Exploration adapter command policy                       */
+/* ----------------------------------------------------------------- */
+
+export function validateExplorationAdapterArgs({
+  executableName,
+  args
+}: {
+  executableName: string;
+  args: ReadonlyArray<string>;
+}): CommandArgsValidationResult {
+  if (!["node", "python", "python3"].includes(executableName)) {
+    return argsInvalid(
+      "unsupported-executable",
+      `Executable '${executableName}' is not supported by the exploration adapter policy.`
+    );
+  }
+  if (args.length === 0) {
+    return argsInvalid(
+      "missing-subcommand",
+      "Exploration adapter policy requires a project-relative script path."
+    );
+  }
+  for (const arg of args) {
+    const valueError = validateArgValue(arg);
+    if (!valueError.ok) return valueError;
+    const explorationArgError = validateExplorationArg(arg);
+    if (!explorationArgError.ok) return explorationArgError;
+  }
+  const scriptResult = validateProjectRelativeOperand(args[0] ?? "");
+  if (!scriptResult.ok) return scriptResult;
+
+  const extension = path.extname(args[0] ?? "").toLowerCase();
+  if (executableName === "node" && ![".js", ".cjs", ".mjs"].includes(extension)) {
+    return argsInvalid("disallowed-operand", "Node exploration adapters must be .js, .cjs, or .mjs files.");
+  }
+  if (["python", "python3"].includes(executableName) && extension !== ".py") {
+    return argsInvalid("disallowed-operand", "Python exploration adapters must be .py files.");
+  }
+  return argsValid;
+}
+
+const EXPLORATION_SECRET_ARG_PATTERN =
+  /(sk-(?:proj|svcacct)-[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{20,}|xox[bpoart]-[A-Za-z0-9-]{20,}|(?:api[_-]?key|token|password|secret|credential)\s*[=:])/i;
+
+function validateExplorationArg(arg: string): CommandArgsValidationResult {
+  const segments = explorationArgSegments(arg);
+  if (
+    segments.some(
+      (segment) => path.isAbsolute(segment) || segment.startsWith("\\") || /^[A-Za-z]:[\\/]/.test(segment)
+    )
+  ) {
+    return argsInvalid("absolute-path", "Exploration adapter args must not contain absolute paths.");
+  }
+  if (
+    segments.some(
+      (segment) => segment.split(/[\\/]/).includes("..") || /(^|[=,])\.\.([\\/]|$)/.test(segment)
+    )
+  ) {
+    return argsInvalid("path-traversal", "Exploration adapter args must not contain traversal segments.");
+  }
+  if (EXPLORATION_SECRET_ARG_PATTERN.test(arg)) {
+    return argsInvalid("disallowed-operand", "Exploration adapter args must not contain inline secrets.");
+  }
+  return argsValid;
+}
+
+function explorationArgSegments(arg: string): string[] {
+  return arg.split(/[=,:]/).filter((segment) => segment.length > 0);
+}
+
+export function createExplorationCommandPolicy(cwdBoundary: string): CommandPolicy {
+  return {
+    allowedExecutables: ["node", "python", "python3"],
+    argValidator: validateExplorationAdapterArgs,
+    cwdBoundary: fs.realpathSync(cwdBoundary),
+    envAllowlist: DEFAULT_ENV_ALLOWLIST
+  };
+}
+
+/* ----------------------------------------------------------------- */
 /* T600-1: Git patch API command policy                              */
 /* ----------------------------------------------------------------- */
 
