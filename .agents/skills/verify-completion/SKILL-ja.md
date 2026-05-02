@@ -92,16 +92,21 @@ Pass: shared 変更あり。Fail: 「boundary code touched without packages/shar
 ### CHECK_NO_SHELL — `child_process` 呼び出しなし
 
 ```bash
+# (a) production パスでの child_process / exec / spawn (test パスは exempt — no-shell.md 参照)
 gh pr diff <PR_NUMBER> | awk '
   /^diff --git / { inTest = ($0 ~ /\/(apps\/agent\/test|apps\/web\/test)\//) }
   !inTest
 ' | grep -E '^\+.*(\bchild_process\b|\b(execSync|spawnSync|exec|spawn)[ \t]*[(])' || true
+
+# (b) diff 全域での shell-mode 呼び出し (test パスでも禁止)
+gh pr diff <PR_NUMBER> | grep -E '^\+.*\bshell[ \t]*:[ \t]*true\b' || true
 ```
 
-Pass: マッチなし。Fail: 各マッチ行を report。パイプラインは 2 段階:
+Pass: 両 grep が出力なし。Fail: いずれかの grep が出力あり。各マッチ行を report。`.agents/rules/no-shell.md` の非対称な scope を反映した 2 段階構成:
 
-1. **awk 前処理** で `apps/agent/test/**` または `apps/web/test/**` 配下のファイルの diff hunk を削除する。`.agents/rules/no-shell.md` はテスト harness (shim script、integration spawning) での `child_process` 利用を明示的に許容しているので、ここを flag すると正当な PR を過剰にブロックしてしまう。
-2. **grep** が alternation を追加行 (`^\+`) に固定。第 1 の内側分岐 `\bchild_process\b` は `import { spawn as rawSpawn } from "node:child_process"` や `require("node:child_process")` のような module 参照を (エイリアス import でも) キャッチ。第 2 の内側分岐 `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` は直接の呼び出し箇所を捕捉、`\b` 単語境界 + `[ \t]*[(]` (literal paren ではなく文字クラス) で `runtimeExec(` などの誤マッチを排除。
+1. **(a) production パス チェック** — `.agents/rules/no-shell.md:50` は stub harness のため `apps/agent/test/` 配下での `child_process` import を許容する。awk 前処理で `apps/agent/test/**` と `apps/web/test/**` の diff hunk を grep 前に剥がす。grep は alternation を追加行 (`^\+`) に固定。第 1 の内側分岐 `\bchild_process\b` は `import { spawn as rawSpawn } from "node:child_process"` や `require("node:child_process")` のような module 参照を (エイリアス import でも) キャッチ。第 2 の内側分岐 `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` は直接の呼び出し箇所を捕捉、`\b` 単語境界 + `[ \t]*[(]` (literal paren ではなく文字クラス) で `runtimeExec(` などの誤マッチを排除。
+
+2. **(b) shell-mode チェック** — `shell: true` (空白許容) は test harness でも常に禁止。awk 前処理を経由せず diff 全体を走査する。
 
 CommandRunner 経由なら literal な `child_process` import は出ない。
 

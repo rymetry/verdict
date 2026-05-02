@@ -90,16 +90,21 @@ Pass: shared changes present. Fail with diagnostic: "boundary code touched witho
 ### CHECK_NO_SHELL — no `child_process` calls
 
 ```bash
+# (a) child_process / exec / spawn in production paths (test paths exempt — see no-shell.md)
 gh pr diff <PR_NUMBER> | awk '
   /^diff --git / { inTest = ($0 ~ /\/(apps\/agent\/test|apps\/web\/test)\//) }
   !inTest
 ' | grep -E '^\+.*(\bchild_process\b|\b(execSync|spawnSync|exec|spawn)[ \t]*[(])' || true
+
+# (b) shell-mode invocation anywhere in the diff (test paths NOT exempt — shell: true is always forbidden)
+gh pr diff <PR_NUMBER> | grep -E '^\+.*\bshell[ \t]*:[ \t]*true\b' || true
 ```
 
-Pass: no matches. Fail: report each matching line. The pipeline has two stages:
+Pass: both grep commands emit nothing. Fail: any output from either command, reported per matching line. The two-stage pipeline reflects the asymmetric scope of `.agents/rules/no-shell.md`:
 
-1. **awk pre-filter** strips diff hunks for files under `apps/agent/test/**` or `apps/web/test/**`. `.agents/rules/no-shell.md` explicitly permits `child_process` in test harnesses (shim scripts, integration spawning), so flagging them would over-block valid PRs.
-2. **grep** anchors the alternation to added lines (`^\+`). The first inner alternative `\bchild_process\b` catches `import { spawn as rawSpawn } from "node:child_process"` and `require("node:child_process")` — any reference to the module by name, even when functions are imported under aliases. The second alternative `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` catches direct call sites; `\b` word boundaries plus `[ \t]*[(]` (character class instead of a literal paren) prevent false positives like `runtimeExec(`.
+1. **(a) production-path check** — `.agents/rules/no-shell.md:50` permits `child_process` imports under `apps/agent/test/` for stub harnesses, so the awk pre-filter strips diff hunks for `apps/agent/test/**` and `apps/web/test/**` before grep. The grep then anchors the alternation to added lines (`^\+`). The first inner alternative `\bchild_process\b` catches `import { spawn as rawSpawn } from "node:child_process"` and `require("node:child_process")` — any reference to the module by name, even when functions are imported under aliases. The second alternative `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` catches direct call sites; `\b` word boundaries plus `[ \t]*[(]` (character class instead of a literal paren) prevent false positives like `runtimeExec(`.
+
+2. **(b) shell-mode check** — `shell: true` (with optional whitespace) is forbidden everywhere, including test harnesses; this grep skips the awk filter so test paths are still audited for shell-mode usage.
 
 CommandRunner usage is fine; it never appears as a literal `child_process` import in the consumer.
 
