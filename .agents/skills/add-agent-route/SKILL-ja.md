@@ -1,6 +1,6 @@
 ---
 name: add-agent-route
-description: `apps/agent` に新規 HTTP route または WebSocket event を追加するときに使う。Hono router 配線、schema validation、error マッピング、audit log、route に対する test をカバーする。
+description: `apps/agent` に新規のサーバーサイド HTTP route または WebSocket event を追加するときに使う (Hono)。新しい payload を伴う場合は `add-shared-schema` の後に実行すること。Router 配線、request/response validation、error マッピング、audit log、route に対する test をカバーする。ブラウザ側 route は対象外 — `apps/web` の routing は `add-web-feature` を参照。
 ---
 
 # Agent に HTTP / WebSocket route を追加する

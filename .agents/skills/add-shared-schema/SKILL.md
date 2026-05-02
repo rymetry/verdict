@@ -1,6 +1,6 @@
 ---
 name: add-shared-schema
-description: Use when adding or modifying any payload that crosses the agent/web boundary (HTTP, WebSocket, persisted run JSON). Defines the schema-first workflow that keeps `apps/agent` and `apps/web` in lockstep via `packages/shared`.
+description: Use when adding or modifying any payload that crosses the agent/web boundary (HTTP, WebSocket, persisted run JSON). Run BEFORE `add-agent-route` or `add-web-feature` whenever the route/feature introduces a new boundary type. Defines the schema-first workflow that keeps `apps/agent` and `apps/web` in lockstep via `packages/shared`.
 ---
 
 # Add or modify a shared schema

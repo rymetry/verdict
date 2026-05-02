@@ -1,6 +1,6 @@
 ---
 name: add-agent-route
-description: Use when adding a new HTTP route or WebSocket event in `apps/agent`. Covers Hono router wiring, schema validation, error mapping, audit log, and tests against the route.
+description: Use when adding a new server-side HTTP route or WebSocket event in `apps/agent` (Hono). Run AFTER `add-shared-schema` if the route introduces a new payload. Covers router wiring, request/response validation, error mapping, audit log, and route tests. Not for browser routes — see `add-web-feature` for `apps/web` routing.
 ---
 
 # Add an HTTP / WebSocket route in the Agent

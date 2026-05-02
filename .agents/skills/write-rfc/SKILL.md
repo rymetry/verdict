@@ -1,6 +1,6 @@
 ---
 name: write-rfc
-description: Use when proposing a non-trivial design change that spans multiple components or modules in Verdict. Defines the standard RFC template, status lifecycle, and review process.
+description: Use when proposing a design change that spans 2+ components, introduces a new external integration (GitHub App, vendor SDK), defines a new on-disk format or CLI flag, or affects security/privacy. For single-package refactors or local fixes, skip the RFC and use a tight commit message instead. Defines the RFC template, status lifecycle (Draft/Accepted/Implemented), and review process.
 ---
 
 # Write or revise an RFC

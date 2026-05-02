@@ -1,6 +1,6 @@
 ---
 name: add-web-feature
-description: `apps/web` に新規 feature / panel / route を追加するときに使う。TanStack Router/Query 配線、shadcn/ui 利用、schema-driven なデータ取得、role-aware UI パターンをカバーする。
+description: `apps/web` に新規 feature / panel / ブラウザ route を追加するときに使う (Vite + React + TanStack Router)。新しい境界 payload を消費する場合は `add-shared-schema` の後に実行すること。Router/Query 配線、shadcn/ui 利用、schema-driven なデータ取得、role-aware UI パターンをカバーする。サーバーサイド HTTP route は対象外 — `apps/agent` の routing は `add-agent-route` を参照。
 ---
 
 # Web GUI に feature を追加する
