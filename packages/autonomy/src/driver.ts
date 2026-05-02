@@ -1,4 +1,6 @@
 import { loadConfig, resolveWorkflow } from "./config.js";
+import { executeTask } from "./executor.js";
+import { SpawnCommandRunner } from "./githubShip.js";
 import { acquireLock } from "./lock.js";
 import { appendLearning, appendTimeline, ensureProgress, writeProgress } from "./state.js";
 import { pickTask } from "./taskSources.js";
@@ -54,25 +56,95 @@ export function drive(options: DriveOptions): DriveResult {
       throw new Error("Selected task is high risk and requires explicit human approval.");
     }
 
-    if (!options.dryRun) {
-      const failure = appendTimeline(options.projectRoot, {
-        stage: "build",
-        status: "fail",
+    if (!options.dryRun && selection.task === null) {
+      appendTimeline(options.projectRoot, {
+        stage: "plan",
+        status: "skipped",
         input: { adapters: config.adapters },
         output: {
-          message:
-            "Full execution is not enabled in the v1 foundation driver. Run with --dry-run until adapters are implemented."
+          message: selection.blockedReason ?? "No task selected.",
+          taskWarnings: selection.warnings
         },
-        failureClass: "UNCLASSIFIED"
+        evidence: [".agents/autonomy.config.json", ...selection.evidence]
       });
-      progress.escalated.push({
-        id: "full-execution-not-enabled",
-        at: failure.at,
-        class: "UNCLASSIFIED",
-        reason: "Full execution is not enabled in the v1 foundation driver."
+      return {
+        dryRun: false,
+        stages,
+        task: null,
+        warnings: selection.warnings,
+        blockedReason: selection.blockedReason,
+        progressPath: ".agents/state/progress.json",
+        summary: selection.blockedReason ?? "No task selected."
+      };
+    }
+
+    if (!options.dryRun && selection.task) {
+      const maxFailures = config.safety?.maxFailuresPerTask ?? 3;
+      if ((progress.failure_counts[selection.task.id] ?? 0) >= maxFailures) {
+        appendTimeline(options.projectRoot, {
+          stage: "build",
+          status: "fail",
+          input: { task: selection.task, maxFailures },
+          output: {
+            message: `Task ${selection.task.id} has reached the retry limit. Escalating through escape-loop.`
+          },
+          evidence: [".agents/state/progress.json"],
+          failureClass: "UNCLASSIFIED"
+        });
+        return {
+          dryRun: false,
+          stages,
+          task: selection.task,
+          warnings: selection.warnings,
+          blockedReason: "max-failures-exceeded",
+          progressPath: ".agents/state/progress.json",
+          summary: `Task ${selection.task.id} has reached the retry limit. Escalating through escape-loop.`
+        };
+      }
+      const execution = executeTask({
+        projectRoot: options.projectRoot,
+        config,
+        task: selection.task,
+        runner: new SpawnCommandRunner(options.projectRoot)
       });
-      writeProgress(options.projectRoot, progress);
-      throw new Error("Full execution is not enabled. Use --dry-run until adapters are implemented.");
+      if (execution.status === "fail" || execution.status === "escalated") {
+        const nextProgress = ensureProgress(options.projectRoot);
+        const failureCount = (nextProgress.failure_counts[selection.task.id] ?? 0) + 1;
+        nextProgress.failure_counts[selection.task.id] = failureCount;
+        if (execution.failureClass) {
+          nextProgress.escalated.push({
+            id: selection.task.id,
+            at: new Date().toISOString(),
+            class: execution.failureClass,
+            reason: execution.summary
+          });
+        }
+        writeProgress(options.projectRoot, nextProgress);
+        const blockedReason =
+          failureCount >= maxFailures ? "max-failures-exceeded" : "executor-failed";
+        return {
+          dryRun: false,
+          stages,
+          task: selection.task,
+          warnings: selection.warnings,
+          blockedReason,
+          progressPath: ".agents/state/progress.json",
+          summary:
+            failureCount >= maxFailures
+              ? `Task ${selection.task.id} reached ${failureCount} failures. Escalating through escape-loop.`
+              : execution.summary
+        };
+      }
+      appendPostBuildWaitingStages(options.projectRoot, stages, selection.task);
+      return {
+        dryRun: false,
+        stages,
+        task: selection.task,
+        warnings: selection.warnings,
+        blockedReason: "waiting-for-pr",
+        progressPath: ".agents/state/progress.json",
+        summary: `${execution.summary} Waiting for PR publication, QA, review, and ship gates.`
+      };
     }
 
     for (const stage of stages) {
@@ -112,6 +184,30 @@ export function drive(options: DriveOptions): DriveResult {
     };
   } finally {
     lock.release();
+  }
+}
+
+function appendPostBuildWaitingStages(
+  projectRoot: string,
+  stages: readonly StageName[],
+  task: TaskBrief
+): void {
+  for (const stage of stages) {
+    if (stage !== "qa-only" && stage !== "review" && stage !== "ship" && stage !== "learn") {
+      continue;
+    }
+    appendTimeline(projectRoot, {
+      stage,
+      status: "pending",
+      input: { task },
+      output: {
+        message:
+          stage === "learn"
+            ? "Learn stage is waiting for ship outcome."
+            : `${stage} is waiting for a published PR and explicit gate evidence.`
+      },
+      evidence: [".agents/state/progress.json"]
+    });
   }
 }
 

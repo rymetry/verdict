@@ -16,10 +16,15 @@ export interface CommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  timedOut?: boolean;
+}
+
+export interface CommandRunOptions {
+  timeoutMs?: number;
 }
 
 export interface CommandRunner {
-  run(command: string, args: readonly string[]): CommandResult;
+  run(command: string, args: readonly string[], options?: CommandRunOptions): CommandResult;
 }
 
 export interface ShipPullRequestOptions {
@@ -291,16 +296,19 @@ function markTaskCompleted(projectRoot: string, taskId: string | undefined): voi
 export class SpawnCommandRunner implements CommandRunner {
   constructor(private readonly cwd: string) {}
 
-  run(command: string, args: readonly string[]): CommandResult {
+  run(command: string, args: readonly string[], options: CommandRunOptions = {}): CommandResult {
     const result = spawnSync(command, args, {
       cwd: this.cwd,
       encoding: "utf8",
-      shell: false
+      shell: false,
+      timeout: options.timeoutMs
     });
+    const errorMessage = result.error ? String(result.error) : "";
     return {
       exitCode: typeof result.status === "number" ? result.status : 1,
       stdout: result.stdout ?? "",
-      stderr: result.stderr ?? (result.error ? String(result.error) : "")
+      stderr: result.stderr || errorMessage,
+      timedOut: errorMessage.includes("ETIMEDOUT")
     };
   }
 }
