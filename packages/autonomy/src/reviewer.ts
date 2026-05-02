@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { classifyToolFailure } from "./failures.js";
 import type { CommandRunner } from "./githubShip.js";
-import { loadReviewInput, type ReviewInputFile } from "./reviewInput.js";
+import { loadReviewInput, parseReviewInput, type ReviewInputFile } from "./reviewInput.js";
 import { appendTimeline, ensureProgress, stateDir, writeProgress } from "./state.js";
 import type { AutonomyConfig } from "./types.js";
 
@@ -19,9 +19,16 @@ export interface RunReviewResult {
   summary: string;
 }
 
+interface ReviewCommandSpec {
+  name: string;
+  command: string[];
+  expectedReviewers?: string[];
+  timeoutMs?: number;
+}
+
 export function runStructuredReview(options: RunReviewOptions): RunReviewResult {
-  const command = options.config.reviewers?.customCommand?.command;
-  if (!command?.length) {
+  const commands = resolveReviewCommands(options.config);
+  if (commands.length === 0) {
     const reviewFile = writePassingOperatorReview(options.projectRoot, options.prNumber, options.config);
     return {
       reviewFile,
@@ -30,48 +37,95 @@ export function runStructuredReview(options: RunReviewOptions): RunReviewResult 
     };
   }
 
-  const expanded = command.map((part) => part.replaceAll("{prNumber}", String(options.prNumber)));
-  const result = options.runner.run(expanded[0], expanded.slice(1), {
-    timeoutMs: options.config.reviewers?.customCommand?.timeoutMs
-  });
-  if (result.exitCode !== 0) {
-    const failureClass = result.timedOut ? "CODEX_HANG" : classifyToolFailure(result.stderr);
-    const failure = appendTimeline(options.projectRoot, {
-      stage: "review",
-      status: "fail",
-      input: { prNumber: options.prNumber, command: expanded },
-      output: { stdout: result.stdout, stderr: result.stderr },
-      failureClass
+  const merged: ReviewInputFile = { reviews: [], expectedReviewers: [] };
+  const commandEvidence: Array<{ name: string; command: string[] }> = [];
+  for (const command of commands) {
+    const expanded = command.command.map((part) => part.replaceAll("{prNumber}", String(options.prNumber)));
+    commandEvidence.push({ name: command.name, command: expanded });
+    const result = options.runner.run(expanded[0], expanded.slice(1), {
+      timeoutMs: command.timeoutMs
     });
-    const progress = ensureProgress(options.projectRoot);
-    progress.escalated.push({
-      id: `PR-${options.prNumber}:review`,
-      at: failure.at,
-      class: failureClass,
-      reason: result.stderr.trim() || `Review command failed with exit code ${result.exitCode}.`
-    });
-    progress.last_iter_at = failure.at;
-    writeProgress(options.projectRoot, progress);
-    throw new Error(result.stderr.trim() || `Review command failed with exit code ${result.exitCode}.`);
+    if (result.exitCode !== 0) {
+      recordReviewCommandFailure(options, command.name, expanded, result);
+    }
+    const reviewInput = parseReviewInput(result.stdout);
+    merged.reviews.push(...reviewInput.reviews);
+    merged.expectedReviewers?.push(...(reviewInput.expectedReviewers ?? command.expectedReviewers ?? []));
   }
+  merged.expectedReviewers = uniqueNonEmpty(merged.expectedReviewers ?? []);
 
   const reviewFile = path.join(".agents", "state", `review-${options.prNumber}.json`);
   const target = path.join(options.projectRoot, reviewFile);
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, result.stdout, { mode: 0o600 });
+  fs.writeFileSync(target, `${JSON.stringify(merged, null, 2)}\n`, { mode: 0o600 });
   const reviewInput = loadReviewInput(options.projectRoot, reviewFile);
   appendTimeline(options.projectRoot, {
     stage: "review",
     status: "pass",
-    input: { prNumber: options.prNumber, command: expanded },
-    output: { reviewFile, reviews: reviewInput.reviews },
+    input: { prNumber: options.prNumber, commands: commandEvidence },
+    output: { reviewFile, reviews: reviewInput.reviews, expectedReviewers: reviewInput.expectedReviewers },
     evidence: [reviewFile]
   });
   return {
     reviewFile,
     reviewInput,
-    summary: `Wrote structured review for PR #${options.prNumber}.`
+    summary: `Wrote ${reviewInput.reviews.length} structured reviews for PR #${options.prNumber}.`
   };
+}
+
+function resolveReviewCommands(config: AutonomyConfig): ReviewCommandSpec[] {
+  const multi = config.reviewers?.customCommands ?? [];
+  if (multi.length > 0) {
+    return multi
+      .filter((command) => command.command.length > 0)
+      .map((command, index) => ({
+        name: command.name ?? `review-command-${index + 1}`,
+        command: command.command,
+        expectedReviewers: command.expectedReviewers,
+        timeoutMs: command.timeoutMs
+      }));
+  }
+  const single = config.reviewers?.customCommand;
+  return single?.command?.length
+    ? [
+        {
+          name: "custom-command",
+          command: single.command,
+          expectedReviewers: single.expectedReviewers,
+          timeoutMs: single.timeoutMs
+        }
+      ]
+    : [];
+}
+
+function recordReviewCommandFailure(
+  options: RunReviewOptions,
+  name: string,
+  command: string[],
+  result: ReturnType<CommandRunner["run"]>
+): never {
+  const failureClass = result.timedOut ? "CODEX_HANG" : classifyToolFailure(result.stderr);
+  const failure = appendTimeline(options.projectRoot, {
+    stage: "review",
+    status: "fail",
+    input: { prNumber: options.prNumber, commandName: name, command },
+    output: { stdout: result.stdout, stderr: result.stderr },
+    failureClass
+  });
+  const progress = ensureProgress(options.projectRoot);
+  progress.escalated.push({
+    id: `PR-${options.prNumber}:review`,
+    at: failure.at,
+    class: failureClass,
+    reason: result.stderr.trim() || `${name} review command failed with exit code ${result.exitCode}.`
+  });
+  progress.last_iter_at = failure.at;
+  writeProgress(options.projectRoot, progress);
+  throw new Error(result.stderr.trim() || `${name} review command failed with exit code ${result.exitCode}.`);
+}
+
+function uniqueNonEmpty(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function writePassingOperatorReview(

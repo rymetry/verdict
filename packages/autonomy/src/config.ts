@@ -116,6 +116,7 @@ function mergeReviewers(
   return {
     ...base,
     ...override,
+    customCommands: override?.customCommands ?? base?.customCommands,
     customCommand: {
       ...base?.customCommand,
       ...override?.customCommand

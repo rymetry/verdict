@@ -18,11 +18,14 @@
     }
   },
   "reviewers": {
-    "customCommand": {
-      "command": ["node", "packages/autonomy/dist/review-cli.js", "--pr", "{prNumber}"],
-      "expectedReviewers": ["diff-review"],
-      "timeoutMs": 60000
-    }
+    "customCommands": [
+      {
+        "name": "diff-review",
+        "command": ["node", "packages/autonomy/dist/review-cli.js", "--pr", "{prNumber}"],
+        "expectedReviewers": ["diff-review"],
+        "timeoutMs": 60000
+      }
+    ]
   },
   "safety": {
     "autoMerge": false,
