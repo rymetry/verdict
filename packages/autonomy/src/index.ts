@@ -7,6 +7,7 @@ export * from "./githubShip.js";
 export * from "./init.js";
 export * from "./lock.js";
 export * from "./policy.js";
+export * from "./prReview.js";
 export * from "./reviewInput.js";
 export * from "./reviewer.js";
 export * from "./ship.js";
