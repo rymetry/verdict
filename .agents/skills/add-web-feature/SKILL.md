@@ -1,6 +1,6 @@
 ---
 name: add-web-feature
-description: Use when adding a new feature, panel, or route to `apps/web`. Covers TanStack Router/Query wiring, shadcn/ui usage, schema-driven data fetching, and the role-aware UI pattern.
+description: Use when adding a new feature, panel, or browser route to `apps/web` (Vite + React + TanStack Router). Run AFTER `add-shared-schema` if the feature consumes a new boundary payload. Covers Router/Query wiring, shadcn/ui usage, schema-driven data fetching, and the role-aware UI pattern. Not for server-side HTTP routes — see `add-agent-route` for `apps/agent` routing.
 ---
 
 # Add a feature in the Web GUI

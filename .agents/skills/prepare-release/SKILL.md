@@ -1,6 +1,6 @@
 ---
 name: prepare-release
-description: Use when staging a commit and PR for review, or preparing a release-ready PR after iterating on a feature. Defines the pre-PR checklist, commit conventions, and PR description template.
+description: Use as the final pass before opening, pushing, or merging a PR — applies whether the work is a T-task (called from `execute-t-task` step 7+) or a one-off commit. Defines the pre-PR / pre-commit checklist, Conventional Commit format, and PR description template.
 ---
 
 # Prepare a release-ready commit and PR

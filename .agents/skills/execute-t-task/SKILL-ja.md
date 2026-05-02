@@ -1,6 +1,6 @@
 ---
 name: execute-t-task
-description: PLAN.v3 の番号付き T-task (例: T1500-3, T2000-5) を起点に作業するときに使う。1 PR が 1 T-task になるよう、標準的なブランチ・コミット・テスト・PR 進行を確立する。
+description: PLAN.v3 の番号付き T-task (例: T1500-3, T2000-5) を起点に作業するときに使う。1 PR が 1 T-task になるよう、ブランチ・schema/コード/テストの進行を確立する。最終的な pre-PR チェックリストは `prepare-release` に委譲する。対応する T-task が無い作業の場合は、進める前にユーザーへエスカレーションすること。
 ---
 
 # PLAN.v3 の T-task を実行する

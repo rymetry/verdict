@@ -1,6 +1,6 @@
 ---
 name: prepare-release
-description: コミットと PR をレビュー向けに整える、もしくは feature を iterate した後の release-ready PR を準備するときに使う。pre-PR チェックリスト、commit 規約、PR 説明テンプレートを定義する。
+description: PR を open / push / merge する前の最終確認として使う — T-task 由来 (`execute-t-task` の step 7 以降から呼ばれる) でも、単発の commit でも適用可能。pre-PR / pre-commit チェックリスト、Conventional Commit 形式、PR 説明テンプレートを定義する。
 ---
 
 # release-ready な commit と PR を準備する

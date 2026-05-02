@@ -1,6 +1,6 @@
 ---
 name: add-shared-schema
-description: agent / web の境界を跨ぐ payload (HTTP / WebSocket / 永続化された run JSON) を追加・修正するときに使う。`packages/shared` 経由で `apps/agent` と `apps/web` を lockstep に保つ schema-first ワークフローを定義する。
+description: agent / web の境界を跨ぐ payload (HTTP / WebSocket / 永続化された run JSON) を追加・修正するときに使う。新しい境界 payload を伴う route / feature を追加する場合は、`add-agent-route` または `add-web-feature` よりも先に実行すること。`packages/shared` 経由で `apps/agent` と `apps/web` を lockstep に保つ schema-first ワークフローを定義する。
 ---
 
 # shared schema を追加・修正する

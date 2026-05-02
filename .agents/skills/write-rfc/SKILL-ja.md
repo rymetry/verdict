@@ -1,6 +1,6 @@
 ---
 name: write-rfc
-description: Verdict の複数コンポーネント / 複数モジュールに跨る非自明な design 変更を提案するときに使う。標準 RFC テンプレート、status ライフサイクル、レビュー手順を定義する。
+description: 2 コンポーネント以上に跨る design 変更、新規の外部連携 (GitHub App / ベンダー SDK)、新規のディスク上フォーマットや CLI フラグ、セキュリティ/プライバシーへの影響がある変更を提案するときに使う。単一パッケージのリファクタリングやローカルな修正は RFC を作らず、簡潔な commit message で済ませる。RFC テンプレート、status ライフサイクル (Draft/Accepted/Implemented)、レビュー手順を定義する。
 ---
 
 # RFC を起草・改訂する

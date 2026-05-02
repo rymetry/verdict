@@ -1,6 +1,6 @@
 ---
 name: execute-t-task
-description: Use when starting work on a numbered T-task from PLAN.v3 (e.g. T1500-3, T2000-5). Establishes the standard branch, commit, test, and PR cadence so a single PR equals a single T-task.
+description: Use when starting work on a numbered T-task from PLAN.v3 (e.g. T1500-3, T2000-5). Establishes the branch, schema/code/test cadence so a single PR equals a single T-task. Delegates the final pre-PR checklist to `prepare-release`. If no T-task exists for the work, escalate to the user before proceeding.
 ---
 
 # Execute a T-task from PLAN.v3
