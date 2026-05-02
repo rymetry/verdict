@@ -129,6 +129,13 @@ export interface TaskBrief {
   highRisk?: boolean;
 }
 
+export interface TaskSelection {
+  task: TaskBrief | null;
+  warnings: string[];
+  evidence: string[];
+  blockedReason?: string;
+}
+
 export interface AdapterContext {
   projectRoot: string;
   config: AutonomyConfig;
