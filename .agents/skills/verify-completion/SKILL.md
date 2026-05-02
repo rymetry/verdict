@@ -90,21 +90,27 @@ Pass: shared changes present. Fail with diagnostic: "boundary code touched witho
 ### CHECK_NO_SHELL — no `child_process` calls
 
 ```bash
-# (a) child_process / exec / spawn in production paths (test paths exempt — see no-shell.md)
+# (a) child_process / exec / spawn in production code (test paths exempt — see no-shell.md)
 gh pr diff <PR_NUMBER> | awk '
-  /^diff --git / { inTest = ($0 ~ /\/(apps\/agent\/test|apps\/web\/test)\//) }
-  !inTest
+  /^diff --git / {
+    isCode = ($0 ~ /\.(ts|tsx|js|jsx|mjs|cjs)$/)
+    inTest = ($0 ~ /\/(apps\/agent\/test|apps\/web\/test)\//)
+  }
+  isCode && !inTest
 ' | grep -E '^\+.*(\bchild_process\b|\b(execSync|spawnSync|exec|spawn)[ \t]*[(])' || true
 
-# (b) shell-mode invocation anywhere in the diff (test paths NOT exempt — shell: true is always forbidden)
-gh pr diff <PR_NUMBER> | grep -E '^\+.*\bshell[ \t]*:[ \t]*true\b' || true
+# (b) shell-mode option in code anywhere (test paths NOT exempt — shell: true is always forbidden)
+gh pr diff <PR_NUMBER> | awk '
+  /^diff --git / { isCode = ($0 ~ /\.(ts|tsx|js|jsx|mjs|cjs)$/) }
+  isCode
+' | grep -E '^\+.*\b["'"'"']?shell["'"'"']?[ \t]*:[ \t]*true\b' || true
 ```
 
-Pass: both grep commands emit nothing. Fail: any output from either command, reported per matching line. The two-stage pipeline reflects the asymmetric scope of `.agents/rules/no-shell.md`:
+Pass: both grep commands emit nothing. Fail: any output from either command, reported per matching line. Each pipeline has an awk pre-filter that keeps only code files (`.ts` / `.tsx` / `.js` / `.jsx` / `.mjs` / `.cjs`) so that prose / markdown / config additions never cause CHECK_NO_SHELL to fail; this includes documentation that legitimately mentions `shell: true` as a forbidden literal (such as this skill itself). The asymmetric scope of `.agents/rules/no-shell.md` is then enforced:
 
-1. **(a) production-path check** — `.agents/rules/no-shell.md:50` permits `child_process` imports under `apps/agent/test/` for stub harnesses, so the awk pre-filter strips diff hunks for `apps/agent/test/**` and `apps/web/test/**` before grep. The grep then anchors the alternation to added lines (`^\+`). The first inner alternative `\bchild_process\b` catches `import { spawn as rawSpawn } from "node:child_process"` and `require("node:child_process")` — any reference to the module by name, even when functions are imported under aliases. The second alternative `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` catches direct call sites; `\b` word boundaries plus `[ \t]*[(]` (character class instead of a literal paren) prevent false positives like `runtimeExec(`.
+1. **(a) production-path check** — `.agents/rules/no-shell.md:50` permits `child_process` imports under `apps/agent/test/` for stub harnesses, so the awk filter additionally strips diff hunks for `apps/agent/test/**` and `apps/web/test/**`. The grep anchors the alternation to added lines (`^\+`). The first inner alternative `\bchild_process\b` catches `import { spawn as rawSpawn } from "node:child_process"` and `require("node:child_process")` — any reference to the module by name, even when functions are imported under aliases. The second alternative `\b(execSync|spawnSync|exec|spawn)[ \t]*[(]` catches direct call sites; `\b` word boundaries plus `[ \t]*[(]` (character class instead of a literal paren) prevent false positives like `runtimeExec(`.
 
-2. **(b) shell-mode check** — `shell: true` (with optional whitespace) is forbidden everywhere, including test harnesses; this grep skips the awk filter so test paths are still audited for shell-mode usage.
+2. **(b) shell-mode check** — `shell: true` is forbidden everywhere code runs, including test harnesses; only the file-extension filter applies. Optional `["']?` around the key catches `{ "shell": true }` and `{ 'shell': true }` (valid JS/TS object-literal forms) in addition to the unquoted shorthand.
 
 CommandRunner usage is fine; it never appears as a literal `child_process` import in the consumer.
 
