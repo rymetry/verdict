@@ -60,3 +60,27 @@ Project-wide TypeScript / JavaScript code style for Verdict. Rooted in the user'
 - `pnpm typecheck` must pass on every PR.
 - The `post-tool-use-typecheck.sh` hook flags type drift on `Edit`/`Write` of `.ts`/`.tsx`.
 - The user-global hooks (Prettier, console.log audit) still apply via Claude Code / Codex defaults.
+
+## Where rules belong: prose vs. lint
+
+Statically-checkable invariants belong in the toolchain, not in this file.
+Before adding a new line of prose to `.agents/rules/`, ask: "could this be
+expressed as a lint rule instead?" If yes, write the lint rule.
+
+| Belongs in TypeScript / ESLint / ast-grep / a hook | Belongs in this file (prose) |
+|---|---|
+| "no `any`", "no unused imports", "no relative imports across packages" | Why immutability matters and which patterns we accept |
+| Locator-policy violations (`xpath=...`), forbidden API names | What makes a test maintainable in this codebase |
+| File-size cap (max 800 lines/file) | When to extract a helper vs. inline a function |
+| Import order, attribute order in JSX | The reasoning behind schema-first |
+
+Prose rules are for **judgment, principles, and contracts that change with
+context**. They are expensive to read and easy to drift; reserve them for
+guidance that no static analyzer can express. Whenever the prose says
+"prefer X over Y" and X / Y are syntactically distinguishable, file an
+issue to migrate it to a lint rule and remove it from the prose set.
+
+This is not optional: prose rules that *could* be lint rules are a
+maintenance bug. They get out of sync with the codebase silently and
+mislead agents into citing them as gospel when reviewers have already
+moved on.

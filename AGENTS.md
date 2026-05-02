@@ -95,6 +95,16 @@ Common multi-step tasks have a corresponding skill in `.agents/skills/`. Agents 
 
 Skills are project-scoped under `.agents/skills/` per the [Agent Skills open standard](https://agentskills.io). Codex discovers them automatically. Claude Code discovers them via `.claude/skills/` symlink (or, if symlinks are not honored, by reading them directly through the SKILL tool).
 
+### Choosing where a new skill belongs
+
+When you need a new reusable workflow, decide its scope before drafting:
+
+- **Project-specific** → `.agents/skills/<name>/SKILL.md` here. The skill depends on Verdict's domain (Hono router shape, `@pwqa/shared` schema, Allure pipeline, T-task framework, etc.) and would not transfer to another repo.
+- **Cross-project / personal** → user-global at `~/.claude/skills/<name>/` or a dedicated marketplace plugin. The skill is language- or tool-cross-cutting (TDD habits, code-review patterns, GitHub PR triage) and would be reused across many repos.
+- **Unsure** → ask the user before drafting. Moving a skill later breaks path references and discovery; the cost of a one-line check up front is much lower than a rename PR later.
+
+When in doubt, prefer project-specific in `.agents/skills/`. Promotion to user-global is easy; demotion has friction.
+
 ## 7. Hook contract
 
 Both Claude Code and Codex run lightweight hooks at agent loop boundaries. The actual scripts live under `.codex/hooks/` and are invoked by **both** tools:
@@ -115,6 +125,7 @@ Hooks are advisory by default — they do not block, only warn — except for th
 - ❌ Never skip `git apply --check` before applying an AI-proposed patch.
 - ❌ Never delete or rewrite git history that has been pushed to `origin/main`.
 - ❌ Never commit secrets, `.env` contents, or contents of `~/.codex/auth.json` / `~/.claude/auth.json`.
+- ❌ Never `rm` an auto-renamed backup file (`*.backup`, `*.orig`, `*.pre-*`, `*.bak`, `*~`) without first `cat`-ing it into the conversation. These files are produced by upgrades / migrations / merge tools and may carry the only remaining copy of important state — surface the contents at least once before removing.
 
 ## 9. Glossary
 
