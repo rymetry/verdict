@@ -12,6 +12,7 @@ import {
   CiArtifactLinkSchema,
   AnnotatedScreenModelSchema,
   ExplorationScreenModelDraftSchema,
+  LayerJudgmentResultSchema,
   GitHubPullRequestLinkSchema,
   PlaywrightLaunchCommandRequestSchema,
   PlaywrightLaunchCommandResponseSchema,
@@ -139,6 +140,25 @@ describe("shared run warning schemas", () => {
         }
       }).steps[0]?.semanticAnnotations[0]?.kind
     ).toBe("payment");
+
+    expect(
+      LayerJudgmentResultSchema.parse({
+        generatedAt: "2026-05-02T00:00:02.000Z",
+        strategy: "heuristic",
+        judgments: [
+          {
+            flowId: "flow-1",
+            recommended: "e2e",
+            confidence: 0.8,
+            rationale: "Cross-boundary checkout flow.",
+            alternativeLayers: ["integration", "contract"],
+            riskIfWrong: "high",
+            evidenceStepIds: ["step-1"]
+          }
+        ],
+        warnings: []
+      }).judgments[0]?.recommended
+    ).toBe("e2e");
 
     expect(() =>
       WorkbenchSkillSchema.parse({

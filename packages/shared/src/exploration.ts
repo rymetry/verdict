@@ -143,3 +143,36 @@ export const AnnotatedScreenModelSchema = ExplorationScreenModelDraftBaseSchema.
     .readonly()
 }).readonly();
 export type AnnotatedScreenModel = z.infer<typeof AnnotatedScreenModelSchema>;
+
+export const TestLayerSchema = z.enum([
+  "unit",
+  "integration",
+  "contract",
+  "e2e",
+  "manual",
+  "none-needed"
+]);
+export type TestLayer = z.infer<typeof TestLayerSchema>;
+
+export const LayerJudgmentSchema = z
+  .object({
+    flowId: z.string().min(1),
+    recommended: TestLayerSchema,
+    confidence: z.number().min(0).max(1),
+    rationale: z.string().min(1),
+    alternativeLayers: z.array(TestLayerSchema).default([]),
+    riskIfWrong: z.enum(["low", "medium", "high"]),
+    evidenceStepIds: z.array(z.string().min(1)).default([])
+  })
+  .readonly();
+export type LayerJudgment = z.infer<typeof LayerJudgmentSchema>;
+
+export const LayerJudgmentResultSchema = z
+  .object({
+    generatedAt: z.string(),
+    strategy: z.enum(["heuristic", "llm"]),
+    judgments: z.array(LayerJudgmentSchema),
+    warnings: z.array(z.string())
+  })
+  .readonly();
+export type LayerJudgmentResult = z.infer<typeof LayerJudgmentResultSchema>;
