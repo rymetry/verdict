@@ -1,5 +1,6 @@
 export * from "./config.js";
 export * from "./driver.js";
+export * from "./githubShip.js";
 export * from "./init.js";
 export * from "./lock.js";
 export * from "./policy.js";
