@@ -1,0 +1,73 @@
+# Project-level Codex configuration for Verdict.
+#
+# Inherits from ~/.codex/config.toml; this file overrides selectively.
+# Project-local hooks load only when this `.codex/` layer is trusted (Codex
+# prompts on first session). Trust is granted per-machine via the user's
+# Codex client.
+#
+# Reference: https://developers.openai.com/codex/hooks
+# Reference: https://developers.openai.com/codex/skills
+# Reference: https://agentskills.io
+#
+# See AGENTS.md for the cross-tool primary context, and .agents/rules/*.md
+# for the policies the hooks enforce.
+
+[features]
+# Long-running task management. Adds `/goal` for sustained multi-turn work.
+# Status: under development. Verdict's roadmap (PLAN.v3 Phase 1.5/2/3) maps
+# naturally to the goals concept; opting in early surfaces the value and
+# keeps us aware of regressions.
+goals = true
+
+# Persistent context across Codex sessions. Auto-redacts secrets and stores
+# locally under ~/.codex/memories/. Useful so Codex remembers Verdict-specific
+# conventions (Hono router shape, schema-first invariant, T-task workflow)
+# across days without re-reading AGENTS.md from scratch.
+# Status: experimental. Unavailable in EEA/UK/CH at launch; the flag is a
+# no-op there.
+memories = true
+
+# Screen-context capture for memories (helps Codex pick up where it left off).
+# Status: under development. Pairs with `memories`; the two are designed
+# together.
+chronicle = true
+
+# Project hooks (already stable; explicit for reproducibility).
+codex_hooks = true
+
+# NOT enabled (reasons documented in PLAN.v3 / AGENTS.md):
+# - child_agents_md: this repo has a single root AGENTS.md by design (3
+#   workspaces share one TS stack and one rule set). Re-evaluate if a future
+#   workspace introduces a divergent stack (e.g. a Python service).
+# - multi_agent_v2 / code_mode: under development; re-evaluate when stable.
+
+# -- Project hooks ----------------------------------------------------------
+# Hook scripts live under .codex/hooks/ and are intentionally invoked from
+# both Codex and Claude Code (see .claude/settings.json) so the policy logic
+# stays single-sourced.
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = '/usr/bin/env bash "$(git rev-parse --show-toplevel)/.codex/hooks/pre-tool-use-policy.sh"'
+timeout = 5
+statusMessage = "Verifying command policy"
+
+[[hooks.PostToolUse]]
+matcher = "^(Edit|Write)$"
+
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = '/usr/bin/env bash "$(git rev-parse --show-toplevel)/.codex/hooks/post-tool-use-typecheck.sh"'
+timeout = 60
+statusMessage = "Targeted typecheck"
+
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = '/usr/bin/env bash "$(git rev-parse --show-toplevel)/.codex/hooks/stop-verify.sh"'
+timeout = 120
+statusMessage = "Final verification"
