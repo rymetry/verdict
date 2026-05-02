@@ -9,6 +9,7 @@ import {
   createInitialProgress,
   ensureProgress,
   learningsPath,
+  seedCompletedTasks,
   timelinePath
 } from "../src/state.js";
 
@@ -31,6 +32,100 @@ describe("progress state", () => {
     expect(fs.readFileSync(path.join(workdir, ".agents/state/progress.json"), "utf8")).toContain(
       "2026-05-02T00:00:00.000Z"
     );
+  });
+
+  it("seeds completed tasks with de-duplication and timeline evidence", () => {
+    const now = new Date("2026-05-02T00:00:00.000Z");
+    const first = seedCompletedTasks({
+      projectRoot: workdir,
+      taskIds: ["T1500-1", "T1500-2", "T1500-1"],
+      now
+    });
+    const second = seedCompletedTasks({
+      projectRoot: workdir,
+      taskIds: ["T1500-2", "T1500-8"],
+      now
+    });
+
+    expect(first).toMatchObject({
+      added: ["T1500-1", "T1500-2"],
+      ignored: [],
+      completed: ["T1500-1", "T1500-2"]
+    });
+    expect(second).toMatchObject({
+      added: ["T1500-8"],
+      ignored: ["T1500-2"],
+      completed: ["T1500-1", "T1500-2", "T1500-8"]
+    });
+    expect(fs.readFileSync(timelinePath(workdir), "utf8").trim().split("\n")).toHaveLength(2);
+  });
+
+  it("rejects unknown task ids when a known baseline is provided", () => {
+    expect(() =>
+      seedCompletedTasks({
+        projectRoot: workdir,
+        taskIds: ["TASK-3"],
+        knownTaskIds: ["TASK-1", "TASK-2"],
+        now: new Date("2026-05-02T00:00:00.000Z")
+      })
+    ).toThrow(/Unknown task id\(s\): TASK-3/);
+  });
+
+  it("refuses to seed an active task as completed", () => {
+    const progress = createInitialProgress(new Date("2026-05-02T00:00:00.000Z"));
+    progress.active = {
+      id: "T1500-1",
+      pr_number: null,
+      branch: null,
+      stage: "build",
+      started_at: "2026-05-02T00:00:00.000Z",
+      last_attempt_at: "2026-05-02T00:00:00.000Z"
+    };
+    fs.mkdirSync(path.join(workdir, ".agents/state"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workdir, ".agents/state/progress.json"),
+      `${JSON.stringify(progress, null, 2)}\n`
+    );
+
+    expect(() =>
+      seedCompletedTasks({
+        projectRoot: workdir,
+        taskIds: ["T1500-1"],
+        now: new Date("2026-05-02T00:00:00.000Z")
+      })
+    ).toThrow(/Cannot mark active task T1500-1 as completed/);
+  });
+
+  it("refuses to seed a legacy tid active task as completed", () => {
+    const progress = createInitialProgress(new Date("2026-05-02T00:00:00.000Z"));
+    fs.mkdirSync(path.join(workdir, ".agents/state"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workdir, ".agents/state/progress.json"),
+      `${JSON.stringify({ ...progress, active: { tid: "T1500-1" } }, null, 2)}\n`
+    );
+
+    expect(() =>
+      seedCompletedTasks({
+        projectRoot: workdir,
+        taskIds: ["T1500-1"],
+        now: new Date("2026-05-02T00:00:00.000Z")
+      })
+    ).toThrow(/Cannot mark active task T1500-1 as completed/);
+  });
+
+  it("does not seed while another autonomy operation holds the lock", () => {
+    const lock = acquireLock(workdir);
+    try {
+      expect(() =>
+        seedCompletedTasks({
+          projectRoot: workdir,
+          taskIds: ["T1500-1"],
+          now: new Date("2026-05-02T00:00:00.000Z")
+        })
+      ).toThrow(/already locked/);
+    } finally {
+      lock.release();
+    }
   });
 });
 
