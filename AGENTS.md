@@ -53,6 +53,8 @@ The agent never accesses anything outside the project root passed via `--project
 
 ## 4. Daily commands
 
+> **First-time bootstrap (fresh worktree / Codex sandbox)**: A new worktree or a sandboxed agent session may have an empty `node_modules`. Run `pnpm install` BEFORE attempting `pnpm add <dep>` or any `pnpm build` / `pnpm typecheck`. If the sandbox blocks DNS to `registry.npmjs.org`, surface that to the user and request approval to re-run `pnpm install` from outside the sandbox — do NOT silently retry `pnpm install --offline --force`, which can leave `node_modules` in a half-rebuilt state when the local pnpm store is missing tarballs.
+
 ```bash
 # Setup
 pnpm install
