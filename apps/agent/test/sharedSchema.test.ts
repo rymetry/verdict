@@ -10,6 +10,7 @@ import {
   CiArtifactImportRequestSchema,
   CiArtifactImportResponseSchema,
   CiArtifactLinkSchema,
+  AnnotatedScreenModelSchema,
   ExplorationScreenModelDraftSchema,
   GitHubPullRequestLinkSchema,
   PlaywrightLaunchCommandRequestSchema,
@@ -95,6 +96,49 @@ describe("shared run warning schemas", () => {
         warnings: []
       }).provider
     ).toBe("custom-browser-driver");
+
+    expect(
+      AnnotatedScreenModelSchema.parse({
+        startUrl: "https://example.test",
+        provider: "custom-browser-driver",
+        generatedAt: "2026-05-02T00:00:00.000Z",
+        steps: [
+          {
+            stepId: "step-1",
+            action: "click",
+            domSnapshot: "<button>Pay</button>",
+            semanticAnnotations: [
+              {
+                kind: "payment",
+                label: "payment flow",
+                confidence: 0.8,
+                evidenceStepIds: ["step-1"]
+              }
+            ],
+            businessMeaning: "Likely payment flow."
+          }
+        ],
+        observedFlows: [
+          {
+            flowId: "flow-1",
+            title: "Checkout",
+            stepIds: ["step-1"],
+            description: "Checkout",
+            triggers: ["click Pay"],
+            outcomes: [],
+            semanticAnnotations: []
+          }
+        ],
+        semantics: [],
+        unclear: [],
+        warnings: [],
+        comprehension: {
+          generatedAt: "2026-05-02T00:00:01.000Z",
+          strategy: "heuristic",
+          warnings: []
+        }
+      }).steps[0]?.semanticAnnotations[0]?.kind
+    ).toBe("payment");
 
     expect(() =>
       WorkbenchSkillSchema.parse({

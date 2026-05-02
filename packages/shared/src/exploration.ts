@@ -41,25 +41,23 @@ export const ExplorationNetworkEventSchema = z
   .readonly();
 export type ExplorationNetworkEvent = z.infer<typeof ExplorationNetworkEventSchema>;
 
-export const ExploredStepSchema = z
-  .object({
-    stepId: z.string().min(1),
-    action: ExplorationActionSchema,
-    target: ExplorationTargetSchema.optional(),
-    data: z.unknown().optional(),
-    domSnapshot: z.string(),
-    networkEvents: z.array(ExplorationNetworkEventSchema).default([])
-  })
-  .readonly();
+const ExploredStepBaseSchema = z.object({
+  stepId: z.string().min(1),
+  action: ExplorationActionSchema,
+  target: ExplorationTargetSchema.optional(),
+  data: z.unknown().optional(),
+  domSnapshot: z.string(),
+  networkEvents: z.array(ExplorationNetworkEventSchema).default([])
+});
+export const ExploredStepSchema = ExploredStepBaseSchema.readonly();
 export type ExploredStep = z.infer<typeof ExploredStepSchema>;
 
-export const ObservedFlowSchema = z
-  .object({
-    flowId: z.string().min(1),
-    title: z.string().min(1),
-    stepIds: z.array(z.string().min(1))
-  })
-  .readonly();
+const ObservedFlowBaseSchema = z.object({
+  flowId: z.string().min(1),
+  title: z.string().min(1),
+  stepIds: z.array(z.string().min(1))
+});
+export const ObservedFlowSchema = ObservedFlowBaseSchema.readonly();
 export type ObservedFlow = z.infer<typeof ObservedFlowSchema>;
 
 export const ClarificationRequestSchema = z
@@ -82,10 +80,66 @@ const ExplorationAdapterOutputBaseSchema = z.object({
 export const ExplorationAdapterOutputSchema = ExplorationAdapterOutputBaseSchema.readonly();
 export type ExplorationAdapterOutput = z.infer<typeof ExplorationAdapterOutputSchema>;
 
-export const ExplorationScreenModelDraftSchema = ExplorationAdapterOutputBaseSchema.extend({
+const ExplorationScreenModelDraftBaseSchema = ExplorationAdapterOutputBaseSchema.extend({
   provider: ExplorationProviderIdSchema,
   generatedAt: z.string()
-}).readonly();
+});
+export const ExplorationScreenModelDraftSchema =
+  ExplorationScreenModelDraftBaseSchema.readonly();
 export type ExplorationScreenModelDraft = z.infer<
   typeof ExplorationScreenModelDraftSchema
 >;
+
+export const ExplorationSemanticKindSchema = z.enum([
+  "authentication",
+  "navigation",
+  "form",
+  "field",
+  "action",
+  "assertion",
+  "payment",
+  "data",
+  "unknown"
+]);
+export type ExplorationSemanticKind = z.infer<typeof ExplorationSemanticKindSchema>;
+
+export const ExplorationSemanticAnnotationSchema = z
+  .object({
+    kind: ExplorationSemanticKindSchema,
+    label: z.string().min(1),
+    confidence: z.number().min(0).max(1),
+    rationale: z.string().min(1).optional(),
+    evidenceStepIds: z.array(z.string().min(1)).default([])
+  })
+  .readonly();
+export type ExplorationSemanticAnnotation = z.infer<
+  typeof ExplorationSemanticAnnotationSchema
+>;
+
+export const AnnotatedExploredStepSchema = ExploredStepBaseSchema.extend({
+  semanticAnnotations: z.array(ExplorationSemanticAnnotationSchema).default([]),
+  businessMeaning: z.string().min(1).optional()
+}).readonly();
+export type AnnotatedExploredStep = z.infer<typeof AnnotatedExploredStepSchema>;
+
+export const AnnotatedObservedFlowSchema = ObservedFlowBaseSchema.extend({
+  description: z.string().min(1).optional(),
+  triggers: z.array(z.string().min(1)).default([]),
+  outcomes: z.array(z.string().min(1)).default([]),
+  semanticAnnotations: z.array(ExplorationSemanticAnnotationSchema).default([])
+}).readonly();
+export type AnnotatedObservedFlow = z.infer<typeof AnnotatedObservedFlowSchema>;
+
+export const AnnotatedScreenModelSchema = ExplorationScreenModelDraftBaseSchema.extend({
+  steps: z.array(AnnotatedExploredStepSchema),
+  observedFlows: z.array(AnnotatedObservedFlowSchema),
+  semantics: z.array(ExplorationSemanticAnnotationSchema).default([]),
+  comprehension: z
+    .object({
+      generatedAt: z.string(),
+      strategy: z.enum(["heuristic", "llm"]),
+      warnings: z.array(z.string())
+    })
+    .readonly()
+}).readonly();
+export type AnnotatedScreenModel = z.infer<typeof AnnotatedScreenModelSchema>;
