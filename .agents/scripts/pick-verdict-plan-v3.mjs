@@ -14,15 +14,6 @@ const progressEvidence = ".agents/state/progress.json";
 const planEvidence = "docs/product/PLAN.v3.md";
 
 const activeTaskId = progress.active?.id ?? progress.active?.tid ?? null;
-if (activeTaskId !== null) {
-  writeSelection({
-    task: null,
-    warnings: [`Active task ${activeTaskId} is already in progress.`],
-    evidence: [progressEvidence, planEvidence],
-    blockedReason: "active-task-in-progress"
-  });
-}
-
 const planPath = path.join(process.cwd(), planEvidence);
 if (!fs.existsSync(planPath)) {
   writeSelection({
@@ -35,6 +26,25 @@ if (!fs.existsSync(planPath)) {
 
 const rows = parsePlanV3Rows(fs.readFileSync(planPath, "utf8"));
 const completed = new Set(progress.completed ?? []);
+if (activeTaskId !== null) {
+  const active = rows.get(activeTaskId);
+  if (active && !completed.has(activeTaskId)) {
+    writeSelection({
+      task: taskFromRow(active),
+      warnings: [`Retrying active task ${activeTaskId}.`],
+      evidence: [progressEvidence, planEvidence]
+    });
+  }
+  if (!active) {
+    writeSelection({
+      task: null,
+      warnings: [`Active task ${activeTaskId} is already in progress but is missing from PLAN.v3.`],
+      evidence: [progressEvidence, planEvidence],
+      blockedReason: "active-task-in-progress"
+    });
+  }
+}
+
 for (const wave of waves) {
   const incomplete = wave.filter((id) => !completed.has(id));
   if (incomplete.length === 0) {
@@ -50,13 +60,7 @@ for (const wave of waves) {
     });
   }
   writeSelection({
-    task: {
-      id: next.id,
-      title: next.title,
-      deliverable: `${next.title} | ${next.location}`,
-      expectedScope: inferExpectedScope(next.location),
-      highRisk: isHighRisk(`${next.id} ${next.title} ${next.location}`)
-    },
+    task: taskFromRow(next),
     warnings: [],
     evidence: [progressEvidence, planEvidence]
   });
@@ -86,6 +90,16 @@ function parsePlanV3Rows(markdown) {
 
 function stripMarkdown(value) {
   return value.replace(/`([^`]+)`/g, "$1");
+}
+
+function taskFromRow(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    deliverable: `${row.title} | ${row.location}`,
+    expectedScope: inferExpectedScope(row.location),
+    highRisk: isHighRisk(`${row.id} ${row.title} ${row.location}`)
+  };
 }
 
 function inferExpectedScope(location) {
