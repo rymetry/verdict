@@ -3,6 +3,7 @@ import {
   AiAnalysisContextSchema,
   AiAnalysisOutputSchema,
   AiTestGenerationOutputSchema,
+  AiTestGenerationContextSchema,
   AiTestGenerationRequestSchema,
   AiTestGenerationResponseSchema,
   AuthSetupRiskSchema,
@@ -692,7 +693,57 @@ describe("shared AI test generation schemas", () => {
       }).mode
     ).toBe("generator");
   });
+
+  it("accepts workbench context in generation context", () => {
+    const context = AiTestGenerationContextSchema.parse({
+      mode: "generator",
+      objective: "Generate coverage for checkout.",
+      targetFiles: ["tests/generated.spec.ts"],
+      analysisContext: baseAiAnalysisContext(),
+      workbenchContext: {
+        agents: {
+          relativePath: ".workbench/AGENTS.md",
+          content: "Project context"
+        },
+        rules: [
+          {
+            name: "locator-policy",
+            relativePath: ".workbench/rules/locator-policy.md",
+            frontmatter: { appliesTo: ["e2e"] },
+            content: "Prefer role locators."
+          }
+        ],
+        skills: [],
+        hooks: [
+          {
+            name: "pre-generate",
+            relativePath: ".workbench/hooks/pre-generate.sh",
+            extension: "sh",
+            content: "echo policy"
+          }
+        ],
+        prompts: [],
+        warnings: []
+      }
+    });
+
+    expect(context.workbenchContext?.rules[0]?.name).toBe("locator-policy");
+  });
 });
+
+function baseAiAnalysisContext() {
+  return {
+    runId: "run-1",
+    projectId: "project-1",
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    status: "failed",
+    command: { executable: "pnpm", args: ["exec", "playwright", "test"] },
+    requested: { projectId: "project-1", headed: false },
+    failures: [],
+    logs: [],
+    warnings: []
+  };
+}
 
 describe("shared release review schemas", () => {
   it("accepts GitHub and CI artifact draft links with HTTP URLs", () => {

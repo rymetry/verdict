@@ -54,6 +54,8 @@ describe("createAiCliAdapter", () => {
     expect(generated?.filesTouched).toEqual(["tests/generated.spec.ts"]);
     expect(captured?.label).toBe("ai-test-generation:claude-code");
     expect(captured?.stdin).toContain('"mode": "generator"');
+    expect(captured?.stdin).toContain('"locator-policy"');
+    expect(captured?.stdin).toContain("Use workbenchContext AGENTS");
     expect(captured?.stdin).toContain("unified git diff");
   });
 
@@ -202,6 +204,24 @@ function baseGenerationContext(): AiTestGenerationContext {
     mode: "generator",
     objective: "Add coverage for checkout retry behavior.",
     targetFiles: ["tests/generated.spec.ts"],
-    analysisContext: baseContext()
+    analysisContext: baseContext(),
+    workbenchContext: {
+      agents: {
+        relativePath: ".workbench/AGENTS.md",
+        content: "Generate tests using project rules."
+      },
+      rules: [
+        {
+          name: "locator-policy",
+          relativePath: ".workbench/rules/locator-policy.md",
+          frontmatter: {},
+          content: "Prefer role locators over CSS."
+        }
+      ],
+      skills: [],
+      hooks: [],
+      prompts: [],
+      warnings: []
+    }
   };
 }

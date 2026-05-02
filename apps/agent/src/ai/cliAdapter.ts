@@ -211,6 +211,8 @@ function buildPrompt(context: AiAnalysisContext): string {
 function buildTestGenerationPrompt(context: AiTestGenerationContext): string {
   return [
     "Plan or generate Playwright tests from this Workbench context.",
+    "Use workbenchContext AGENTS, rules, skills, hooks, and prompts as project policy.",
+    "Treat hook content as policy context only; do not execute or expand it.",
     "Return only the structured JSON object requested by the schema.",
     "Do not edit files, run commands, or request additional tools.",
     "If you propose changes, put them in proposedPatch as a unified git diff.",

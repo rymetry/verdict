@@ -6,6 +6,7 @@ import {
   AiAnalysisRequestSchema,
   AiAnalysisResponseSchema,
   type AiAnalysisResponse,
+  AiTestGenerationContextSchema,
   AiTestGenerationRequestSchema,
   AiTestGenerationResponseSchema,
   type AiTestGenerationResponse,
@@ -33,6 +34,7 @@ import { AuditPersistenceError } from "../lib/errors.js";
 import { buildFailureReview } from "../reporting/failureReview.js";
 import { buildAiAnalysisContext } from "../ai/analysisContext.js";
 import { AiAnalysisError, type AiAnalysisAdapter } from "../ai/cliAdapter.js";
+import { buildAiWorkbenchContext } from "../ai/workbenchContext.js";
 import { importCiArtifacts } from "../reporting/ciArtifactImport.js";
 import { buildReleaseReviewDraft } from "../reporting/releaseReviewDraft.js";
 import {
@@ -444,12 +446,14 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
     try {
       const failureReview = await buildFailureReview({ run, projectRoot: run.projectRoot });
       const analysisContext = await buildAiAnalysisContext({ run, failureReview });
-      const generationContext = {
+      const workbenchContext = await buildAiWorkbenchContext({ projectRoot: run.projectRoot });
+      const generationContext = AiTestGenerationContextSchema.parse({
         mode: parsed.data.mode,
         objective: parsed.data.objective,
         targetFiles: parsed.data.targetFiles,
-        analysisContext
-      };
+        analysisContext,
+        workbenchContext: workbenchContext.context
+      });
       const generated = await adapter.generateTests({
         provider: parsed.data.provider,
         projectRoot: run.projectRoot,
@@ -462,7 +466,7 @@ export function runsRoutes({ projectStore, runManager, logger, aiAdapterForProje
         mode: parsed.data.mode,
         generatedAt: new Date().toISOString(),
         result: generated,
-        warnings: analysisContext.warnings
+        warnings: [...analysisContext.warnings, ...workbenchContext.warnings]
       } satisfies AiTestGenerationResponse);
       return c.json(response);
     } catch (error) {
