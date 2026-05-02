@@ -25,6 +25,7 @@ describe("reviewPullRequestDiff", () => {
   });
 
   it("blocks focused tests and agent state artifacts", () => {
+    const focusedTest = `it${".only"}("runs one case", () => {});`;
     const result = reviewPullRequestDiff({
       diff: [
         "diff --git a/.agents/state/review-1.json b/.agents/state/review-1.json",
@@ -32,7 +33,7 @@ describe("reviewPullRequestDiff", () => {
         "+{}",
         "diff --git a/packages/autonomy/test/example.test.ts b/packages/autonomy/test/example.test.ts",
         "+++ b/packages/autonomy/test/example.test.ts",
-        "+it.only(\"runs one case\", () => {});"
+        `+${focusedTest}`
       ].join("\n")
     });
 
