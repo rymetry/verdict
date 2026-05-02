@@ -154,6 +154,8 @@ v1 では `.agents/autonomy.config.json` の `version: 1` を唯一の設定 ver
 5. `agents:progress seed-completed` で既存 repo の完了済み baseline を明示できる。
 6. 既存 file を `--force` なしで上書きしない。
 7. package tarball に engine bin と templates が入り、空 repo へ展開できる。
+8. `agents:drive --run-deploy` が config なしでは skipped、production approval なしでは blocked、
+   canary failure では `CANARY_FAILURE` として記録できる。
 
 ### 5.2 Verdict optimization after template migration
 
@@ -214,10 +216,15 @@ Deploy つき project は `deploy` を追加する。
   "deploy": {
     "enabled": true,
     "environment": "staging",
-    "provider": "vercel-compatible",
+    "provider": "custom-command",
+    "customCommand": ["pnpm", "deploy:staging", "--task", "{taskId}"],
     "healthCheckUrl": "https://example.com/health",
     "productionPolicy": "approval",
-    "canary": { "enabled": true, "checks": ["health", "console-errors"] }
+    "canary": {
+      "enabled": true,
+      "customCommand": ["pnpm", "canary:check", "--url", "{healthCheckUrl}"],
+      "checks": ["health", "console-errors"]
+    }
   }
 }
 ```

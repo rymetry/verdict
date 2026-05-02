@@ -1,0 +1,384 @@
+import { loadConfig, hasDeployConfig } from "./config.js";
+import { classifyToolFailure } from "./failures.js";
+import { SpawnCommandRunner, type CommandRunner } from "./githubShip.js";
+import { evaluateDeployGate } from "./policy.js";
+import { appendLearning, appendTimeline, ensureProgress, writeProgress } from "./state.js";
+import type { AutonomyConfig, FailureClass, GateDecision } from "./types.js";
+
+export interface RunDeployMonitorOptions {
+  projectRoot: string;
+  taskId?: string;
+  approvalGranted?: boolean;
+  runner?: CommandRunner;
+  now?: Date;
+}
+
+export interface DeployStageSummary {
+  stage: "land-and-deploy" | "canary";
+  status: "pass" | "fail" | "skipped" | "blocked";
+  summary: string;
+  evidence: string[];
+  failureClass?: FailureClass;
+}
+
+export interface RunDeployMonitorResult {
+  environment: "preview" | "staging" | "production";
+  gate: GateDecision;
+  deploy: DeployStageSummary;
+  canary: DeployStageSummary;
+  summary: string;
+}
+
+export function runDeployMonitor(options: RunDeployMonitorOptions): RunDeployMonitorResult {
+  const config = loadConfig(options.projectRoot);
+  const runner = options.runner ?? new SpawnCommandRunner(options.projectRoot);
+  const environment = config.deploy?.environment ?? "preview";
+  const emptyDeploy = makeStage("land-and-deploy", "skipped", "Deploy config is not configured.");
+  const emptyCanary = makeStage("canary", "skipped", "Canary config is not configured.");
+
+  if (!hasDeployConfig(config)) {
+    appendTimeline(options.projectRoot, {
+      stage: "land-and-deploy",
+      status: "skipped",
+      input: { taskId: options.taskId },
+      output: { message: emptyDeploy.summary }
+    });
+    appendTimeline(options.projectRoot, {
+      stage: "canary",
+      status: "skipped",
+      input: { taskId: options.taskId },
+      output: { message: emptyCanary.summary }
+    });
+    return {
+      environment,
+      gate: { allowed: true, reasons: [] },
+      deploy: emptyDeploy,
+      canary: emptyCanary,
+      summary: "Deploy/Monitor skipped because no deploy config is present."
+    };
+  }
+
+  const gate = evaluateDeployGate({
+    environment,
+    productionPolicy: config.deploy?.productionPolicy,
+    approvalGranted: options.approvalGranted
+  });
+  if (!gate.allowed) {
+    const blocked = makeStage(
+      "land-and-deploy",
+      "blocked",
+      `Deploy gate blocked: ${gate.reasons.join("; ")}`
+    );
+    updateDeployProgress(options, environment, "pending");
+    appendTimeline(options.projectRoot, {
+      stage: "land-and-deploy",
+      status: "pending",
+      input: { taskId: options.taskId, environment },
+      output: { message: blocked.summary, gate },
+      evidence: [".agents/autonomy.config.json"]
+    });
+    return {
+      environment,
+      gate,
+      deploy: blocked,
+      canary: emptyCanary,
+      summary: blocked.summary
+    };
+  }
+
+  const deploy = runDeployStage({ projectRoot: options.projectRoot, config, runner, taskId: options.taskId });
+  if (deploy.status === "fail") {
+    updateDeployProgress(options, environment, "failed");
+    recordDeployFailure(options.projectRoot, options.taskId, deploy.failureClass ?? "UNCLASSIFIED", deploy.summary);
+    return {
+      environment,
+      gate,
+      deploy,
+      canary: emptyCanary,
+      summary: deploy.summary
+    };
+  }
+
+  updateDeployProgress(options, environment, "deployed");
+  const canary = runCanaryStage({ projectRoot: options.projectRoot, config, runner, taskId: options.taskId });
+  if (canary.status === "fail") {
+    updateDeployProgress(options, environment, "failed");
+    recordDeployFailure(options.projectRoot, options.taskId, canary.failureClass ?? "CANARY_FAILURE", canary.summary);
+    return {
+      environment,
+      gate,
+      deploy,
+      canary,
+      summary: canary.summary
+    };
+  }
+
+  appendLearning(options.projectRoot, {
+    key: `deploy-monitor-${environment}`,
+    type: "tool",
+    insight: `Deploy/Monitor completed for ${environment} with deploy=${deploy.status} and canary=${canary.status}.`,
+    source: "deploy"
+  });
+  return {
+    environment,
+    gate,
+    deploy,
+    canary,
+    summary: `Deploy/Monitor completed for ${environment}.`
+  };
+}
+
+function runDeployStage(input: {
+  projectRoot: string;
+  config: AutonomyConfig;
+  runner: CommandRunner;
+  taskId?: string;
+}): DeployStageSummary {
+  const command = input.config.deploy?.customCommand;
+  const healthCheckUrl = input.config.deploy?.healthCheckUrl;
+  const evidence: string[] = [];
+
+  if (command?.length) {
+    const result = runConfiguredCommand({
+      runner: input.runner,
+      command,
+      stage: "land-and-deploy",
+      taskId: input.taskId,
+      environment: input.config.deploy?.environment ?? "preview",
+      healthCheckUrl,
+      timeoutMs: input.config.deploy?.timeoutMs
+    });
+    evidence.push(...result.evidence);
+    if (result.status === "fail") {
+      appendTimeline(input.projectRoot, {
+        stage: "land-and-deploy",
+        status: "fail",
+        input: { taskId: input.taskId },
+        output: { message: result.summary },
+        evidence,
+        failureClass: result.failureClass
+      });
+      return result;
+    }
+  }
+
+  if (healthCheckUrl) {
+    const result = runHealthCheck({
+      runner: input.runner,
+      stage: "land-and-deploy",
+      url: healthCheckUrl,
+      timeoutMs: input.config.deploy?.timeoutMs
+    });
+    evidence.push(...result.evidence);
+    if (result.status === "fail") {
+      appendTimeline(input.projectRoot, {
+        stage: "land-and-deploy",
+        status: "fail",
+        input: { taskId: input.taskId, healthCheckUrl },
+        output: { message: result.summary },
+        evidence,
+        failureClass: result.failureClass
+      });
+      return result;
+    }
+  }
+
+  const status = command?.length || healthCheckUrl ? "pass" : "skipped";
+  const summary =
+    status === "pass"
+      ? "Deploy stage completed."
+      : "Deploy stage skipped because no deploy command or health check is configured.";
+  appendTimeline(input.projectRoot, {
+    stage: "land-and-deploy",
+    status,
+    input: { taskId: input.taskId },
+    output: { message: summary },
+    evidence
+  });
+  return makeStage("land-and-deploy", status, summary, evidence);
+}
+
+function runCanaryStage(input: {
+  projectRoot: string;
+  config: AutonomyConfig;
+  runner: CommandRunner;
+  taskId?: string;
+}): DeployStageSummary {
+  if (input.config.deploy?.canary?.enabled === false) {
+    const skipped = makeStage("canary", "skipped", "Canary stage disabled by config.");
+    appendTimeline(input.projectRoot, {
+      stage: "canary",
+      status: "skipped",
+      input: { taskId: input.taskId },
+      output: { message: skipped.summary }
+    });
+    return skipped;
+  }
+
+  const command = input.config.deploy?.canary?.customCommand;
+  const healthCheckUrl = input.config.deploy?.canary?.healthCheckUrl ?? input.config.deploy?.healthCheckUrl;
+  const evidence: string[] = [];
+
+  if (command?.length) {
+    const result = runConfiguredCommand({
+      runner: input.runner,
+      command,
+      stage: "canary",
+      taskId: input.taskId,
+      environment: input.config.deploy?.environment ?? "preview",
+      healthCheckUrl,
+      timeoutMs: input.config.deploy?.canary?.timeoutMs ?? input.config.deploy?.timeoutMs,
+      canaryFailure: true
+    });
+    evidence.push(...result.evidence);
+    if (result.status === "fail") {
+      appendTimeline(input.projectRoot, {
+        stage: "canary",
+        status: "fail",
+        input: { taskId: input.taskId },
+        output: { message: result.summary },
+        evidence,
+        failureClass: result.failureClass
+      });
+      return result;
+    }
+  }
+
+  if (healthCheckUrl) {
+    const result = runHealthCheck({
+      runner: input.runner,
+      stage: "canary",
+      url: healthCheckUrl,
+      timeoutMs: input.config.deploy?.canary?.timeoutMs ?? input.config.deploy?.timeoutMs,
+      canaryFailure: true
+    });
+    evidence.push(...result.evidence);
+    if (result.status === "fail") {
+      appendTimeline(input.projectRoot, {
+        stage: "canary",
+        status: "fail",
+        input: { taskId: input.taskId, healthCheckUrl },
+        output: { message: result.summary },
+        evidence,
+        failureClass: result.failureClass
+      });
+      return result;
+    }
+  }
+
+  const status = command?.length || healthCheckUrl ? "pass" : "skipped";
+  const summary =
+    status === "pass"
+      ? "Canary stage completed."
+      : "Canary stage skipped because no canary command or health check is configured.";
+  appendTimeline(input.projectRoot, {
+    stage: "canary",
+    status,
+    input: { taskId: input.taskId },
+    output: { message: summary },
+    evidence
+  });
+  return makeStage("canary", status, summary, evidence);
+}
+
+function runConfiguredCommand(input: {
+  runner: CommandRunner;
+  command: readonly string[];
+  stage: "land-and-deploy" | "canary";
+  taskId?: string;
+  environment: string;
+  healthCheckUrl?: string;
+  timeoutMs?: number;
+  canaryFailure?: boolean;
+}): DeployStageSummary {
+  const [command, ...args] = input.command.map((value) =>
+    value
+      .replaceAll("{taskId}", input.taskId ?? "")
+      .replaceAll("{environment}", input.environment)
+      .replaceAll("{stage}", input.stage)
+      .replaceAll("{healthCheckUrl}", input.healthCheckUrl ?? "")
+  );
+  if (!command) {
+    return makeStage(input.stage, "skipped", `${input.stage} command is empty.`);
+  }
+  const result = input.runner.run(command, args, { timeoutMs: input.timeoutMs });
+  const evidence = [`command:${command}`];
+  if (result.exitCode === 0) {
+    return makeStage(input.stage, "pass", trimOrDefault(result.stdout, `${input.stage} command completed.`), evidence);
+  }
+  const failureClass = input.canaryFailure ? "CANARY_FAILURE" : classifyToolFailure(result.stderr || result.stdout);
+  return makeStage(
+    input.stage,
+    "fail",
+    trimOrDefault(result.stderr || result.stdout, `${input.stage} command failed.`),
+    evidence,
+    failureClass
+  );
+}
+
+function runHealthCheck(input: {
+  runner: CommandRunner;
+  stage: "land-and-deploy" | "canary";
+  url: string;
+  timeoutMs?: number;
+  canaryFailure?: boolean;
+}): DeployStageSummary {
+  const result = input.runner.run("curl", ["-fsS", input.url], { timeoutMs: input.timeoutMs });
+  const evidence = [input.url];
+  if (result.exitCode === 0) {
+    return makeStage(input.stage, "pass", "Health check passed.", evidence);
+  }
+  const failureClass = input.canaryFailure ? "CANARY_FAILURE" : classifyToolFailure(result.stderr || result.stdout);
+  return makeStage(
+    input.stage,
+    "fail",
+    trimOrDefault(result.stderr || result.stdout, `Health check failed for ${input.url}.`),
+    evidence,
+    failureClass
+  );
+}
+
+function updateDeployProgress(
+  options: RunDeployMonitorOptions,
+  environment: string,
+  status: "pending" | "deployed" | "failed" | "skipped"
+): void {
+  const progress = ensureProgress(options.projectRoot, options.now);
+  progress.last_iter_at = (options.now ?? new Date()).toISOString();
+  progress.stats.deploys += status === "deployed" ? 1 : 0;
+  if (progress.active) {
+    progress.active.deploy = { environment, status };
+  }
+  writeProgress(options.projectRoot, progress);
+}
+
+function recordDeployFailure(
+  projectRoot: string,
+  taskId: string | undefined,
+  failureClass: FailureClass,
+  reason: string
+): void {
+  const progress = ensureProgress(projectRoot);
+  progress.escalated.push({
+    id: taskId ? `${taskId}:deploy` : "deploy",
+    at: new Date().toISOString(),
+    class: failureClass,
+    reason
+  });
+  writeProgress(projectRoot, progress);
+}
+
+function makeStage(
+  stage: "land-and-deploy" | "canary",
+  status: DeployStageSummary["status"],
+  summary: string,
+  evidence: string[] = [],
+  failureClass?: FailureClass
+): DeployStageSummary {
+  return { stage, status, summary, evidence, failureClass };
+}
+
+function trimOrDefault(text: string, fallback: string): string {
+  const trimmed = text.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}

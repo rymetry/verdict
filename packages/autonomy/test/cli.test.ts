@@ -32,6 +32,14 @@ describe("cli", () => {
     expect(result.stdout).toBe("");
   });
 
+  it("rejects --run-deploy combined with ship commands", () => {
+    const result = runCli(["--run-deploy", "--ship-pr", "109"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--run-deploy cannot be combined with publish, review, or ship commands.");
+    expect(result.stdout).toBe("");
+  });
+
   it("recognizes symlinked package bin entrypoints", () => {
     const realCli = path.join(workdir, "dist", "cli.js");
     const linkedCli = path.join(workdir, "node_modules", ".bin", "agent-autonomy-drive");
