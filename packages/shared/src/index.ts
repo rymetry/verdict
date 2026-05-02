@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./workbench.js";
+
 export const HealthResponseSchema = z.object({
   ok: z.boolean(),
   service: z.literal("playwright-workbench-agent"),

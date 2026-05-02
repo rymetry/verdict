@@ -25,11 +25,53 @@ import {
   SnapshotPayloadSchema,
   TestCaseSchema,
   TestCodeSignalSchema,
+  WorkbenchContextSchema,
+  WorkbenchHookSpecSchema,
+  WorkbenchSkillSchema,
   WorkbenchEventSchema,
   terminalStatusMatchesEvent
 } from "@pwqa/shared";
 
 describe("shared run warning schemas", () => {
+  it("validates workbench loader schemas with project-relative paths", () => {
+    expect(
+      WorkbenchSkillSchema.parse({
+        name: "payment-flow",
+        relativePath: ".workbench/skills/payment-flow/SKILL.md",
+        frontmatter: { title: "Payment Flow" },
+        content: "# Payment Flow\n"
+      }).name
+    ).toBe("payment-flow");
+
+    expect(
+      WorkbenchHookSpecSchema.parse({
+        name: "pre-generate",
+        relativePath: ".workbench/hooks/pre-generate.sh",
+        extension: "sh",
+        content: "#!/bin/sh\n"
+      }).extension
+    ).toBe("sh");
+
+    expect(
+      WorkbenchContextSchema.parse({
+        skills: [],
+        rules: [],
+        hooks: [],
+        intents: [],
+        prompts: []
+      }).skills
+    ).toEqual([]);
+
+    expect(() =>
+      WorkbenchSkillSchema.parse({
+        name: "bad",
+        relativePath: "/tmp/project/.workbench/skills/bad/SKILL.md",
+        frontmatter: {},
+        content: "# Bad\n"
+      })
+    ).toThrow();
+  });
+
   it("validates RunRequest retries and workers controls", () => {
     expect(
       RunRequestSchema.parse({
