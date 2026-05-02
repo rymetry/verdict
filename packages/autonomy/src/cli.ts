@@ -44,8 +44,8 @@ export function runCli(args: string[], environment: CliEnvironment): number {
     const result = publishCurrent
       ? publishCurrentBranch({
           projectRoot,
-          title: readRequiredArg(args, "--title"),
-          bodyFile: readRequiredArg(args, "--body-file"),
+          title: readOptionalArg(args, "--title"),
+          bodyFile: readOptionalArg(args, "--body-file"),
           base: readOptionalArg(args, "--base"),
           head: readOptionalArg(args, "--head"),
           taskId: readOptionalArg(args, "--task-id"),
