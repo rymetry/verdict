@@ -9,6 +9,7 @@ import {
   CiArtifactImportRequestSchema,
   CiArtifactImportResponseSchema,
   CiArtifactLinkSchema,
+  ExplorationScreenModelDraftSchema,
   GitHubPullRequestLinkSchema,
   PlaywrightLaunchCommandRequestSchema,
   PlaywrightLaunchCommandResponseSchema,
@@ -25,6 +26,7 @@ import {
   SnapshotPayloadSchema,
   TestCaseSchema,
   TestCodeSignalSchema,
+  WorkbenchConfigSchema,
   WorkbenchContextSchema,
   WorkbenchHookSpecSchema,
   WorkbenchSkillSchema,
@@ -62,12 +64,109 @@ describe("shared run warning schemas", () => {
       }).skills
     ).toEqual([]);
 
+    expect(
+      WorkbenchConfigSchema.parse({
+        version: "0.1",
+        exploration: {
+          defaultProvider: "custom-browser-driver",
+          providers: [
+            {
+              name: "custom-browser-driver",
+              command: { executable: "node", args: ["scripts/explore.mjs"] }
+            }
+          ]
+        }
+      }).exploration
+    ).toMatchObject({
+      defaultProvider: "custom-browser-driver",
+      fallbackProviders: ["browser-use"],
+      maxAttempts: 2
+    });
+
+    expect(
+      ExplorationScreenModelDraftSchema.parse({
+        startUrl: "https://example.test",
+        provider: "custom-browser-driver",
+        generatedAt: "2026-05-02T00:00:00.000Z",
+        steps: [],
+        observedFlows: [],
+        unclear: [],
+        warnings: []
+      }).provider
+    ).toBe("custom-browser-driver");
+
     expect(() =>
       WorkbenchSkillSchema.parse({
         name: "bad",
         relativePath: "/tmp/project/.workbench/skills/bad/SKILL.md",
         frontmatter: {},
         content: "# Bad\n"
+      })
+    ).toThrow();
+    expect(() =>
+      WorkbenchConfigSchema.parse({
+        version: "0.1",
+        exploration: {
+          providers: [
+            {
+              name: "stagehand",
+              command: { executable: "/tmp/stagehand", args: [] }
+            }
+          ]
+        }
+      })
+    ).toThrow();
+    expect(() =>
+      WorkbenchConfigSchema.parse({
+        version: "0.1",
+        exploration: {
+          providers: [
+            {
+              name: "stagehand",
+              command: { executable: "node", args: ["scripts/explore.mjs", "--state=/etc/passwd"] }
+            }
+          ]
+        }
+      })
+    ).toThrow();
+    expect(() =>
+      WorkbenchConfigSchema.parse({
+        version: "0.1",
+        exploration: {
+          providers: [
+            {
+              name: "stagehand",
+              command: { executable: "node", args: ["scripts/explore.mjs", "\\\\server\\share\\state.json"] }
+            }
+          ]
+        }
+      })
+    ).toThrow();
+    expect(() =>
+      WorkbenchConfigSchema.parse({
+        version: "0.1",
+        exploration: {
+          providers: [
+            {
+              name: "stagehand",
+              command: {
+                executable: "node",
+                args: ["scripts/explore.mjs", "--api-key=sk-proj-abcdefghijklmnopqrstuvwxyz"]
+              }
+            }
+          ]
+        }
+      })
+    ).toThrow();
+    expect(() =>
+      WorkbenchConfigSchema.parse({
+        version: "0.1",
+        exploration: {
+          providers: [
+            { name: "stagehand", command: { executable: "node", args: ["a.mjs"] } },
+            { name: "stagehand", command: { executable: "node", args: ["b.mjs"] } }
+          ]
+        }
       })
     ).toThrow();
   });

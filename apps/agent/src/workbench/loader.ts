@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
   WorkbenchAgentsManifestSchema,
+  WorkbenchConfigSchema,
   WorkbenchContextSchema,
   WorkbenchHookSpecSchema,
   WorkbenchIntentSchema,
@@ -42,7 +43,8 @@ export async function loadWorkbench(projectRoot: string): Promise<WorkbenchConte
   }
 
   const agents = await loadAgentsManifest(workbenchRoot, absoluteProjectRoot);
-  const [skills, rules, hooks, intents, prompts] = await Promise.all([
+  const [config, skills, rules, hooks, intents, prompts] = await Promise.all([
+    loadConfig(workbenchRoot, absoluteProjectRoot),
     loadSkills(workbenchRoot, absoluteProjectRoot),
     loadRules(workbenchRoot, absoluteProjectRoot),
     loadHooks(workbenchRoot, absoluteProjectRoot),
@@ -52,6 +54,7 @@ export async function loadWorkbench(projectRoot: string): Promise<WorkbenchConte
 
   return freezeWorkbenchContext(
     WorkbenchContextSchema.parse({
+      config,
       agents,
       skills,
       rules,
@@ -59,6 +62,21 @@ export async function loadWorkbench(projectRoot: string): Promise<WorkbenchConte
       intents,
       prompts
     })
+  );
+}
+
+async function loadConfig(
+  workbenchRoot: string,
+  projectRoot: string
+): Promise<WorkbenchContext["config"]> {
+  const absolutePath = path.join(workbenchRoot, "workbench.json");
+  if (!(await fileExists(absolutePath))) {
+    return undefined;
+  }
+
+  const relativePath = projectRelativePath(absolutePath, projectRoot);
+  return parseFile(relativePath, async () =>
+    WorkbenchConfigSchema.parse(JSON.parse(await fs.readFile(absolutePath, "utf8")))
   );
 }
 
