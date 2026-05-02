@@ -141,9 +141,11 @@ export function drive(options: DriveOptions): DriveResult {
         stages,
         task: selection.task,
         warnings: selection.warnings,
-        blockedReason: "waiting-for-pr",
+        blockedReason: execution.prNumber ? "waiting-for-qa-review-ship" : "waiting-for-pr",
         progressPath: ".agents/state/progress.json",
-        summary: `${execution.summary} Waiting for PR publication, QA, review, and ship gates.`
+        summary: execution.prNumber
+          ? `${execution.summary} PR #${execution.prNumber} is ready for QA, review, and ship gates.`
+          : `${execution.summary} Waiting for PR publication, QA, review, and ship gates.`
       };
     }
 

@@ -59,6 +59,12 @@ export interface AutonomyConfig {
       expectedReviewers?: string[];
       timeoutMs?: number;
     };
+    customCommands?: Array<{
+      name?: string;
+      command: string[];
+      expectedReviewers?: string[];
+      timeoutMs?: number;
+    }>;
   };
   deploy?: {
     enabled?: boolean;

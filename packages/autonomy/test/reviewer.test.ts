@@ -61,6 +61,50 @@ describe("runStructuredReview", () => {
     );
   });
 
+  it("merges multiple configured review command outputs", () => {
+    const runner = new FakeRunner([
+      {
+        exitCode: 0,
+        stdout: `${JSON.stringify({
+          expectedReviewers: ["diff-review"],
+          reviews: [{ reviewer: "diff-review", status: "pass", findings: [], summary: "ok" }]
+        })}\n`,
+        stderr: ""
+      },
+      {
+        exitCode: 0,
+        stdout: `${JSON.stringify({
+          expectedReviewers: ["ai-review"],
+          reviews: [{ reviewer: "ai-review", status: "pass", findings: [], summary: "ok" }]
+        })}\n`,
+        stderr: ""
+      }
+    ]);
+
+    const result = runStructuredReview({
+      projectRoot: workdir,
+      config: {
+        ...baseConfig,
+        reviewers: {
+          customCommands: [
+            { name: "diff", command: ["diff-review", "{prNumber}"], expectedReviewers: ["diff-review"] },
+            { name: "ai", command: ["ai-review", "{prNumber}"], expectedReviewers: ["ai-review"] }
+          ]
+        }
+      },
+      prNumber: 126,
+      runner
+    });
+
+    expect(runner.calls).toEqual([
+      { command: "diff-review", args: ["126"], options: { timeoutMs: undefined } },
+      { command: "ai-review", args: ["126"], options: { timeoutMs: undefined } }
+    ]);
+    expect(result.reviewInput.expectedReviewers).toEqual(["diff-review", "ai-review"]);
+    expect(result.reviewInput.reviews.map((review) => review.reviewer)).toEqual(["diff-review", "ai-review"]);
+    expect(result.summary).toBe("Wrote 2 structured reviews for PR #126.");
+  });
+
   it("writes an explicit pending operator review when no command is configured", () => {
     const result = runStructuredReview({
       projectRoot: workdir,
@@ -121,11 +165,18 @@ describe("runStructuredReview", () => {
 
 class FakeRunner implements CommandRunner {
   readonly calls: Array<{ command: string; args: readonly string[]; options?: CommandRunOptions }> = [];
+  private readonly results: CommandResult[];
 
-  constructor(private readonly result: CommandResult) {}
+  constructor(result: CommandResult | CommandResult[]) {
+    this.results = Array.isArray(result) ? [...result] : [result];
+  }
 
   run(command: string, args: readonly string[], options?: CommandRunOptions): CommandResult {
     this.calls.push({ command, args, options });
-    return this.result;
+    const result = this.results.shift();
+    if (!result) {
+      throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+    }
+    return result;
   }
 }

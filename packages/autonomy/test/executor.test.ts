@@ -69,6 +69,43 @@ describe("executeTask", () => {
     expect(fs.existsSync(path.join(workdir, result.promptPath))).toBe(true);
   });
 
+  it("records PR completion metadata when the executor emits structured JSON", () => {
+    const result = executeTask({
+      projectRoot: workdir,
+      config,
+      task,
+      runner: new FakeRunner({
+        exitCode: 0,
+        stdout: [
+          "implemented task",
+          JSON.stringify({
+            prNumber: 123,
+            prUrl: "https://github.com/rymetry/verdict/pull/123",
+            branch: "codex/roadmap-1",
+            tests: ["pnpm --filter @rymetry/agent-autonomy test"],
+            summary: "Opened PR for ROADMAP-1"
+          })
+        ].join("\n"),
+        stderr: ""
+      })
+    });
+
+    expect(result).toMatchObject({
+      status: "pass",
+      prNumber: 123,
+      prUrl: "https://github.com/rymetry/verdict/pull/123",
+      branch: "codex/roadmap-1",
+      summary: "Opened PR for ROADMAP-1"
+    });
+    const progress = JSON.parse(fs.readFileSync(path.join(workdir, ".agents", "state", "progress.json"), "utf8"));
+    expect(progress.active).toMatchObject({
+      id: "ROADMAP-1",
+      pr_number: 123,
+      branch: "codex/roadmap-1",
+      stage: "ship"
+    });
+  });
+
   it("classifies timed-out executor commands as CODEX_HANG", () => {
     const result = executeTask({
       projectRoot: workdir,

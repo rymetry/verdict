@@ -9,7 +9,11 @@ export interface ReviewInputFile {
 
 export function loadReviewInput(projectRoot: string, reviewFile: string): ReviewInputFile {
   const target = path.resolve(projectRoot, reviewFile);
-  const parsed = JSON.parse(fs.readFileSync(target, "utf8")) as unknown;
+  return parseReviewInput(fs.readFileSync(target, "utf8"));
+}
+
+export function parseReviewInput(raw: string): ReviewInputFile {
+  const parsed = JSON.parse(raw) as unknown;
   const input = Array.isArray(parsed) ? { reviews: parsed } : parsed;
   if (!isRecord(input) || !Array.isArray(input.reviews)) {
     throw new Error("Review input must be an array or an object with a reviews array.");
