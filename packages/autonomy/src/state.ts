@@ -176,7 +176,7 @@ function normalizeTaskIds(
   return unique;
 }
 
-function readActiveTaskId(progress: ProgressState): string | null {
+export function readActiveTaskId(progress: ProgressState): string | null {
   if (!progress.active) {
     return null;
   }

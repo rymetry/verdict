@@ -18,23 +18,46 @@ export function initProject(options: InitOptions): InitResult {
   const skipped: string[] = [];
   for (const relative of listTemplateFiles(templateRoot)) {
     const source = path.join(templateRoot, relative);
-    const target = path.join(options.targetRoot, relative);
+    const targetRelative = templateTargetPath(relative);
+    const target = path.join(options.targetRoot, targetRelative);
     if (!fs.existsSync(source)) {
-      skipped.push(relative);
+      skipped.push(targetRelative);
       continue;
     }
     if (fs.existsSync(target) && !options.force) {
-      skipped.push(relative);
+      if (targetRelative === ".gitignore" && appendGitignoreStateRule(target)) {
+        written.push(targetRelative);
+        continue;
+      }
+      skipped.push(targetRelative);
       continue;
     }
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(source, target);
-    if (relative.includes("/hooks/")) {
+    if (targetRelative.includes("/hooks/")) {
       fs.chmodSync(target, 0o755);
     }
-    written.push(relative);
+    written.push(targetRelative);
   }
   return { written, skipped };
+}
+
+function templateTargetPath(relative: string): string {
+  return relative === "gitignore" ? ".gitignore" : relative;
+}
+
+function appendGitignoreStateRule(target: string): boolean {
+  const existing = fs.readFileSync(target, "utf8");
+  if (/^\.agents\/state\/$/m.test(existing)) {
+    return false;
+  }
+  const prefix = existing.endsWith("\n") ? "" : "\n";
+  fs.appendFileSync(
+    target,
+    `${prefix}\n# Agent runtime state\n.agents/state/\n`,
+    { mode: 0o600 }
+  );
+  return true;
 }
 
 function resolveTemplateRoot(sourceRoot: string): string {

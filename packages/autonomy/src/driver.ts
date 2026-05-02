@@ -28,7 +28,31 @@ export function drive(options: DriveOptions): DriveResult {
     progress.last_iter_at = new Date().toISOString();
     progress.stats.iterations += 1;
     writeProgress(options.projectRoot, progress);
-    const selection = pickTask(options.projectRoot, config, progress);
+    const selection = applyHighRiskGate(pickTask(options.projectRoot, config, progress));
+
+    if (selection.blockedReason === "high-risk-task" && !options.dryRun) {
+      const failure = appendTimeline(options.projectRoot, {
+        stage: "plan",
+        status: "fail",
+        input: { adapters: config.adapters },
+        output: {
+          message: "Selected task is high risk and requires explicit human approval.",
+          task: selection.task,
+          taskWarnings: selection.warnings,
+          blockedReason: selection.blockedReason
+        },
+        failureClass: "UNCLASSIFIED",
+        evidence: [".agents/autonomy.config.json", ...selection.evidence]
+      });
+      progress.escalated.push({
+        id: selection.task?.id ?? "high-risk-task",
+        at: failure.at,
+        class: "UNCLASSIFIED",
+        reason: "Selected task is high risk and requires explicit human approval."
+      });
+      writeProgress(options.projectRoot, progress);
+      throw new Error("Selected task is high risk and requires explicit human approval.");
+    }
 
     if (!options.dryRun) {
       const failure = appendTimeline(options.projectRoot, {
@@ -89,4 +113,17 @@ export function drive(options: DriveOptions): DriveResult {
   } finally {
     lock.release();
   }
+}
+
+function applyHighRiskGate<T extends { task: TaskBrief | null; warnings: string[]; blockedReason?: string }>(
+  selection: T
+): T {
+  if (!selection.task?.highRisk || selection.blockedReason) {
+    return selection;
+  }
+  return {
+    ...selection,
+    warnings: [...selection.warnings, `Task ${selection.task.id} is high risk and requires approval.`],
+    blockedReason: "high-risk-task"
+  };
 }

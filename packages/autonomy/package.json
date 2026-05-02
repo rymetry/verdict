@@ -1,10 +1,14 @@
 {
   "name": "@rymetry/agent-autonomy",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "templates"
+  ],
   "bin": {
     "agent-autonomy-drive": "./dist/cli.js",
     "agent-autonomy-init": "./dist/init-cli.js",
@@ -23,6 +27,7 @@
     "drive": "pnpm run build && node dist/cli.js",
     "init": "pnpm run build && node dist/init-cli.js",
     "progress": "pnpm run build && node dist/progress-cli.js",
+    "prepack": "pnpm run build",
     "test": "vitest run"
   },
   "devDependencies": {

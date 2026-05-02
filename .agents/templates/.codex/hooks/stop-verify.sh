@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-if git --no-pager grep -l --exclude-standard -E '^(<<<<<<<|>>>>>>>|=======)$' -- ':!node_modules' >/tmp/agents-conflicts.$$ 2>/dev/null; then
-  if [ -s /tmp/agents-conflicts.$$ ]; then
-    echo "Conflict markers found:" >&2
-    cat /tmp/agents-conflicts.$$ >&2
-  fi
+matches="$(git --no-pager grep -n -E '^(<<<<<<<|>>>>>>>|=======)$' -- ':!node_modules' 2>/dev/null || true)"
+if [ -n "$matches" ]; then
+  echo "Conflict markers found:" >&2
+  printf '%s\n' "$matches" >&2
+  exit 2
 fi
-rm -f /tmp/agents-conflicts.$$
 
 exit 0

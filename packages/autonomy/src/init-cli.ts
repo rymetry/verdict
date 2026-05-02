@@ -18,15 +18,16 @@ try {
 }
 
 function readPathArg(args: string[], flag: string, fallback: string): string {
+  const base = process.env.INIT_CWD ?? process.cwd();
   const index = args.indexOf(flag);
   if (index === -1) {
-    return fallback;
+    return path.resolve(fallback);
   }
   const value = args[index + 1];
   if (!value || value.startsWith("--")) {
     throw new Error(`${flag} requires a path value`);
   }
-  return path.resolve(value);
+  return path.resolve(base, value);
 }
 
 function defaultPackageRoot(): string {

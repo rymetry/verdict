@@ -29,9 +29,14 @@ export function defaultConfig(): AutonomyConfig {
     adapters: {
       taskSource: "markdown-roadmap",
       executor: "codex",
-      verifier: "custom-command",
+      verifier: "manual-verification",
       reviewer: "codex-review",
       publisher: "github-pr"
+    },
+    taskSources: {
+      markdownRoadmap: {
+        paths: ["ROADMAP.md", "docs/ROADMAP.md", "docs/roadmap.md", "TODO.md"]
+      }
     },
     safety: {
       autoMerge: false,
@@ -64,8 +69,27 @@ export function mergeConfig(base: AutonomyConfig, override: Partial<AutonomyConf
     ...override,
     workflow: { ...base.workflow, ...override.workflow },
     adapters: { ...base.adapters, ...override.adapters },
+    taskSources: mergeTaskSources(base.taskSources, override.taskSources),
     deploy: override.deploy === undefined ? base.deploy : { ...base.deploy, ...override.deploy },
     safety: { ...base.safety, ...override.safety }
+  };
+}
+
+function mergeTaskSources(
+  base: AutonomyConfig["taskSources"],
+  override: AutonomyConfig["taskSources"]
+): AutonomyConfig["taskSources"] {
+  return {
+    ...base,
+    ...override,
+    markdownRoadmap: {
+      ...base?.markdownRoadmap,
+      ...override?.markdownRoadmap
+    },
+    customCommand: {
+      ...base?.customCommand,
+      ...override?.customCommand
+    }
   };
 }
 
