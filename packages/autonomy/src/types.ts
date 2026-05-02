@@ -47,6 +47,19 @@ export interface AutonomyConfig {
       timeoutMs?: number;
     };
   };
+  executors?: {
+    customCommand?: {
+      command?: string[];
+      timeoutMs?: number;
+    };
+  };
+  reviewers?: {
+    customCommand?: {
+      command?: string[];
+      expectedReviewers?: string[];
+      timeoutMs?: number;
+    };
+  };
   deploy?: {
     enabled?: boolean;
     environment?: "preview" | "staging" | "production";

@@ -70,6 +70,8 @@ export function mergeConfig(base: AutonomyConfig, override: Partial<AutonomyConf
     workflow: { ...base.workflow, ...override.workflow },
     adapters: { ...base.adapters, ...override.adapters },
     taskSources: mergeTaskSources(base.taskSources, override.taskSources),
+    executors: mergeExecutors(base.executors, override.executors),
+    reviewers: mergeReviewers(base.reviewers, override.reviewers),
     deploy: override.deploy === undefined ? base.deploy : { ...base.deploy, ...override.deploy },
     safety: { ...base.safety, ...override.safety }
   };
@@ -86,6 +88,34 @@ function mergeTaskSources(
       ...base?.markdownRoadmap,
       ...override?.markdownRoadmap
     },
+    customCommand: {
+      ...base?.customCommand,
+      ...override?.customCommand
+    }
+  };
+}
+
+function mergeExecutors(
+  base: AutonomyConfig["executors"],
+  override: AutonomyConfig["executors"]
+): AutonomyConfig["executors"] {
+  return {
+    ...base,
+    ...override,
+    customCommand: {
+      ...base?.customCommand,
+      ...override?.customCommand
+    }
+  };
+}
+
+function mergeReviewers(
+  base: AutonomyConfig["reviewers"],
+  override: AutonomyConfig["reviewers"]
+): AutonomyConfig["reviewers"] {
+  return {
+    ...base,
+    ...override,
     customCommand: {
       ...base?.customCommand,
       ...override?.customCommand

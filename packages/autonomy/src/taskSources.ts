@@ -38,15 +38,6 @@ export function pickMarkdownRoadmapTask(
 ): TaskSelection {
   const activeTaskId = readActiveTaskId(progress);
   const evidence = [".agents/state/progress.json"];
-  if (activeTaskId !== null) {
-    return {
-      task: null,
-      warnings: [`Active task ${activeTaskId} is already in progress.`],
-      evidence,
-      blockedReason: "active-task-in-progress"
-    };
-  }
-
   let sources: MarkdownTaskRow[];
   try {
     sources = readMarkdownRoadmapTasks(projectRoot, config);
@@ -74,6 +65,23 @@ export function pickMarkdownRoadmapTask(
   }
 
   const completed = new Set(progress.completed);
+  if (activeTaskId !== null) {
+    const active = sources.find((task) => task.id === activeTaskId && !completed.has(task.id));
+    if (active) {
+      return {
+        task: taskBriefFromMarkdownRow(active, config),
+        warnings: [`Retrying active task ${activeTaskId}.`],
+        evidence: [...evidence, active.sourcePath]
+      };
+    }
+    return {
+      task: null,
+      warnings: [`Active task ${activeTaskId} is already in progress but is not present in the roadmap.`],
+      evidence,
+      blockedReason: "active-task-in-progress"
+    };
+  }
+
   const next = sources.find((task) => !completed.has(task.id));
   if (!next) {
     return {
@@ -83,17 +91,20 @@ export function pickMarkdownRoadmapTask(
     };
   }
 
-  const task: TaskBrief = {
-    id: next.id,
-    title: next.title,
-    deliverable: `${next.title} | ${next.sourcePath}:${next.line}`,
-    expectedScope: inferExpectedScope(next.raw),
-    highRisk: isTextHighRisk(`${next.id} ${next.title} ${next.raw}`, config)
-  };
   return {
-    task,
+    task: taskBriefFromMarkdownRow(next, config),
     warnings: [],
     evidence: [...evidence, next.sourcePath]
+  };
+}
+
+function taskBriefFromMarkdownRow(row: MarkdownTaskRow, config: AutonomyConfig): TaskBrief {
+  return {
+    id: row.id,
+    title: row.title,
+    deliverable: `${row.title} | ${row.sourcePath}:${row.line}`,
+    expectedScope: inferExpectedScope(row.raw),
+    highRisk: isTextHighRisk(`${row.id} ${row.title} ${row.raw}`, config)
   };
 }
 

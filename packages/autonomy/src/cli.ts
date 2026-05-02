@@ -1,53 +1,99 @@
 #!/usr/bin/env node
+import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
+import { loadConfig } from "./config.js";
 import { drive } from "./driver.js";
 import { publishCurrentBranch } from "./githubPublish.js";
 import { shipPullRequest, SpawnCommandRunner } from "./githubShip.js";
 import { loadReviewInput } from "./reviewInput.js";
+import { runStructuredReview } from "./reviewer.js";
 
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
-
-try {
-  const projectRoot = readPathArg(args, "--cwd", process.env.INIT_CWD ?? process.cwd());
-  const runner = new SpawnCommandRunner(projectRoot);
-  const publishCurrent = args.includes("--publish-current");
-  const shipPr = readNumberArg(args, "--ship-pr");
-  const reviewFile = readOptionalArg(args, "--review-file");
-  const reviewInput = reviewFile ? loadReviewInput(projectRoot, reviewFile) : undefined;
-  const result = publishCurrent
-    ? publishCurrentBranch({
-        projectRoot,
-        title: readRequiredArg(args, "--title"),
-        bodyFile: readRequiredArg(args, "--body-file"),
-        base: readOptionalArg(args, "--base"),
-        head: readOptionalArg(args, "--head"),
-        taskId: readOptionalArg(args, "--task-id"),
-        draft: args.includes("--draft"),
-        runner
-      })
-    : shipPr
-      ? shipPullRequest({
-          projectRoot,
-          prNumber: shipPr,
-          taskId: readOptionalArg(args, "--task-id"),
-          autoMerge: args.includes("--auto-merge"),
-          qa: args.includes("--qa-pass") ? "pass" : "skipped",
-          review: args.includes("--review-pass") ? "pass" : "pending",
-          reviews: reviewInput?.reviews,
-          expectedReviewers: reviewInput?.expectedReviewers,
-          scope: args.includes("--scope-fail") ? "fail" : "pass"
-        })
-      : drive({ projectRoot, dryRun });
-  console.log(JSON.stringify(result, null, 2));
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
-  process.exitCode = 1;
+export interface CliEnvironment {
+  cwd: string;
+  initCwd?: string;
+  stdout: Pick<typeof process.stdout, "write">;
+  stderr: Pick<typeof process.stderr, "write">;
 }
 
-function readPathArg(args: string[], flag: string, fallback: string): string {
-  const base = process.env.INIT_CWD ?? process.cwd();
+export function runCli(args: string[], environment: CliEnvironment): number {
+  const dryRun = args.includes("--dry-run");
+  try {
+    const projectRoot = readPathArg(args, "--cwd", environment.initCwd ?? environment.cwd, environment);
+    const runner = new SpawnCommandRunner(projectRoot);
+    const publishCurrent = args.includes("--publish-current");
+    const shipPr = readNumberArg(args, "--ship-pr");
+    const reviewPr = readNumberArg(args, "--run-review");
+    if (reviewPr !== undefined && shipPr !== undefined && reviewPr !== shipPr) {
+      throw new Error("--run-review and --ship-pr must reference the same PR.");
+    }
+    const reviewFile = readOptionalArg(args, "--review-file");
+    if (reviewPr !== undefined && reviewFile !== undefined) {
+      throw new Error("--run-review cannot be combined with --review-file.");
+    }
+    const reviewResult = reviewPr
+      ? runStructuredReview({
+          projectRoot,
+          config: loadConfig(projectRoot),
+          prNumber: reviewPr,
+          runner
+        })
+      : undefined;
+    const resolvedReviewFile = reviewFile ?? reviewResult?.reviewFile;
+    const reviewInput = resolvedReviewFile ? loadReviewInput(projectRoot, resolvedReviewFile) : undefined;
+    const result = publishCurrent
+      ? publishCurrentBranch({
+          projectRoot,
+          title: readRequiredArg(args, "--title"),
+          bodyFile: readRequiredArg(args, "--body-file"),
+          base: readOptionalArg(args, "--base"),
+          head: readOptionalArg(args, "--head"),
+          taskId: readOptionalArg(args, "--task-id"),
+          draft: args.includes("--draft"),
+          runner
+        })
+      : reviewPr && !shipPr
+        ? reviewResult
+        : shipPr
+          ? shipPullRequest({
+              projectRoot,
+              prNumber: shipPr,
+              taskId: readOptionalArg(args, "--task-id"),
+              autoMerge: args.includes("--auto-merge"),
+              qa: args.includes("--qa-pass") ? "pass" : "skipped",
+              review: args.includes("--review-pass") ? "pass" : "pending",
+              reviews: reviewInput?.reviews,
+              expectedReviewers: reviewInput?.expectedReviewers,
+              scope: args.includes("--scope-fail") ? "fail" : "pass"
+            })
+          : drive({ projectRoot, dryRun });
+    environment.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    environment.stderr.write(`${message}\n`);
+    return 1;
+  }
+}
+
+if (isMainModule(import.meta.url, process.argv[1])) {
+  process.exitCode = runCli(process.argv.slice(2), {
+    cwd: process.cwd(),
+    initCwd: process.env.INIT_CWD,
+    stdout: process.stdout,
+    stderr: process.stderr
+  });
+}
+
+export function isMainModule(moduleUrl: string, argvPath: string | undefined): boolean {
+  if (!argvPath) {
+    return false;
+  }
+  return moduleUrl === pathToFileURL(fs.realpathSync(argvPath)).href;
+}
+
+function readPathArg(args: string[], flag: string, fallback: string, environment: CliEnvironment): string {
+  const base = environment.initCwd ?? environment.cwd;
   const index = args.indexOf(flag);
   if (index === -1) {
     return path.resolve(fallback);

@@ -57,7 +57,7 @@ describe("pickMarkdownRoadmapTask", () => {
     });
   });
 
-  it("blocks when a task is already active", () => {
+  it("reselects an active roadmap task for retry", () => {
     writeRoadmap();
 
     expect(
@@ -74,8 +74,11 @@ describe("pickMarkdownRoadmapTask", () => {
         })
       )
     ).toMatchObject({
-      task: null,
-      blockedReason: "active-task-in-progress"
+      task: {
+        id: "ROADMAP-1",
+        title: "Add lifecycle CLI"
+      },
+      warnings: ["Retrying active task ROADMAP-1."]
     });
   });
 
