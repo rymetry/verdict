@@ -115,6 +115,10 @@ function writeQmoSummary(run: RunMetadata, summary: Partial<QmoSummary> = {}): v
   fs.writeFileSync(run.paths.qmoSummaryJsonPath, JSON.stringify(qmo, null, 2));
 }
 
+function resetWorkbenchDir(): void {
+  fs.rmSync(path.join(workdir, ".workbench"), { recursive: true, force: true });
+}
+
 beforeAll(() => {
   workdir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pwqa-server-")));
   fs.writeFileSync(
@@ -1688,6 +1692,26 @@ describe("HTTP API surface", () => {
   it("runs AI test generation through the redacted gateway context", async () => {
     const run = fakeRunMetadata(workdir, "run-ai-gen-11111111", 1);
     writeRunMetadata(run);
+    resetWorkbenchDir();
+    fs.mkdirSync(path.join(workdir, ".workbench", "rules"), { recursive: true });
+    fs.mkdirSync(path.join(workdir, ".workbench", "skills", "checkout-flow"), { recursive: true });
+    fs.mkdirSync(path.join(workdir, ".workbench", "hooks"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workdir, ".workbench", "AGENTS.md"),
+      `# Project context\nDo not leak ${workdir}.\n`
+    );
+    fs.writeFileSync(
+      path.join(workdir, ".workbench", "rules", "locator-policy.md"),
+      "---\nkind: rule\n---\nPrefer role locators. token=ghp_123456789012345678901234\nDo not expose /private/tmp/app or C:\\tmp\\app.\n"
+    );
+    fs.writeFileSync(
+      path.join(workdir, ".workbench", "skills", "checkout-flow", "SKILL.md"),
+      "---\nname: checkout-flow\n---\nUse checkout domain fixtures.\n"
+    );
+    fs.writeFileSync(
+      path.join(workdir, ".workbench", "hooks", "pre-generate.sh"),
+      "echo validate generated plan\n"
+    );
     let capturedObjective: string | undefined;
     const { app, projectStore } = buildApp({
       env: {
@@ -1706,6 +1730,14 @@ describe("HTTP API surface", () => {
           expect(input.context.mode).toBe("healer");
           expect(input.context.targetFiles).toEqual(["tests/generated.spec.ts"]);
           expect(JSON.stringify(input.context)).not.toContain(workdir);
+          expect(input.context.workbenchContext?.agents?.content).toContain("<projectRoot>");
+          expect(input.context.workbenchContext?.rules[0]?.name).toBe("locator-policy");
+          expect(input.context.workbenchContext?.rules[0]?.content).toContain("<REDACTED>");
+          expect(input.context.workbenchContext?.rules[0]?.content).toContain("<REDACTED_PATH>");
+          expect(input.context.workbenchContext?.skills[0]?.name).toBe("checkout-flow");
+          expect(input.context.workbenchContext?.hooks[0]?.name).toBe("pre-generate");
+          expect(JSON.stringify(input.context)).not.toContain("/private/tmp");
+          expect(JSON.stringify(input.context)).not.toContain("C:\\tmp");
           return {
             plan: ["Add generated coverage"],
             proposedPatch: "diff --git a/tests/generated.spec.ts b/tests/generated.spec.ts\n",
@@ -1735,6 +1767,64 @@ describe("HTTP API surface", () => {
     expect(capturedObjective).toBe("Generate a regression test for checkout failure.");
     expect(body.mode).toBe("healer");
     expect(body.result.filesTouched).toEqual(["tests/generated.spec.ts"]);
+    expect(body.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(".workbench/rules/locator-policy.md: redacted")
+      ])
+    );
+  });
+
+  it("degrades AI test generation when .workbench context is malformed", async () => {
+    const run = fakeRunMetadata(workdir, "run-ai-gen-22222222", 1);
+    writeRunMetadata(run);
+    resetWorkbenchDir();
+    fs.mkdirSync(path.join(workdir, ".workbench", "rules"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workdir, ".workbench", "rules", "broken.md"),
+      "---\n[unterminated\n---\nPrefer role locators.\n"
+    );
+    const { app, projectStore } = buildApp({
+      env: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        allowedRoots: [workdir],
+        failClosedAudit: false
+      },
+      aiAdapterFactory: () => ({
+        async analyze() {
+          throw new Error("not used");
+        },
+        async generateTests(input) {
+          expect(input.context.workbenchContext?.rules).toEqual([]);
+          expect(input.context.workbenchContext?.warnings[0]).toContain("Workbench context unavailable");
+          expect(JSON.stringify(input.context)).not.toContain(workdir);
+          return {
+            plan: ["Add generated coverage"],
+            filesTouched: ["tests/generated.spec.ts"],
+            evidence: ["failure context includes checkout"],
+            risk: ["workbench context omitted"],
+            confidence: 0.61,
+            requiresHumanDecision: true
+          };
+        }
+      })
+    });
+    projectStore.set({ summary: fakeProjectSummary(workdir), packageManager: fakePackageManager() });
+
+    const response = await app.request(`/runs/${run.runId}/ai-test-generation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        objective: "Generate a regression test for checkout failure."
+      })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining("Workbench context unavailable")])
+    );
   });
 
   it("serves linkable evidence artifacts through index-based routes", async () => {

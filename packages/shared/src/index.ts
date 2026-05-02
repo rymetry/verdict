@@ -857,11 +857,44 @@ export const AiTestGenerationRequestSchema = z.object({
 });
 export type AiTestGenerationRequest = z.input<typeof AiTestGenerationRequestSchema>;
 
+export const AiWorkbenchContextDocumentSchema = z.object({
+  name: z.string().min(1),
+  relativePath: ProjectRelativeFileSchema,
+  frontmatter: z.record(z.string(), z.unknown()).optional(),
+  content: z.string()
+});
+export type AiWorkbenchContextDocument = z.infer<typeof AiWorkbenchContextDocumentSchema>;
+
+export const AiWorkbenchAgentsContextSchema = z.object({
+  relativePath: ProjectRelativeFileSchema,
+  content: z.string()
+});
+export type AiWorkbenchAgentsContext = z.infer<typeof AiWorkbenchAgentsContextSchema>;
+
+export const AiWorkbenchHookContextSchema = z.object({
+  name: z.string().min(1),
+  relativePath: ProjectRelativeFileSchema,
+  extension: z.enum(["sh", "toml", "json"]),
+  content: z.string()
+});
+export type AiWorkbenchHookContext = z.infer<typeof AiWorkbenchHookContextSchema>;
+
+export const AiWorkbenchContextSchema = z.object({
+  agents: AiWorkbenchAgentsContextSchema.optional(),
+  rules: z.array(AiWorkbenchContextDocumentSchema),
+  skills: z.array(AiWorkbenchContextDocumentSchema),
+  hooks: z.array(AiWorkbenchHookContextSchema),
+  prompts: z.array(AiWorkbenchContextDocumentSchema),
+  warnings: z.array(z.string())
+});
+export type AiWorkbenchContext = z.infer<typeof AiWorkbenchContextSchema>;
+
 export const AiTestGenerationContextSchema = z.object({
   mode: AiTestGenerationModeSchema,
   objective: z.string(),
   targetFiles: z.array(ProjectRelativeFileSchema),
-  analysisContext: AiAnalysisContextSchema
+  analysisContext: AiAnalysisContextSchema,
+  workbenchContext: AiWorkbenchContextSchema.optional()
 });
 export type AiTestGenerationContext = z.infer<typeof AiTestGenerationContextSchema>;
 
