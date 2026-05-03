@@ -13,6 +13,7 @@ export interface AiReviewCliEnvironment {
   cwd: string;
   stdout: Pick<typeof process.stdout, "write">;
   stderr: Pick<typeof process.stderr, "write">;
+  allowUnsafeCodexTools?: boolean;
 }
 
 export function runAiReviewCli(
@@ -27,6 +28,15 @@ export function runAiReviewCli(
     const reviewer = readOptionalArg(args, "--reviewer") ?? `${runtime}-review`;
     const timeoutMs = readNumberArg(args, "--timeout-ms") ?? 300_000;
     const commandRunner = runner ?? new SpawnCommandRunner(projectRoot);
+    const allowUnsafeCodexTools =
+      environment.allowUnsafeCodexTools ?? process.env.AUTONOMY_ALLOW_CODEX_AI_REVIEW_WITH_TOOLS === "true";
+
+    if (runtime === "codex" && !allowUnsafeCodexTools) {
+      throw new Error(
+        "Codex AI review is disabled by default because Codex CLI does not expose a no-tools review mode. " +
+          "Use --runtime claude, deterministic review, or set AUTONOMY_ALLOW_CODEX_AI_REVIEW_WITH_TOOLS=true to opt into read-capable Codex review."
+      );
+    }
 
     const diffResult = commandRunner.run("gh", ["pr", "diff", prNumber], { timeoutMs: 60_000 });
     if (diffResult.exitCode !== 0) {
