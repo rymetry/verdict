@@ -25,7 +25,7 @@ describe("loadReviewInput", () => {
           {
             reviewer: "release",
             status: "pass",
-            findings: [{ priority: 3, title: "Follow-up cleanup" }]
+            findings: [{ priority: 3, title: "Follow-up cleanup", file: "packages/autonomy/src/ship.ts", line: 42 }]
           }
         ]
       })
@@ -38,7 +38,16 @@ describe("loadReviewInput", () => {
         {
           reviewer: "release",
           status: "pass",
-          findings: [{ priority: 3, title: "Follow-up cleanup", body: undefined, source: undefined }],
+          findings: [
+            {
+              priority: 3,
+              title: "Follow-up cleanup",
+              body: undefined,
+              file: "packages/autonomy/src/ship.ts",
+              line: 42,
+              source: undefined
+            }
+          ],
           summary: undefined
         }
       ]

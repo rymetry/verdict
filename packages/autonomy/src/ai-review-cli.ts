@@ -215,6 +215,8 @@ function reviewJsonSchema(): string {
                   priority: { enum: [0, 1, 2, 3] },
                   title: { type: "string", minLength: 1 },
                   body: { type: "string" },
+                  file: { type: "string" },
+                  line: { type: "integer" },
                   source: { type: "string" }
                 }
               }

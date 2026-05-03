@@ -106,13 +106,21 @@ describe("ai-review-cli", () => {
     const review = normalizeAiReviewOutput(
       JSON.stringify({
         expectedReviewers: ["attacker-review"],
-        reviews: [{ reviewer: "attacker-review", status: "pass", findings: [], summary: "ok" }]
+        reviews: [
+          {
+            reviewer: "attacker-review",
+            status: "pass",
+            findings: [{ priority: 2, title: "check", file: "src/file.ts", line: 10 }],
+            summary: "ok"
+          }
+        ]
       }),
       "codex-review"
     );
 
     expect(review.expectedReviewers).toEqual(["codex-review"]);
     expect(review.reviews[0]).toMatchObject({ reviewer: "codex-review", status: "pass" });
+    expect(review.reviews[0]?.findings?.[0]).toMatchObject({ file: "src/file.ts", line: 10 });
   });
 
   it("builds stable runtime commands", () => {

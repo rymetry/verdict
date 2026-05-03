@@ -48,6 +48,8 @@ function parseFinding(value: unknown): ReviewFinding {
     priority,
     title: parseNonEmptyString(value.title, "finding title"),
     body: typeof value.body === "string" ? value.body : undefined,
+    file: typeof value.file === "string" ? value.file : undefined,
+    line: typeof value.line === "number" && Number.isInteger(value.line) ? value.line : undefined,
     source: typeof value.source === "string" ? value.source : undefined
   };
 }
