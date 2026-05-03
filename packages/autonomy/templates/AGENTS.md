@@ -85,8 +85,9 @@ agent-autonomy-ai-review --runtime claude --pr <number>
 ```
 
 Keep AI reviewers opt-in in `.agents/autonomy.config.json`; they call external
-AI CLIs and can fail on auth, network, or quota. A typical explicit gate uses
-both deterministic diff review and one AI runtime:
+AI CLIs and can fail on auth, network, or quota. The wrapper sends the review
+prompt through stdin and marks the PR diff as untrusted data. A typical explicit
+gate uses both deterministic diff review and one AI runtime:
 
 ```json
 {
@@ -112,5 +113,6 @@ both deterministic diff review and one AI runtime:
 Deploy commands are no-shell argv arrays. The driver expands
 `{taskId}`, `{environment}`, `{stage}`, `{healthCheckUrl}`, and `{deployUrl}`
 placeholders. `provider: "vercel-compatible"` runs `vercel deploy --yes`
-by default, adds `--prod` for production, infers the first deployment URL from
-stdout, and canary-checks that URL unless a canary URL or command is configured.
+by default, adds `--prod` for production, prefers the first `*.vercel.app`
+URL from stdout, falls back to the last URL, and canary-checks that URL unless
+a canary URL or command is configured.

@@ -21,6 +21,7 @@ export interface CommandResult {
 
 export interface CommandRunOptions {
   timeoutMs?: number;
+  input?: string;
 }
 
 export interface CommandRunner {
@@ -301,6 +302,7 @@ export class SpawnCommandRunner implements CommandRunner {
       cwd: this.cwd,
       encoding: "utf8",
       shell: false,
+      input: options.input,
       timeout: options.timeoutMs
     });
     const errorMessage = result.error ? String(result.error) : "";

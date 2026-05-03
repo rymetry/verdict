@@ -282,6 +282,23 @@ function runCanaryStage(input: {
   const command = input.plan.canaryCommand;
   const healthCheckUrl = input.plan.canaryHealthCheckUrl;
   const evidence: string[] = [];
+  if (healthCheckUrl === "{deployUrl}" && !input.deployUrl) {
+    const failure = makeStage(
+      "canary",
+      "fail",
+      "Canary health check requires a deploy URL, but no deploy URL was inferred from deploy stdout.",
+      [],
+      "CANARY_FAILURE"
+    );
+    appendTimeline(input.projectRoot, {
+      stage: "canary",
+      status: "fail",
+      input: { taskId: input.taskId, healthCheckUrl },
+      output: { message: failure.summary },
+      failureClass: failure.failureClass
+    });
+    return failure;
+  }
 
   if (command?.length) {
     const result = runConfiguredCommand({
@@ -530,6 +547,21 @@ function expandPlaceholders(
 }
 
 function inferDeployUrl(stdout: string): string | undefined {
-  const match = stdout.match(/https?:\/\/[^\s"'<>]+/);
-  return match?.[0];
+  const urls = [...stripAnsi(stdout).matchAll(/https?:\/\/[^\s"'<>]+/g)].map((match) =>
+    match[0].replace(/[),.;:]+$/, "")
+  );
+  return (
+    urls.find((url) => {
+      try {
+        const hostname = new URL(url).hostname;
+        return hostname === "vercel.app" || hostname.endsWith(".vercel.app");
+      } catch {
+        return false;
+      }
+    }) ?? urls.at(-1)
+  );
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/g, "");
 }
