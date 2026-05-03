@@ -104,7 +104,7 @@ export function buildAiReviewPrompt(input: {
 
 export function buildRuntimeCommand(runtime: AiReviewRuntime, _prompt: string): string[] {
   if (runtime === "codex") {
-    return ["codex", "exec", "--cd", ".", "-"];
+    return ["codex", "exec", "--cd", ".", "--sandbox", "read-only", "--ephemeral", "-"];
   }
   return [
     "claude",

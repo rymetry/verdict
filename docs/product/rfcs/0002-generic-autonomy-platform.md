@@ -232,6 +232,10 @@ AI reviewer を明示 gate に加える場合:
 }
 ```
 
+`agent-autonomy-ai-review` は PR diff を stdin 経由で runtime に渡し、diff を
+untrusted data として明示する。Codex runtime は read-only ephemeral sandbox で
+実行する。
+
 Deploy つき project は `deploy` を追加する。
 
 ```json
