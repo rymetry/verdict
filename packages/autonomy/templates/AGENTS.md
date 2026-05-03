@@ -87,8 +87,9 @@ agent-autonomy-ai-review --runtime claude --pr <number>
 Keep AI reviewers opt-in in `.agents/autonomy.config.json`; they call external
 AI CLIs and can fail on auth, network, or quota. The wrapper sends the review
 prompt through stdin, marks the PR diff as untrusted data, and runs Codex review
-with a read-only ephemeral sandbox. A typical explicit gate uses both
-deterministic diff review and one AI runtime:
+with a read-only ephemeral sandbox. Reviewer identity is taken from the trusted
+CLI runtime, not model output. A typical explicit gate uses both deterministic
+diff review and one AI runtime:
 
 ```json
 {

@@ -121,10 +121,10 @@ export function buildRuntimeCommand(runtime: AiReviewRuntime, _prompt: string): 
 export function normalizeAiReviewOutput(raw: string, reviewer: string): ReviewInputFile {
   const parsed = parseReviewInput(extractReviewJson(raw));
   return {
-    expectedReviewers: parsed.expectedReviewers?.length ? parsed.expectedReviewers : [reviewer],
+    expectedReviewers: [reviewer],
     reviews: parsed.reviews.map((review) => ({
       ...review,
-      reviewer: review.reviewer || reviewer
+      reviewer
     }))
   };
 }

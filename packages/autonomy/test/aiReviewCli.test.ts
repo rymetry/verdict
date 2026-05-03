@@ -95,6 +95,19 @@ describe("ai-review-cli", () => {
     expect(review.reviews[0]).toMatchObject({ reviewer: "claude-review", status: "pass" });
   });
 
+  it("uses the trusted CLI reviewer identity instead of model-controlled names", () => {
+    const review = normalizeAiReviewOutput(
+      JSON.stringify({
+        expectedReviewers: ["attacker-review"],
+        reviews: [{ reviewer: "attacker-review", status: "pass", findings: [], summary: "ok" }]
+      }),
+      "codex-review"
+    );
+
+    expect(review.expectedReviewers).toEqual(["codex-review"]);
+    expect(review.reviews[0]).toMatchObject({ reviewer: "codex-review", status: "pass" });
+  });
+
   it("builds stable runtime commands", () => {
     expect(buildRuntimeCommand("codex", "prompt").slice(0, 3)).toEqual(["codex", "exec", "--cd"]);
     expect(buildRuntimeCommand("claude", "prompt").slice(0, 3)).toEqual(["claude", "-p", "--output-format"]);

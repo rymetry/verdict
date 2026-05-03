@@ -234,7 +234,8 @@ AI reviewer を明示 gate に加える場合:
 
 `agent-autonomy-ai-review` は PR diff を stdin 経由で runtime に渡し、diff を
 untrusted data として明示する。Codex runtime は read-only ephemeral sandbox で
-実行する。
+実行する。reviewer identity と `expectedReviewers` は model output ではなく CLI
+runtime の trusted reviewer 名で固定する。
 
 Deploy つき project は `deploy` を追加する。
 
