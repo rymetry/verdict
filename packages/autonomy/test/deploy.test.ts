@@ -83,6 +83,50 @@ describe("runDeployMonitor", () => {
     expect(readLearnings()).toContain("deploy-monitor-production");
   });
 
+  it("runs the vercel-compatible provider and uses its deployment URL for canary", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "preview",
+        provider: "vercel-compatible",
+        canary: {
+          enabled: true
+        }
+      }
+    });
+    const runner = new FakeRunner([
+      { exitCode: 0, stdout: "https://preview.example.vercel.app\n", stderr: "" },
+      { exitCode: 0, stdout: "ok\n", stderr: "" }
+    ]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(runner.calls).toEqual([
+      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } },
+      { command: "curl", args: ["-fsS", "https://preview.example.vercel.app"], options: { timeoutMs: undefined } }
+    ]);
+    expect(result.provider).toBe("vercel-compatible");
+    expect(result.deploy.deployUrl).toBe("https://preview.example.vercel.app");
+    expect(result.canary.status).toBe("pass");
+  });
+
+  it("fails closed for unsupported providers without a custom command", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "staging",
+        provider: "unknown-cloud"
+      }
+    });
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner: new FakeRunner([]) });
+
+    expect(result.provider).toBe("unsupported");
+    expect(result.deploy.status).toBe("fail");
+    expect(result.summary).toContain("Deploy provider is not supported");
+    expect(readTimeline()).toContain('"failureClass":"UNCLASSIFIED"');
+  });
+
   it("records canary failures as escalated CANARY_FAILURE", () => {
     writeConfig({
       deploy: {

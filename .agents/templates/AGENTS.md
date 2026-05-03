@@ -22,6 +22,8 @@ autonomy engine itself must be supplied by the consuming repository or by an
 installed package. Expose these commands before running the lifecycle:
 
 - `agent-autonomy-drive` or an equivalent `agents:drive` script
+- `agent-autonomy-review` for deterministic diff review, and optionally
+  `agent-autonomy-ai-review` for Codex / Claude review
 - `agent-autonomy-progress` or an equivalent `agents:progress` script
 
 Useful driver commands:
@@ -74,5 +76,41 @@ Review commands must emit structured JSON:
 }
 ```
 
+The package provides two standard reviewer commands:
+
+```bash
+agent-autonomy-review --pr <number>
+agent-autonomy-ai-review --runtime codex --pr <number>
+agent-autonomy-ai-review --runtime claude --pr <number>
+```
+
+Keep AI reviewers opt-in in `.agents/autonomy.config.json`; they call external
+AI CLIs and can fail on auth, network, or quota. A typical explicit gate uses
+both deterministic diff review and one AI runtime:
+
+```json
+{
+  "reviewers": {
+    "customCommands": [
+      {
+        "name": "diff-review",
+        "command": ["agent-autonomy-review", "--pr", "{prNumber}"],
+        "expectedReviewers": ["diff-review"],
+        "timeoutMs": 60000
+      },
+      {
+        "name": "codex-review",
+        "command": ["agent-autonomy-ai-review", "--runtime", "codex", "--pr", "{prNumber}"],
+        "expectedReviewers": ["codex-review"],
+        "timeoutMs": 300000
+      }
+    ]
+  }
+}
+```
+
 Deploy commands are no-shell argv arrays. The driver expands
-`{taskId}`, `{environment}`, `{stage}`, and `{healthCheckUrl}` placeholders.
+`{taskId}`, `{environment}`, `{stage}`, `{healthCheckUrl}`, and `{deployUrl}`
+placeholders. `provider: "vercel-compatible"` runs `vercel deploy --yes`
+by default, adds `--prod` for production, infers the first deployment URL from
+stdout, and canary-checks that URL unless a canary URL or command is configured.

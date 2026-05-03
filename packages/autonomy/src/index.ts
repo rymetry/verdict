@@ -1,3 +1,4 @@
+export * from "./ai-review-cli.js";
 export * from "./config.js";
 export * from "./deploy.js";
 export * from "./driver.js";
