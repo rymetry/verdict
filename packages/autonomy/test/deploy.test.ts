@@ -137,6 +137,32 @@ describe("runDeployMonitor", () => {
     ]);
   });
 
+  it("runs a custom canary command when vercel-compatible cannot infer a deploy URL", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "preview",
+        provider: "vercel-compatible",
+        canary: {
+          enabled: true,
+          customCommand: ["npm", "run", "canary"]
+        }
+      }
+    });
+    const runner = new FakeRunner([
+      { exitCode: 0, stdout: "No deployment URL emitted\n", stderr: "" },
+      { exitCode: 0, stdout: "canary ok\n", stderr: "" }
+    ]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.canary.status).toBe("pass");
+    expect(runner.calls).toEqual([
+      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } },
+      { command: "npm", args: ["run", "canary"], options: { timeoutMs: undefined } }
+    ]);
+  });
+
   it("fails closed for unsupported providers without a custom command", () => {
     writeConfig({
       deploy: {

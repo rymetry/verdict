@@ -282,7 +282,8 @@ function runCanaryStage(input: {
   const command = input.plan.canaryCommand;
   const healthCheckUrl = input.plan.canaryHealthCheckUrl;
   const evidence: string[] = [];
-  if (healthCheckUrl === "{deployUrl}" && !input.deployUrl) {
+  const hasCanaryCommand = Boolean(command?.length);
+  if (healthCheckUrl === "{deployUrl}" && !input.deployUrl && !hasCanaryCommand) {
     const failure = makeStage(
       "canary",
       "fail",
@@ -326,7 +327,8 @@ function runCanaryStage(input: {
     }
   }
 
-  if (healthCheckUrl) {
+  const hasRunnableHealthCheck = Boolean(healthCheckUrl && (healthCheckUrl !== "{deployUrl}" || input.deployUrl));
+  if (hasRunnableHealthCheck && healthCheckUrl) {
     const result = runHealthCheck({
       runner: input.runner,
       stage: "canary",
@@ -354,7 +356,7 @@ function runCanaryStage(input: {
     }
   }
 
-  const status = command?.length || healthCheckUrl ? "pass" : "skipped";
+  const status = hasCanaryCommand || hasRunnableHealthCheck ? "pass" : "skipped";
   const summary =
     status === "pass"
       ? "Canary stage completed."
