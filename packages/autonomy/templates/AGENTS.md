@@ -86,13 +86,13 @@ agent-autonomy-ai-review --runtime claude --pr <number>
 
 Keep AI reviewers opt-in in `.agents/autonomy.config.json`; they call external
 AI CLIs and can fail on auth, network, or quota. The wrapper sends the review
-prompt through stdin and marks the PR diff as untrusted data. Claude review runs
-with tools disabled, and the wrapper preflights the installed CLI for required
-flags before reading a PR diff. Codex review is disabled by default because
-Codex CLI does not expose a no-tools review mode; set
-`AUTONOMY_ALLOW_CODEX_AI_REVIEW_WITH_TOOLS=true` only when accepting read-capable
-reviewer risk. Reviewer identity is taken from the trusted CLI runtime, not
-model output. A typical explicit gate uses deterministic diff review and Claude:
+prompt through stdin and marks the PR diff as untrusted data. Codex is the
+default AI reviewer runtime; when `--runtime` is omitted the wrapper uses
+`codex-review` with a read-only ephemeral sandbox. Claude Code is also supported
+explicitly with `--runtime claude`; the Claude path runs with tools disabled and
+preflights the installed CLI for required flags before reading a PR diff.
+Reviewer identity is taken from the trusted CLI runtime, not model output.
+A typical explicit gate uses deterministic diff review and Codex:
 
 ```json
 {
@@ -105,13 +105,24 @@ model output. A typical explicit gate uses deterministic diff review and Claude:
         "timeoutMs": 60000
       },
       {
-        "name": "claude-review",
-        "command": ["agent-autonomy-ai-review", "--runtime", "claude", "--pr", "{prNumber}"],
-        "expectedReviewers": ["claude-review"],
+        "name": "codex-review",
+        "command": ["agent-autonomy-ai-review", "--runtime", "codex", "--pr", "{prNumber}"],
+        "expectedReviewers": ["codex-review"],
         "timeoutMs": 300000
       }
     ]
   }
+}
+```
+
+Claude Code can use the same contract by replacing the AI reviewer command:
+
+```json
+{
+  "name": "claude-review",
+  "command": ["agent-autonomy-ai-review", "--runtime", "claude", "--pr", "{prNumber}"],
+  "expectedReviewers": ["claude-review"],
+  "timeoutMs": 300000
 }
 ```
 

@@ -24,7 +24,7 @@ describe("ai-review-cli", () => {
       }
     ]);
 
-    const result = runCli(["--runtime", "codex", "--pr", "123"], runner, { allowUnsafeCodexTools: true });
+    const result = runCli(["--runtime", "codex", "--pr", "123"], runner);
 
     expect(result.status).toBe(0);
     expect(runner.calls[0]).toEqual({
@@ -89,18 +89,34 @@ describe("ai-review-cli", () => {
     expect(result.stderr).toContain("Claude AI review requires Claude CLI support");
   });
 
-  it("fails closed for Codex when no no-tools mode is available", () => {
-    const result = runCli(["--runtime", "codex", "--pr", "123"], new FakeRunner([]));
+  it("defaults to Codex when runtime is omitted", () => {
+    const runner = new FakeRunner([
+      {
+        exitCode: 0,
+        stdout: "--sandbox <SANDBOX_MODE>\n--ephemeral\ninstructions are read from stdin\n",
+        stderr: ""
+      },
+      { exitCode: 0, stdout: "diff --git a/file.ts b/file.ts\n", stderr: "" },
+      {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          reviews: [{ reviewer: "codex-review", status: "pass", findings: [], summary: "ok" }]
+        }),
+        stderr: ""
+      }
+    ]);
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Codex AI review is disabled by default");
+    const result = runCli(["--pr", "123"], runner);
+
+    expect(result.status).toBe(0);
+    expect(runner.calls[2].command).toBe("codex");
+    expect(result.stdout).toContain('"codex-review"');
   });
 
-  it("fails closed for opted-in Codex when required CLI flags are absent", () => {
+  it("fails closed for Codex when required CLI flags are absent", () => {
     const result = runCli(
       ["--runtime", "codex", "--pr", "123"],
-      new FakeRunner([{ exitCode: 0, stdout: "--sandbox <SANDBOX_MODE>\n", stderr: "" }]),
-      { allowUnsafeCodexTools: true }
+      new FakeRunner([{ exitCode: 0, stdout: "--sandbox <SANDBOX_MODE>\n", stderr: "" }])
     );
 
     expect(result.status).toBe(1);
@@ -188,11 +204,7 @@ describe("ai-review-cli", () => {
   });
 });
 
-function runCli(
-  args: string[],
-  runner: CommandRunner,
-  options: { allowUnsafeCodexTools?: boolean } = {}
-): { status: number; stdout: string; stderr: string } {
+function runCli(args: string[], runner: CommandRunner): { status: number; stdout: string; stderr: string } {
   let stdout = "";
   let stderr = "";
   const status = runAiReviewCli(
@@ -210,8 +222,7 @@ function runCli(
           stderr += chunk;
           return true;
         }
-      },
-      allowUnsafeCodexTools: options.allowUnsafeCodexTools
+      }
     },
     runner
   );
