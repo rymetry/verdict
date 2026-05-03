@@ -96,6 +96,17 @@ describe("ai-review-cli", () => {
     expect(result.stderr).toContain("Codex AI review is disabled by default");
   });
 
+  it("fails closed for opted-in Codex when required CLI flags are absent", () => {
+    const result = runCli(
+      ["--runtime", "codex", "--pr", "123"],
+      new FakeRunner([{ exitCode: 0, stdout: "--sandbox <SANDBOX_MODE>\n", stderr: "" }]),
+      { allowUnsafeCodexTools: true }
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Codex AI review requires Codex CLI support");
+  });
+
   it("rejects unsupported runtimes", () => {
     const result = runCli(["--runtime", "gemini", "--pr", "125"], new FakeRunner([]));
 
@@ -172,8 +183,8 @@ describe("ai-review-cli", () => {
   });
 
   it("builds stable runtime commands", () => {
-    expect(buildRuntimeCommand("codex", "prompt").slice(0, 3)).toEqual(["codex", "exec", "--cd"]);
-    expect(buildRuntimeCommand("claude", "prompt").slice(0, 3)).toEqual(["claude", "-p", "--output-format"]);
+    expect(buildRuntimeCommand("codex").slice(0, 3)).toEqual(["codex", "exec", "--cd"]);
+    expect(buildRuntimeCommand("claude").slice(0, 3)).toEqual(["claude", "-p", "--output-format"]);
   });
 });
 

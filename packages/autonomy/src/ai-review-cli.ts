@@ -45,7 +45,7 @@ export function runAiReviewCli(
     }
 
     const prompt = buildAiReviewPrompt({ prNumber, reviewer, diff: diffResult.stdout });
-    const aiCommand = buildRuntimeCommand(runtime, prompt);
+    const aiCommand = buildRuntimeCommand(runtime);
     const aiResult = commandRunner.run(aiCommand[0], aiCommand.slice(1), { timeoutMs, input: prompt });
     if (aiResult.exitCode !== 0) {
       const failureClass = aiResult.timedOut ? "CODEX_HANG" : classifyToolFailure(aiResult.stderr);
@@ -113,7 +113,7 @@ export function buildAiReviewPrompt(input: {
   ].join("\n");
 }
 
-export function buildRuntimeCommand(runtime: AiReviewRuntime, _prompt: string): string[] {
+export function buildRuntimeCommand(runtime: AiReviewRuntime): string[] {
   if (runtime === "codex") {
     return ["codex", "exec", "--cd", ".", "--sandbox", "read-only", "--ephemeral", "-"];
   }

@@ -284,7 +284,8 @@ function runCanaryStage(input: {
   const healthCheckUrl = input.plan.canaryHealthCheckUrl;
   const evidence: string[] = [];
   const hasCanaryCommand = Boolean(command?.length);
-  if (healthCheckUrl === "{deployUrl}" && !input.deployUrl && !hasCanaryCommand) {
+  const requiresDeployUrl = Boolean(healthCheckUrl?.includes("{deployUrl}") && !input.deployUrl);
+  if (requiresDeployUrl && !hasCanaryCommand) {
     const failure = makeStage(
       "canary",
       "fail",
@@ -329,7 +330,7 @@ function runCanaryStage(input: {
     }
   }
 
-  const hasRunnableHealthCheck = Boolean(healthCheckUrl && (healthCheckUrl !== "{deployUrl}" || input.deployUrl));
+  const hasRunnableHealthCheck = Boolean(healthCheckUrl && !requiresDeployUrl);
   if (hasRunnableHealthCheck && healthCheckUrl) {
     const result = runHealthCheck({
       runner: input.runner,
@@ -569,18 +570,7 @@ function inferDeployUrl(stdout: string, provider: string): string | undefined {
   if (provider === "vercel-compatible") {
     return undefined;
   }
-  for (let index = urls.length - 1; index >= 0; index -= 1) {
-    const url = urls[index];
-    try {
-      const hostname = new URL(url).hostname;
-      if (hostname !== "vercel.com" && !hostname.endsWith(".vercel.com")) {
-        return url;
-      }
-    } catch {
-      // Ignore malformed URL-like values.
-    }
-  }
-  return undefined;
+  return urls[0];
 }
 
 function stripAnsi(value: string): string {

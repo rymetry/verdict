@@ -83,6 +83,37 @@ describe("runDeployMonitor", () => {
     expect(readLearnings()).toContain("deploy-monitor-production");
   });
 
+  it("keeps first URL inference for custom deploy providers", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "staging",
+        provider: "custom-command",
+        customCommand: ["deploy"],
+        healthCheckUrl: "{deployUrl}",
+        canary: {
+          enabled: false
+        }
+      }
+    });
+    const runner = new FakeRunner([
+      {
+        exitCode: 0,
+        stdout: "Deployed to https://preview.example.test\nDocs: https://docs.example.test\n",
+        stderr: ""
+      },
+      { exitCode: 0, stdout: "ok\n", stderr: "" }
+    ]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.deploy.deployUrl).toBe("https://preview.example.test");
+    expect(runner.calls).toEqual([
+      { command: "deploy", args: [], options: { timeoutMs: undefined } },
+      { command: "curl", args: ["-fsS", "https://preview.example.test"], options: { timeoutMs: undefined } }
+    ]);
+  });
+
   it("runs the vercel-compatible provider and uses its deployment URL for canary", () => {
     writeConfig({
       deploy: {
@@ -123,6 +154,29 @@ describe("runDeployMonitor", () => {
         provider: "vercel-compatible",
         canary: {
           enabled: true
+        }
+      }
+    });
+    const runner = new FakeRunner([{ exitCode: 0, stdout: "No deployment URL emitted\n", stderr: "" }]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.canary.status).toBe("fail");
+    expect(result.canary.summary).toContain("requires a deploy URL");
+    expect(runner.calls).toEqual([
+      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } }
+    ]);
+  });
+
+  it("fails canary clearly when a composed canary URL requires a missing deploy URL", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "preview",
+        provider: "vercel-compatible",
+        canary: {
+          enabled: true,
+          healthCheckUrl: "{deployUrl}/health"
         }
       }
     });
