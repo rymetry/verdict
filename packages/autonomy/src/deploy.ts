@@ -19,20 +19,33 @@ export interface DeployStageSummary {
   summary: string;
   evidence: string[];
   failureClass?: FailureClass;
+  deployUrl?: string;
 }
 
 export interface RunDeployMonitorResult {
   environment: "preview" | "staging" | "production";
+  provider: string;
   gate: GateDecision;
   deploy: DeployStageSummary;
   canary: DeployStageSummary;
   summary: string;
 }
 
+interface DeployProviderPlan {
+  provider: string;
+  deployCommand?: string[];
+  deployHealthCheckUrl?: string;
+  canaryCommand?: string[];
+  canaryHealthCheckUrl?: string;
+  timeoutMs?: number;
+  canaryTimeoutMs?: number;
+}
+
 export function runDeployMonitor(options: RunDeployMonitorOptions): RunDeployMonitorResult {
   const config = loadConfig(options.projectRoot);
   const runner = options.runner ?? new SpawnCommandRunner(options.projectRoot);
   const environment = config.deploy?.environment ?? "preview";
+  const plan = resolveDeployProviderPlan(config);
   const emptyDeploy = makeStage("land-and-deploy", "skipped", "Deploy config is not configured.");
   const emptyCanary = makeStage("canary", "skipped", "Canary config is not configured.");
 
@@ -51,6 +64,7 @@ export function runDeployMonitor(options: RunDeployMonitorOptions): RunDeployMon
     });
     return {
       environment,
+      provider: plan.provider,
       gate: { allowed: true, reasons: [] },
       deploy: emptyDeploy,
       canary: emptyCanary,
@@ -79,6 +93,7 @@ export function runDeployMonitor(options: RunDeployMonitorOptions): RunDeployMon
     });
     return {
       environment,
+      provider: plan.provider,
       gate,
       deploy: blocked,
       canary: emptyCanary,
@@ -86,12 +101,41 @@ export function runDeployMonitor(options: RunDeployMonitorOptions): RunDeployMon
     };
   }
 
-  const deploy = runDeployStage({ projectRoot: options.projectRoot, config, runner, taskId: options.taskId });
+  if (plan.provider === "unsupported") {
+    const failure = makeStage(
+      "land-and-deploy",
+      "fail",
+      `Deploy provider is not supported: ${config.deploy?.provider ?? config.adapters.deployProvider ?? "unknown"}.`,
+      [".agents/autonomy.config.json"],
+      "UNCLASSIFIED"
+    );
+    appendTimeline(options.projectRoot, {
+      stage: "land-and-deploy",
+      status: "fail",
+      input: { taskId: options.taskId, provider: config.deploy?.provider ?? config.adapters.deployProvider },
+      output: { message: failure.summary },
+      evidence: failure.evidence,
+      failureClass: failure.failureClass
+    });
+    updateDeployProgress(options, environment, "failed");
+    recordDeployFailure(options.projectRoot, options.taskId, "UNCLASSIFIED", failure.summary);
+    return {
+      environment,
+      provider: plan.provider,
+      gate,
+      deploy: failure,
+      canary: emptyCanary,
+      summary: failure.summary
+    };
+  }
+
+  const deploy = runDeployStage({ projectRoot: options.projectRoot, config, plan, runner, taskId: options.taskId });
   if (deploy.status === "fail") {
     updateDeployProgress(options, environment, "failed");
     recordDeployFailure(options.projectRoot, options.taskId, deploy.failureClass ?? "UNCLASSIFIED", deploy.summary);
     return {
       environment,
+      provider: plan.provider,
       gate,
       deploy,
       canary: emptyCanary,
@@ -100,12 +144,20 @@ export function runDeployMonitor(options: RunDeployMonitorOptions): RunDeployMon
   }
 
   updateDeployProgress(options, environment, "deployed");
-  const canary = runCanaryStage({ projectRoot: options.projectRoot, config, runner, taskId: options.taskId });
+  const canary = runCanaryStage({
+    projectRoot: options.projectRoot,
+    config,
+    plan,
+    runner,
+    taskId: options.taskId,
+    deployUrl: deploy.deployUrl
+  });
   if (canary.status === "fail") {
     updateDeployProgress(options, environment, "failed");
     recordDeployFailure(options.projectRoot, options.taskId, canary.failureClass ?? "CANARY_FAILURE", canary.summary);
     return {
       environment,
+      provider: plan.provider,
       gate,
       deploy,
       canary,
@@ -121,6 +173,7 @@ export function runDeployMonitor(options: RunDeployMonitorOptions): RunDeployMon
   });
   return {
     environment,
+    provider: plan.provider,
     gate,
     deploy,
     canary,
@@ -131,12 +184,14 @@ export function runDeployMonitor(options: RunDeployMonitorOptions): RunDeployMon
 function runDeployStage(input: {
   projectRoot: string;
   config: AutonomyConfig;
+  plan: DeployProviderPlan;
   runner: CommandRunner;
   taskId?: string;
 }): DeployStageSummary {
-  const command = input.config.deploy?.customCommand;
-  const healthCheckUrl = input.config.deploy?.healthCheckUrl;
+  const command = input.plan.deployCommand;
+  const healthCheckUrl = input.plan.deployHealthCheckUrl;
   const evidence: string[] = [];
+  let deployUrl: string | undefined;
 
   if (command?.length) {
     const result = runConfiguredCommand({
@@ -146,9 +201,10 @@ function runDeployStage(input: {
       taskId: input.taskId,
       environment: input.config.deploy?.environment ?? "preview",
       healthCheckUrl,
-      timeoutMs: input.config.deploy?.timeoutMs
+      timeoutMs: input.plan.timeoutMs
     });
     evidence.push(...result.evidence);
+    deployUrl = result.deployUrl;
     if (result.status === "fail") {
       appendTimeline(input.projectRoot, {
         stage: "land-and-deploy",
@@ -166,8 +222,14 @@ function runDeployStage(input: {
     const result = runHealthCheck({
       runner: input.runner,
       stage: "land-and-deploy",
-      url: healthCheckUrl,
-      timeoutMs: input.config.deploy?.timeoutMs
+      url: expandPlaceholders(healthCheckUrl, {
+        taskId: input.taskId,
+        environment: input.config.deploy?.environment ?? "preview",
+        stage: "land-and-deploy",
+        healthCheckUrl,
+        deployUrl
+      }),
+      timeoutMs: input.plan.timeoutMs
     });
     evidence.push(...result.evidence);
     if (result.status === "fail") {
@@ -195,14 +257,16 @@ function runDeployStage(input: {
     output: { message: summary },
     evidence
   });
-  return makeStage("land-and-deploy", status, summary, evidence);
+  return makeStage("land-and-deploy", status, summary, evidence, undefined, deployUrl);
 }
 
 function runCanaryStage(input: {
   projectRoot: string;
   config: AutonomyConfig;
+  plan: DeployProviderPlan;
   runner: CommandRunner;
   taskId?: string;
+  deployUrl?: string;
 }): DeployStageSummary {
   if (input.config.deploy?.canary?.enabled === false) {
     const skipped = makeStage("canary", "skipped", "Canary stage disabled by config.");
@@ -215,8 +279,8 @@ function runCanaryStage(input: {
     return skipped;
   }
 
-  const command = input.config.deploy?.canary?.customCommand;
-  const healthCheckUrl = input.config.deploy?.canary?.healthCheckUrl ?? input.config.deploy?.healthCheckUrl;
+  const command = input.plan.canaryCommand;
+  const healthCheckUrl = input.plan.canaryHealthCheckUrl;
   const evidence: string[] = [];
 
   if (command?.length) {
@@ -227,7 +291,8 @@ function runCanaryStage(input: {
       taskId: input.taskId,
       environment: input.config.deploy?.environment ?? "preview",
       healthCheckUrl,
-      timeoutMs: input.config.deploy?.canary?.timeoutMs ?? input.config.deploy?.timeoutMs,
+      deployUrl: input.deployUrl,
+      timeoutMs: input.plan.canaryTimeoutMs ?? input.plan.timeoutMs,
       canaryFailure: true
     });
     evidence.push(...result.evidence);
@@ -248,8 +313,14 @@ function runCanaryStage(input: {
     const result = runHealthCheck({
       runner: input.runner,
       stage: "canary",
-      url: healthCheckUrl,
-      timeoutMs: input.config.deploy?.canary?.timeoutMs ?? input.config.deploy?.timeoutMs,
+      url: expandPlaceholders(healthCheckUrl, {
+        taskId: input.taskId,
+        environment: input.config.deploy?.environment ?? "preview",
+        stage: "canary",
+        healthCheckUrl,
+        deployUrl: input.deployUrl
+      }),
+      timeoutMs: input.plan.canaryTimeoutMs ?? input.plan.timeoutMs,
       canaryFailure: true
     });
     evidence.push(...result.evidence);
@@ -288,23 +359,34 @@ function runConfiguredCommand(input: {
   taskId?: string;
   environment: string;
   healthCheckUrl?: string;
+  deployUrl?: string;
   timeoutMs?: number;
   canaryFailure?: boolean;
 }): DeployStageSummary {
   const [command, ...args] = input.command.map((value) =>
-    value
-      .replaceAll("{taskId}", input.taskId ?? "")
-      .replaceAll("{environment}", input.environment)
-      .replaceAll("{stage}", input.stage)
-      .replaceAll("{healthCheckUrl}", input.healthCheckUrl ?? "")
+    expandPlaceholders(value, {
+      taskId: input.taskId,
+      environment: input.environment,
+      stage: input.stage,
+      healthCheckUrl: input.healthCheckUrl,
+      deployUrl: input.deployUrl
+    })
   );
   if (!command) {
     return makeStage(input.stage, "skipped", `${input.stage} command is empty.`);
   }
   const result = input.runner.run(command, args, { timeoutMs: input.timeoutMs });
   const evidence = [`command:${command}`];
+  const deployUrl = inferDeployUrl(result.stdout);
   if (result.exitCode === 0) {
-    return makeStage(input.stage, "pass", trimOrDefault(result.stdout, `${input.stage} command completed.`), evidence);
+    return makeStage(
+      input.stage,
+      "pass",
+      trimOrDefault(result.stdout, `${input.stage} command completed.`),
+      deployUrl ? [...evidence, deployUrl] : evidence,
+      undefined,
+      deployUrl
+    );
   }
   const failureClass = input.canaryFailure ? "CANARY_FAILURE" : classifyToolFailure(result.stderr || result.stdout);
   return makeStage(
@@ -373,12 +455,81 @@ function makeStage(
   status: DeployStageSummary["status"],
   summary: string,
   evidence: string[] = [],
-  failureClass?: FailureClass
+  failureClass?: FailureClass,
+  deployUrl?: string
 ): DeployStageSummary {
-  return { stage, status, summary, evidence, failureClass };
+  return { stage, status, summary, evidence, failureClass, deployUrl };
 }
 
 function trimOrDefault(text: string, fallback: string): string {
   const trimmed = text.trim();
   return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function resolveDeployProviderPlan(config: AutonomyConfig): DeployProviderPlan {
+  const provider = config.deploy?.provider ?? config.adapters.deployProvider ?? "custom-command";
+  if (provider === "custom-command") {
+    return {
+      provider,
+      deployCommand: config.deploy?.customCommand,
+      deployHealthCheckUrl: config.deploy?.healthCheckUrl,
+      canaryCommand: config.deploy?.canary?.customCommand,
+      canaryHealthCheckUrl: config.deploy?.canary?.healthCheckUrl ?? config.deploy?.healthCheckUrl,
+      timeoutMs: config.deploy?.timeoutMs,
+      canaryTimeoutMs: config.deploy?.canary?.timeoutMs
+    };
+  }
+  if (provider === "vercel-compatible") {
+    const environment = config.deploy?.environment ?? "preview";
+    return {
+      provider,
+      deployCommand: config.deploy?.customCommand ?? [
+        "vercel",
+        "deploy",
+        "--yes",
+        ...(environment === "production" ? ["--prod"] : [])
+      ],
+      deployHealthCheckUrl: config.deploy?.healthCheckUrl,
+      canaryCommand: config.deploy?.canary?.customCommand,
+      canaryHealthCheckUrl:
+        config.deploy?.canary?.healthCheckUrl ?? config.deploy?.healthCheckUrl ?? "{deployUrl}",
+      timeoutMs: config.deploy?.timeoutMs,
+      canaryTimeoutMs: config.deploy?.canary?.timeoutMs
+    };
+  }
+  if (config.deploy?.customCommand?.length) {
+    return {
+      provider,
+      deployCommand: config.deploy.customCommand,
+      deployHealthCheckUrl: config.deploy.healthCheckUrl,
+      canaryCommand: config.deploy.canary?.customCommand,
+      canaryHealthCheckUrl: config.deploy.canary?.healthCheckUrl ?? config.deploy.healthCheckUrl,
+      timeoutMs: config.deploy.timeoutMs,
+      canaryTimeoutMs: config.deploy.canary?.timeoutMs
+    };
+  }
+  return { provider: "unsupported" };
+}
+
+function expandPlaceholders(
+  value: string,
+  input: {
+    taskId?: string;
+    environment: string;
+    stage: "land-and-deploy" | "canary";
+    healthCheckUrl?: string;
+    deployUrl?: string;
+  }
+): string {
+  return value
+    .replaceAll("{taskId}", input.taskId ?? "")
+    .replaceAll("{environment}", input.environment)
+    .replaceAll("{stage}", input.stage)
+    .replaceAll("{healthCheckUrl}", input.healthCheckUrl ?? "")
+    .replaceAll("{deployUrl}", input.deployUrl ?? "");
+}
+
+function inferDeployUrl(stdout: string): string | undefined {
+  const match = stdout.match(/https?:\/\/[^\s"'<>]+/);
+  return match?.[0];
 }

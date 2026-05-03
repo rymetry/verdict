@@ -209,6 +209,29 @@ Verdict の default config:
 }
 ```
 
+AI reviewer を明示 gate に加える場合:
+
+```json
+{
+  "reviewers": {
+    "customCommands": [
+      {
+        "name": "diff-review",
+        "command": ["agent-autonomy-review", "--pr", "{prNumber}"],
+        "expectedReviewers": ["diff-review"],
+        "timeoutMs": 60000
+      },
+      {
+        "name": "codex-review",
+        "command": ["agent-autonomy-ai-review", "--runtime", "codex", "--pr", "{prNumber}"],
+        "expectedReviewers": ["codex-review"],
+        "timeoutMs": 300000
+      }
+    ]
+  }
+}
+```
+
 Deploy つき project は `deploy` を追加する。
 
 ```json
@@ -225,6 +248,22 @@ Deploy つき project は `deploy` を追加する。
       "customCommand": ["pnpm", "canary:check", "--url", "{healthCheckUrl}"],
       "checks": ["health", "console-errors"]
     }
+  }
+}
+```
+
+Vercel-compatible project は provider を差し替える。`vercel deploy --yes`
+を no-shell argv として呼び、stdout の最初の URL を `{deployUrl}` として
+canary health check に渡す。
+
+```json
+{
+  "deploy": {
+    "enabled": true,
+    "environment": "preview",
+    "provider": "vercel-compatible",
+    "productionPolicy": "approval",
+    "canary": { "enabled": true }
   }
 }
 ```

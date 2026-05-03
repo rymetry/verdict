@@ -16,6 +16,16 @@
       "paths": ["ROADMAP.md", "docs/ROADMAP.md", "docs/roadmap.md", "TODO.md"]
     }
   },
+  "reviewers": {
+    "customCommands": [
+      {
+        "name": "diff-review",
+        "command": ["agent-autonomy-review", "--pr", "{prNumber}"],
+        "expectedReviewers": ["diff-review"],
+        "timeoutMs": 60000
+      }
+    ]
+  },
   "safety": {
     "autoMerge": false,
     "maxFailuresPerTask": 3

@@ -10,6 +10,7 @@
     "templates"
   ],
   "bin": {
+    "agent-autonomy-ai-review": "./dist/ai-review-cli.js",
     "agent-autonomy-drive": "./dist/cli.js",
     "agent-autonomy-init": "./dist/init-cli.js",
     "agent-autonomy-review": "./dist/review-cli.js",
@@ -26,6 +27,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "drive": "pnpm run build && node dist/cli.js",
+    "ai-review": "pnpm run build && node dist/ai-review-cli.js",
     "init": "pnpm run build && node dist/init-cli.js",
     "review": "pnpm run build && node dist/review-cli.js",
     "progress": "pnpm run build && node dist/progress-cli.js",
