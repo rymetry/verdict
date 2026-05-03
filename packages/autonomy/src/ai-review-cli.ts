@@ -37,6 +37,7 @@ export function runAiReviewCli(
           "Use --runtime claude, deterministic review, or set AUTONOMY_ALLOW_CODEX_AI_REVIEW_WITH_TOOLS=true to opt into read-capable Codex review."
       );
     }
+    assertRuntimeSupported(runtime, commandRunner);
 
     const diffResult = commandRunner.run("gh", ["pr", "diff", prNumber], { timeoutMs: 60_000 });
     if (diffResult.exitCode !== 0) {
@@ -126,6 +127,28 @@ export function buildRuntimeCommand(runtime: AiReviewRuntime, _prompt: string): 
     "--tools",
     ""
   ];
+}
+
+function assertRuntimeSupported(runtime: AiReviewRuntime, runner: CommandRunner): void {
+  if (runtime === "claude") {
+    const result = runner.run("claude", ["--help"], { timeoutMs: 10_000 });
+    const help = `${result.stdout}\n${result.stderr}`;
+    if (result.exitCode !== 0 || !help.includes("--tools") || !help.includes("--json-schema")) {
+      throw new Error("Claude AI review requires Claude CLI support for --tools and --json-schema.");
+    }
+    return;
+  }
+
+  const result = runner.run("codex", ["exec", "--help"], { timeoutMs: 10_000 });
+  const help = `${result.stdout}\n${result.stderr}`;
+  if (
+    result.exitCode !== 0 ||
+    !help.includes("--ephemeral") ||
+    !help.includes("--sandbox") ||
+    !help.includes("instructions are read from stdin")
+  ) {
+    throw new Error("Codex AI review requires Codex CLI support for --sandbox, --ephemeral, and stdin prompt input.");
+  }
 }
 
 export function normalizeAiReviewOutput(raw: string, reviewer: string): ReviewInputFile {

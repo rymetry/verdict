@@ -234,7 +234,8 @@ AI reviewer を明示 gate に加える場合:
 
 `agent-autonomy-ai-review` は PR diff を stdin 経由で runtime に渡し、diff を
 untrusted data として明示する。Claude runtime は tools disabled で実行する。
-Codex runtime は現行 CLI に no-tools mode がないため default disabled とし、
+実行前には installed CLI の required flag を preflight する。Codex runtime は現行
+CLI に no-tools mode がないため default disabled とし、
 `AUTONOMY_ALLOW_CODEX_AI_REVIEW_WITH_TOOLS=true` で明示 opt-in された場合のみ
 read-only ephemeral sandbox で実行する。reviewer identity と `expectedReviewers`
 は model output ではなく CLI runtime の trusted reviewer 名で固定する。
