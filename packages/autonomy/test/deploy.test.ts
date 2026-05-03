@@ -137,6 +137,30 @@ describe("runDeployMonitor", () => {
     ]);
   });
 
+  it("does not treat a Vercel inspect URL as a deploy URL", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "preview",
+        provider: "vercel-compatible",
+        canary: {
+          enabled: true
+        }
+      }
+    });
+    const runner = new FakeRunner([
+      { exitCode: 0, stdout: "Inspect: https://vercel.com/acme/app/abc123\n", stderr: "" }
+    ]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.deploy.deployUrl).toBeUndefined();
+    expect(result.canary.status).toBe("fail");
+    expect(runner.calls).toEqual([
+      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } }
+    ]);
+  });
+
   it("runs a custom canary command when vercel-compatible cannot infer a deploy URL", () => {
     writeConfig({
       deploy: {

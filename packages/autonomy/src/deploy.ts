@@ -552,16 +552,29 @@ function inferDeployUrl(stdout: string): string | undefined {
   const urls = [...stripAnsi(stdout).matchAll(/https?:\/\/[^\s"'<>]+/g)].map((match) =>
     match[0].replace(/[),.;:]+$/, "")
   );
-  return (
-    urls.find((url) => {
-      try {
-        const hostname = new URL(url).hostname;
-        return hostname === "vercel.app" || hostname.endsWith(".vercel.app");
-      } catch {
-        return false;
+  const vercelAppUrl = urls.find((url) => {
+    try {
+      const hostname = new URL(url).hostname;
+      return hostname === "vercel.app" || hostname.endsWith(".vercel.app");
+    } catch {
+      return false;
+    }
+  });
+  if (vercelAppUrl) {
+    return vercelAppUrl;
+  }
+  for (let index = urls.length - 1; index >= 0; index -= 1) {
+    const url = urls[index];
+    try {
+      const hostname = new URL(url).hostname;
+      if (hostname !== "vercel.com" && !hostname.endsWith(".vercel.com")) {
+        return url;
       }
-    }) ?? urls.at(-1)
-  );
+    } catch {
+      // Ignore malformed URL-like values.
+    }
+  }
+  return undefined;
 }
 
 function stripAnsi(value: string): string {

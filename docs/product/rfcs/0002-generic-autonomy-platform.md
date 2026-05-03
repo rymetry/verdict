@@ -259,7 +259,8 @@ Deploy つき project は `deploy` を追加する。
 
 Vercel-compatible project は provider を差し替える。`vercel deploy --yes`
 を no-shell argv として呼び、stdout の最初の `*.vercel.app` URL
-または fallback の最後の URL を `{deployUrl}` として canary health check に渡す。
+または fallback の最後の non-`vercel.com` URL を `{deployUrl}` として canary
+health check に渡す。
 
 ```json
 {
