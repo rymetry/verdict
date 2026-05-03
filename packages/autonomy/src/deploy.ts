@@ -197,6 +197,7 @@ function runDeployStage(input: {
     const result = runConfiguredCommand({
       runner: input.runner,
       command,
+      provider: input.plan.provider,
       stage: "land-and-deploy",
       taskId: input.taskId,
       environment: input.config.deploy?.environment ?? "preview",
@@ -305,6 +306,7 @@ function runCanaryStage(input: {
     const result = runConfiguredCommand({
       runner: input.runner,
       command,
+      provider: input.plan.provider,
       stage: "canary",
       taskId: input.taskId,
       environment: input.config.deploy?.environment ?? "preview",
@@ -374,6 +376,7 @@ function runCanaryStage(input: {
 function runConfiguredCommand(input: {
   runner: CommandRunner;
   command: readonly string[];
+  provider: string;
   stage: "land-and-deploy" | "canary";
   taskId?: string;
   environment: string;
@@ -396,7 +399,7 @@ function runConfiguredCommand(input: {
   }
   const result = input.runner.run(command, args, { timeoutMs: input.timeoutMs });
   const evidence = [`command:${command}`];
-  const deployUrl = inferDeployUrl(result.stdout);
+  const deployUrl = inferDeployUrl(result.stdout, input.provider);
   if (result.exitCode === 0) {
     return makeStage(
       input.stage,
@@ -548,7 +551,7 @@ function expandPlaceholders(
     .replaceAll("{deployUrl}", input.deployUrl ?? "");
 }
 
-function inferDeployUrl(stdout: string): string | undefined {
+function inferDeployUrl(stdout: string, provider: string): string | undefined {
   const urls = [...stripAnsi(stdout).matchAll(/https?:\/\/[^\s"'<>]+/g)].map((match) =>
     match[0].replace(/[),.;:]+$/, "")
   );
@@ -562,6 +565,9 @@ function inferDeployUrl(stdout: string): string | undefined {
   });
   if (vercelAppUrl) {
     return vercelAppUrl;
+  }
+  if (provider === "vercel-compatible") {
+    return undefined;
   }
   for (let index = urls.length - 1; index >= 0; index -= 1) {
     const url = urls[index];

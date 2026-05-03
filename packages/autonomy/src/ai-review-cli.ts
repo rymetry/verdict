@@ -133,7 +133,12 @@ function assertRuntimeSupported(runtime: AiReviewRuntime, runner: CommandRunner)
   if (runtime === "claude") {
     const result = runner.run("claude", ["--help"], { timeoutMs: 10_000 });
     const help = `${result.stdout}\n${result.stderr}`;
-    if (result.exitCode !== 0 || !help.includes("--tools") || !help.includes("--json-schema")) {
+    if (
+      result.exitCode !== 0 ||
+      !help.includes("--tools") ||
+      !help.includes('Use "" to disable all tools') ||
+      !help.includes("--json-schema")
+    ) {
       throw new Error("Claude AI review requires Claude CLI support for --tools and --json-schema.");
     }
     return;
@@ -145,7 +150,7 @@ function assertRuntimeSupported(runtime: AiReviewRuntime, runner: CommandRunner)
     result.exitCode !== 0 ||
     !help.includes("--ephemeral") ||
     !help.includes("--sandbox") ||
-    !help.includes("instructions are read from stdin")
+    !help.includes("stdin")
   ) {
     throw new Error("Codex AI review requires Codex CLI support for --sandbox, --ephemeral, and stdin prompt input.");
   }
@@ -155,6 +160,7 @@ export function normalizeAiReviewOutput(raw: string, reviewer: string): ReviewIn
   const parsed = parseReviewInput(extractReviewJson(raw));
   return {
     expectedReviewers: [reviewer],
+    // Reviewer identity is a trust boundary: never let model output choose the gate name.
     reviews: parsed.reviews.map((review) => ({
       ...review,
       reviewer
@@ -197,7 +203,10 @@ function extractClaudeStructuredOutput(raw: string): string | undefined {
       return undefined;
     }
     const structured = parsed.structured_output;
-    if (structured !== undefined) {
+    if (typeof structured === "string") {
+      return structured;
+    }
+    if (isRecord(structured)) {
       return JSON.stringify(structured);
     }
     if (typeof parsed.result === "string") {

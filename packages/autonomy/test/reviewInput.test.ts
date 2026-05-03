@@ -62,4 +62,24 @@ describe("loadReviewInput", () => {
 
     expect(() => loadReviewInput(workdir, "reviews.json")).toThrow(/priority/);
   });
+
+  it("normalizes unsafe optional finding locations", () => {
+    fs.writeFileSync(
+      path.join(workdir, "reviews.json"),
+      JSON.stringify({
+        reviews: [
+          {
+            reviewer: "security",
+            status: "pass",
+            findings: [{ priority: 2, title: "bad path", file: "../secret", line: -1 }]
+          }
+        ]
+      })
+    );
+
+    expect(loadReviewInput(workdir, "reviews.json").reviews[0]?.findings?.[0]).toMatchObject({
+      file: undefined,
+      line: undefined
+    });
+  });
 });

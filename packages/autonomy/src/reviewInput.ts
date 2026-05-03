@@ -48,10 +48,21 @@ function parseFinding(value: unknown): ReviewFinding {
     priority,
     title: parseNonEmptyString(value.title, "finding title"),
     body: typeof value.body === "string" ? value.body : undefined,
-    file: typeof value.file === "string" ? value.file : undefined,
-    line: typeof value.line === "number" && Number.isInteger(value.line) ? value.line : undefined,
+    file: parseFindingFile(value.file),
+    line: typeof value.line === "number" && Number.isInteger(value.line) && value.line > 0 ? value.line : undefined,
     source: typeof value.source === "string" ? value.source : undefined
   };
+}
+
+function parseFindingFile(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  if (!normalized || path.isAbsolute(normalized) || normalized.split(/[\\/]+/).includes("..")) {
+    return undefined;
+  }
+  return normalized;
 }
 
 function parseStatus(value: unknown): SubagentReview["status"] {

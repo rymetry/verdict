@@ -149,7 +149,11 @@ describe("runDeployMonitor", () => {
       }
     });
     const runner = new FakeRunner([
-      { exitCode: 0, stdout: "Inspect: https://vercel.com/acme/app/abc123\n", stderr: "" }
+      {
+        exitCode: 0,
+        stdout: "Inspect: https://vercel.com/acme/app/abc123\nDocs: https://nextjs.org/docs\n",
+        stderr: ""
+      }
     ]);
 
     const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });

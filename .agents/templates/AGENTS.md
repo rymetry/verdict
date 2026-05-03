@@ -119,5 +119,5 @@ Deploy commands are no-shell argv arrays. The driver expands
 `{taskId}`, `{environment}`, `{stage}`, `{healthCheckUrl}`, and `{deployUrl}`
 placeholders. `provider: "vercel-compatible"` runs `vercel deploy --yes`
 by default, adds `--prod` for production, prefers the first `*.vercel.app`
-URL from stdout, falls back to the last non-`vercel.com` URL, and
-canary-checks that URL unless a canary URL or command is configured.
+URL from stdout, and fails closed when no deployment URL is emitted unless a
+canary URL or command is configured.
