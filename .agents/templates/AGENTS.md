@@ -85,8 +85,14 @@ agent-autonomy-ai-review --runtime claude --pr <number>
 ```
 
 Keep AI reviewers opt-in in `.agents/autonomy.config.json`; they call external
-AI CLIs and can fail on auth, network, or quota. A typical explicit gate uses
-both deterministic diff review and one AI runtime:
+AI CLIs and can fail on auth, network, or quota. The wrapper sends the review
+prompt through stdin and marks the PR diff as untrusted data. Claude review runs
+with tools disabled, and the wrapper preflights the installed CLI for required
+flags before reading a PR diff. Codex review is disabled by default because
+Codex CLI does not expose a no-tools review mode; set
+`AUTONOMY_ALLOW_CODEX_AI_REVIEW_WITH_TOOLS=true` only when accepting read-capable
+reviewer risk. Reviewer identity is taken from the trusted CLI runtime, not
+model output. A typical explicit gate uses deterministic diff review and Claude:
 
 ```json
 {
@@ -99,9 +105,9 @@ both deterministic diff review and one AI runtime:
         "timeoutMs": 60000
       },
       {
-        "name": "codex-review",
-        "command": ["agent-autonomy-ai-review", "--runtime", "codex", "--pr", "{prNumber}"],
-        "expectedReviewers": ["codex-review"],
+        "name": "claude-review",
+        "command": ["agent-autonomy-ai-review", "--runtime", "claude", "--pr", "{prNumber}"],
+        "expectedReviewers": ["claude-review"],
         "timeoutMs": 300000
       }
     ]
@@ -112,5 +118,6 @@ both deterministic diff review and one AI runtime:
 Deploy commands are no-shell argv arrays. The driver expands
 `{taskId}`, `{environment}`, `{stage}`, `{healthCheckUrl}`, and `{deployUrl}`
 placeholders. `provider: "vercel-compatible"` runs `vercel deploy --yes`
-by default, adds `--prod` for production, infers the first deployment URL from
-stdout, and canary-checks that URL unless a canary URL or command is configured.
+by default, adds `--prod` for production, prefers the first `*.vercel.app`
+URL from stdout, and fails closed when no deployment URL is emitted unless a
+canary URL or command is configured.

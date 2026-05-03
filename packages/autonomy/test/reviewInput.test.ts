@@ -25,7 +25,7 @@ describe("loadReviewInput", () => {
           {
             reviewer: "release",
             status: "pass",
-            findings: [{ priority: 3, title: "Follow-up cleanup" }]
+            findings: [{ priority: 3, title: "Follow-up cleanup", file: "packages/autonomy/src/ship.ts", line: 42 }]
           }
         ]
       })
@@ -38,7 +38,16 @@ describe("loadReviewInput", () => {
         {
           reviewer: "release",
           status: "pass",
-          findings: [{ priority: 3, title: "Follow-up cleanup", body: undefined, source: undefined }],
+          findings: [
+            {
+              priority: 3,
+              title: "Follow-up cleanup",
+              body: undefined,
+              file: "packages/autonomy/src/ship.ts",
+              line: 42,
+              source: undefined
+            }
+          ],
           summary: undefined
         }
       ]
@@ -52,5 +61,25 @@ describe("loadReviewInput", () => {
     );
 
     expect(() => loadReviewInput(workdir, "reviews.json")).toThrow(/priority/);
+  });
+
+  it("normalizes unsafe optional finding locations", () => {
+    fs.writeFileSync(
+      path.join(workdir, "reviews.json"),
+      JSON.stringify({
+        reviews: [
+          {
+            reviewer: "security",
+            status: "pass",
+            findings: [{ priority: 2, title: "bad path", file: "../secret", line: -1 }]
+          }
+        ]
+      })
+    );
+
+    expect(loadReviewInput(workdir, "reviews.json").reviews[0]?.findings?.[0]).toMatchObject({
+      file: undefined,
+      line: undefined
+    });
   });
 });

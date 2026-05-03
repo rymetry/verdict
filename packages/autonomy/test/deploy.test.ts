@@ -83,6 +83,37 @@ describe("runDeployMonitor", () => {
     expect(readLearnings()).toContain("deploy-monitor-production");
   });
 
+  it("keeps first URL inference for custom deploy providers", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "staging",
+        provider: "custom-command",
+        customCommand: ["deploy"],
+        healthCheckUrl: "{deployUrl}",
+        canary: {
+          enabled: false
+        }
+      }
+    });
+    const runner = new FakeRunner([
+      {
+        exitCode: 0,
+        stdout: "Deployed to https://preview.example.test\nDocs: https://docs.example.test\n",
+        stderr: ""
+      },
+      { exitCode: 0, stdout: "ok\n", stderr: "" }
+    ]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.deploy.deployUrl).toBe("https://preview.example.test");
+    expect(runner.calls).toEqual([
+      { command: "deploy", args: [], options: { timeoutMs: undefined } },
+      { command: "curl", args: ["-fsS", "https://preview.example.test"], options: { timeoutMs: undefined } }
+    ]);
+  });
+
   it("runs the vercel-compatible provider and uses its deployment URL for canary", () => {
     writeConfig({
       deploy: {
@@ -95,7 +126,12 @@ describe("runDeployMonitor", () => {
       }
     });
     const runner = new FakeRunner([
-      { exitCode: 0, stdout: "https://preview.example.vercel.app\n", stderr: "" },
+      {
+        exitCode: 0,
+        stdout:
+          "Vercel CLI 99.0.0\nInspect: https://vercel.com/acme/app/abc123\nhttps://preview.example.vercel.app\n",
+        stderr: ""
+      },
       { exitCode: 0, stdout: "ok\n", stderr: "" }
     ]);
 
@@ -108,6 +144,105 @@ describe("runDeployMonitor", () => {
     expect(result.provider).toBe("vercel-compatible");
     expect(result.deploy.deployUrl).toBe("https://preview.example.vercel.app");
     expect(result.canary.status).toBe("pass");
+  });
+
+  it("fails canary clearly when vercel-compatible cannot infer a deploy URL", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "preview",
+        provider: "vercel-compatible",
+        canary: {
+          enabled: true
+        }
+      }
+    });
+    const runner = new FakeRunner([{ exitCode: 0, stdout: "No deployment URL emitted\n", stderr: "" }]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.canary.status).toBe("fail");
+    expect(result.canary.summary).toContain("requires a deploy URL");
+    expect(runner.calls).toEqual([
+      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } }
+    ]);
+  });
+
+  it("fails canary clearly when a composed canary URL requires a missing deploy URL", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "preview",
+        provider: "vercel-compatible",
+        canary: {
+          enabled: true,
+          healthCheckUrl: "{deployUrl}/health"
+        }
+      }
+    });
+    const runner = new FakeRunner([{ exitCode: 0, stdout: "No deployment URL emitted\n", stderr: "" }]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.canary.status).toBe("fail");
+    expect(result.canary.summary).toContain("requires a deploy URL");
+    expect(runner.calls).toEqual([
+      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } }
+    ]);
+  });
+
+  it("does not treat a Vercel inspect URL as a deploy URL", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "preview",
+        provider: "vercel-compatible",
+        canary: {
+          enabled: true
+        }
+      }
+    });
+    const runner = new FakeRunner([
+      {
+        exitCode: 0,
+        stdout: "Inspect: https://vercel.com/acme/app/abc123\nDocs: https://nextjs.org/docs\n",
+        stderr: ""
+      }
+    ]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.deploy.deployUrl).toBeUndefined();
+    expect(result.canary.status).toBe("fail");
+    expect(runner.calls).toEqual([
+      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } }
+    ]);
+  });
+
+  it("runs a custom canary command when vercel-compatible cannot infer a deploy URL", () => {
+    writeConfig({
+      deploy: {
+        enabled: true,
+        environment: "preview",
+        provider: "vercel-compatible",
+        canary: {
+          enabled: true,
+          customCommand: ["npm", "run", "canary"]
+        }
+      }
+    });
+    const runner = new FakeRunner([
+      { exitCode: 0, stdout: "No deployment URL emitted\n", stderr: "" },
+      { exitCode: 0, stdout: "canary ok\n", stderr: "" }
+    ]);
+
+    const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
+
+    expect(result.canary.status).toBe("pass");
+    expect(runner.calls).toEqual([
+      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } },
+      { command: "npm", args: ["run", "canary"], options: { timeoutMs: undefined } }
+    ]);
   });
 
   it("fails closed for unsupported providers without a custom command", () => {

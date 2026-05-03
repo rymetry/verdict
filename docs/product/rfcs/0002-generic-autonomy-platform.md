@@ -222,15 +222,23 @@ AI reviewer を明示 gate に加える場合:
         "timeoutMs": 60000
       },
       {
-        "name": "codex-review",
-        "command": ["agent-autonomy-ai-review", "--runtime", "codex", "--pr", "{prNumber}"],
-        "expectedReviewers": ["codex-review"],
+        "name": "claude-review",
+        "command": ["agent-autonomy-ai-review", "--runtime", "claude", "--pr", "{prNumber}"],
+        "expectedReviewers": ["claude-review"],
         "timeoutMs": 300000
       }
     ]
   }
 }
 ```
+
+`agent-autonomy-ai-review` は PR diff を stdin 経由で runtime に渡し、diff を
+untrusted data として明示する。Claude runtime は tools disabled で実行する。
+実行前には installed CLI の required flag を preflight する。Codex runtime は現行
+CLI に no-tools mode がないため default disabled とし、
+`AUTONOMY_ALLOW_CODEX_AI_REVIEW_WITH_TOOLS=true` で明示 opt-in された場合のみ
+read-only ephemeral sandbox で実行する。reviewer identity と `expectedReviewers`
+は model output ではなく CLI runtime の trusted reviewer 名で固定する。
 
 Deploy つき project は `deploy` を追加する。
 
@@ -253,8 +261,9 @@ Deploy つき project は `deploy` を追加する。
 ```
 
 Vercel-compatible project は provider を差し替える。`vercel deploy --yes`
-を no-shell argv として呼び、stdout の最初の URL を `{deployUrl}` として
-canary health check に渡す。
+を no-shell argv として呼び、stdout の最初の `*.vercel.app` URL を
+`{deployUrl}` として canary health check に渡す。URL が取れない場合は推測せず
+fail closed する。
 
 ```json
 {

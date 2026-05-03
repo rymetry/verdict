@@ -41,6 +41,8 @@ export interface ReviewFinding {
   priority: 0 | 1 | 2 | 3;
   title: string;
   body?: string;
+  file?: string;
+  line?: number;
   source?: string;
 }
 
