@@ -507,6 +507,8 @@ function resolveDeployProviderPlan(config: AutonomyConfig): DeployProviderPlan {
     return {
       provider,
       deployCommand: config.deploy?.customCommand ?? [
+        "pnpm",
+        "exec",
         "vercel",
         "deploy",
         "--yes",

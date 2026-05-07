@@ -128,7 +128,7 @@ Claude Code can use the same contract by replacing the AI reviewer command:
 
 Deploy commands are no-shell argv arrays. The driver expands
 `{taskId}`, `{environment}`, `{stage}`, `{healthCheckUrl}`, and `{deployUrl}`
-placeholders. `provider: "vercel-compatible"` runs `vercel deploy --yes`
+placeholders. `provider: "vercel-compatible"` runs `pnpm exec vercel deploy --yes`
 by default, adds `--prod` for production, prefers the first `*.vercel.app`
 URL from stdout, and fails closed when no deployment URL is emitted unless a
 canary URL or command is configured.
