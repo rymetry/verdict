@@ -138,7 +138,7 @@ describe("runDeployMonitor", () => {
     const result = runDeployMonitor({ projectRoot: workdir, taskId: "ROADMAP-1", runner });
 
     expect(runner.calls).toEqual([
-      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } },
+      { command: "pnpm", args: ["exec", "vercel", "deploy", "--yes"], options: { timeoutMs: undefined } },
       { command: "curl", args: ["-fsS", "https://preview.example.vercel.app"], options: { timeoutMs: undefined } }
     ]);
     expect(result.provider).toBe("vercel-compatible");
@@ -164,7 +164,7 @@ describe("runDeployMonitor", () => {
     expect(result.canary.status).toBe("fail");
     expect(result.canary.summary).toContain("requires a deploy URL");
     expect(runner.calls).toEqual([
-      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } }
+      { command: "pnpm", args: ["exec", "vercel", "deploy", "--yes"], options: { timeoutMs: undefined } }
     ]);
   });
 
@@ -187,7 +187,7 @@ describe("runDeployMonitor", () => {
     expect(result.canary.status).toBe("fail");
     expect(result.canary.summary).toContain("requires a deploy URL");
     expect(runner.calls).toEqual([
-      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } }
+      { command: "pnpm", args: ["exec", "vercel", "deploy", "--yes"], options: { timeoutMs: undefined } }
     ]);
   });
 
@@ -215,7 +215,7 @@ describe("runDeployMonitor", () => {
     expect(result.deploy.deployUrl).toBeUndefined();
     expect(result.canary.status).toBe("fail");
     expect(runner.calls).toEqual([
-      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } }
+      { command: "pnpm", args: ["exec", "vercel", "deploy", "--yes"], options: { timeoutMs: undefined } }
     ]);
   });
 
@@ -240,7 +240,7 @@ describe("runDeployMonitor", () => {
 
     expect(result.canary.status).toBe("pass");
     expect(runner.calls).toEqual([
-      { command: "vercel", args: ["deploy", "--yes"], options: { timeoutMs: undefined } },
+      { command: "pnpm", args: ["exec", "vercel", "deploy", "--yes"], options: { timeoutMs: undefined } },
       { command: "npm", args: ["run", "canary"], options: { timeoutMs: undefined } }
     ]);
   });
